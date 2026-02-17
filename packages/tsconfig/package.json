@@ -1,9 +1,17 @@
 {
-  "name": "@ekairos/tsconfig",
-  "version": "1.21.83-beta.0",
-  "private": true,
-  "files": [
-    "base.json",
-    "next.json"
-  ]
+    "name":  "@ekairos/tsconfig",
+    "version":  "1.21.83-beta.0",
+    "private":  true,
+    "files":  [
+                  "base.json",
+                  "next.json"
+              ],
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/e-kairos/ekairos-public.git"
+                   },
+    "homepage":  "https://github.com/e-kairos/ekairos-public#readme",
+    "bugs":  {
+                 "url":  "https://github.com/e-kairos/ekairos-public/issues"
+             }
 }
