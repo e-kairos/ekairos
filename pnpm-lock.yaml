@@ -134,13 +134,13 @@ importers:
   packages/dataset:
     dependencies:
       '@ekairos/domain':
-        specifier: ^1.21.99-beta.0
+        specifier: ^1.21.100-beta.0
         version: link:../domain
       '@ekairos/sandbox':
         specifier: workspace:*
         version: link:../sandbox
       '@ekairos/thread':
-        specifier: ^1.21.99-beta.0
+        specifier: ^1.21.100-beta.0
         version: link:../thread
       '@instantdb/admin':
         specifier: 0.22.126
@@ -208,16 +208,16 @@ importers:
         specifier: ^1.21.85-beta.0
         version: link:../dataset
       '@ekairos/domain':
-        specifier: ^1.21.99-beta.0
+        specifier: ^1.21.100-beta.0
         version: link:../domain
       '@ekairos/thread':
-        specifier: ^1.21.99-beta.0
+        specifier: ^1.21.100-beta.0
         version: link:../thread
       '@instantdb/admin':
         specifier: 0.22.126
         version: 0.22.126
       ekairos-cli:
-        specifier: ^1.21.99-beta.0
+        specifier: ^1.21.100-beta.0
         version: link:../cli
     devDependencies:
       '@ekairos/tsconfig':
@@ -496,7 +496,7 @@ importers:
         specifier: ^0.134.0
         version: 0.134.0(ws@8.18.3)
       '@ekairos/domain':
-        specifier: ^1.21.99-beta.0
+        specifier: ^1.21.100-beta.0
         version: link:../domain
       '@instantdb/admin':
         specifier: 0.22.126
@@ -549,7 +549,7 @@ importers:
   packages/structure:
     dependencies:
       '@ekairos/domain':
-        specifier: ^1.21.99-beta.0
+        specifier: ^1.21.100-beta.0
         version: link:../domain
       '@ekairos/sandbox':
         specifier: workspace:*
@@ -641,7 +641,7 @@ importers:
         specifier: ^2.0.52
         version: 2.0.68(zod@4.1.12)
       '@ekairos/domain':
-        specifier: ^1.21.99-beta.0
+        specifier: ^1.21.100-beta.0
         version: link:../domain
       '@instantdb/admin':
         specifier: 0.22.126
