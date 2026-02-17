@@ -1,6 +1,6 @@
 {
   "name": "@ekairos/openai-reactor",
-  "version": "1.21.99-beta.0",
+  "version": "1.21.100-beta.0",
   "description": "OpenAI/Codex reactors for @ekairos/thread",
   "type": "module",
   "main": "./dist/index.js",
