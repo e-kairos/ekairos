@@ -373,8 +373,9 @@ function getStoredActions(source: unknown): DomainActionRegistration[] {
 
 function setStoredActions(source: unknown, actions: DomainActionRegistration[]) {
   if (!source || typeof source !== "object") return;
+  const frozenActions = Object.freeze([...actions]) as unknown as DomainActionRegistration[];
   Object.defineProperty(source, EKAIROS_ACTIONS, {
-    value: actions,
+    value: frozenActions,
     enumerable: false,
     configurable: true,
     writable: true,
@@ -455,10 +456,11 @@ function attachMeta(target: object, meta: DomainMeta) {
 }
 
 function freezeMeta(meta: DomainMeta): DomainMeta {
+  const frozenIncludes = Object.freeze([...(meta.includes ?? [])]) as unknown as DomainIncludeRef[];
   return Object.freeze({
     ...meta,
-    includes: Object.freeze([...(meta.includes ?? [])]),
-  });
+    includes: frozenIncludes,
+  }) as DomainMeta;
 }
 
 function appendMetaInclude(meta: DomainMeta, include: DomainIncludeRef): DomainMeta {
@@ -997,9 +999,7 @@ export function domain(arg?: unknown): any {
           const capturedEntities = { ...allEntities };
           const capturedLinks = cloneLinksDef(allLinks);
           const capturedRooms = cloneRoomsDef(def.rooms);
-          let cachedInstantSchema: ReturnType<
-            typeof i.schema<WithBase<MergedEntitiesType>, MergedLinksType, typeof def.rooms>
-          > | null = null;
+          let cachedInstantSchema: ReturnType<typeof i.schema> | null = null;
 
           const result = {
             entities: Object.freeze({ ...allEntities }) as MergedEntitiesType,
@@ -1010,7 +1010,9 @@ export function domain(arg?: unknown): any {
             originalEntities: Object.freeze({ ...allEntities }) as MergedEntitiesType,
             toInstantSchema: () => {
               if (cachedInstantSchema) {
-                return cachedInstantSchema;
+                return cachedInstantSchema as ReturnType<
+                  typeof i.schema<WithBase<MergedEntitiesType>, MergedLinksType, typeof def.rooms>
+                >;
               }
 
               let finalEntities = { ...capturedEntities };
@@ -1086,7 +1088,7 @@ export function domain(arg?: unknown): any {
           const reboundActions = seedActions.map((action) =>
             bindAction(action, { name: action.name, domain: result }),
           );
-          setStoredActions(result as any, Object.freeze([...reboundActions]));
+          setStoredActions(result as any, [...reboundActions]);
           (result as any).actions = (actionsInput: DomainActionCollection) => {
             const current = getStoredActions(result as any);
             const additions = normalizeActionCollection(result as any, actionsInput);
