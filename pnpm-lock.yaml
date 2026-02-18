@@ -28,7 +28,7 @@ importers:
     dependencies:
       instant-cli:
         specifier: latest
-        version: 0.22.140
+        version: 0.22.142
       svix:
         specifier: ^1.81.0
         version: 1.81.0
@@ -134,13 +134,13 @@ importers:
   packages/dataset:
     dependencies:
       '@ekairos/domain':
-        specifier: ^1.21.100-beta.0
+        specifier: ^1.22.0
         version: link:../domain
       '@ekairos/sandbox':
         specifier: workspace:*
         version: link:../sandbox
       '@ekairos/thread':
-        specifier: ^1.21.100-beta.0
+        specifier: ^1.22.0
         version: link:../thread
       '@instantdb/admin':
         specifier: 0.22.126
@@ -208,16 +208,16 @@ importers:
         specifier: ^1.21.85-beta.0
         version: link:../dataset
       '@ekairos/domain':
-        specifier: ^1.21.100-beta.0
+        specifier: ^1.22.0
         version: link:../domain
       '@ekairos/thread':
-        specifier: ^1.21.100-beta.0
+        specifier: ^1.22.0
         version: link:../thread
       '@instantdb/admin':
         specifier: 0.22.126
         version: 0.22.126
       ekairos-cli:
-        specifier: ^1.21.100-beta.0
+        specifier: ^1.22.0
         version: link:../cli
     devDependencies:
       '@ekairos/tsconfig':
@@ -496,7 +496,7 @@ importers:
         specifier: ^0.134.0
         version: 0.134.0(ws@8.18.3)
       '@ekairos/domain':
-        specifier: ^1.21.100-beta.0
+        specifier: ^1.22.0
         version: link:../domain
       '@instantdb/admin':
         specifier: 0.22.126
@@ -549,7 +549,7 @@ importers:
   packages/structure:
     dependencies:
       '@ekairos/domain':
-        specifier: ^1.21.100-beta.0
+        specifier: ^1.22.0
         version: link:../domain
       '@ekairos/sandbox':
         specifier: workspace:*
@@ -641,7 +641,7 @@ importers:
         specifier: ^2.0.52
         version: 2.0.68(zod@4.1.12)
       '@ekairos/domain':
-        specifier: ^1.21.100-beta.0
+        specifier: ^1.22.0
         version: link:../domain
       '@instantdb/admin':
         specifier: 0.22.126
@@ -2388,14 +2388,14 @@ packages:
   '@instantdb/core@0.22.126':
     resolution: {integrity: sha512-MmOjg97mxYy6VEct/1VKAtMgiDJgjQKj72d2FgKb91cAlWfhZjXfCy/V3MfsvZtfvAolTYYqfHqiRy6BZbOQJg==}
 
-  '@instantdb/core@0.22.140':
-    resolution: {integrity: sha512-AUjXoWVgs1aN3DsK8cRqUFxrLCo5mOePFkUOg3uM67mDZDeqtT6NT1bjV8PHJCCuXVwh3OumRDW0aFpt8BCxkA==}
+  '@instantdb/core@0.22.142':
+    resolution: {integrity: sha512-p7Tnm2yN4aWWPvx3SL2Dh84JU3XyY8Y4bviRPk2qr85wtSvTRquKwiooJe3yICTdO6x/f+AUoPUk7zttP/583w==}
 
   '@instantdb/platform@0.22.126':
     resolution: {integrity: sha512-qf1tsKnLjiq2/exTg0aSfoxI96p+USNYN4GoX3SP7TY3ZfeTil8kqGk+Zmii7Lw3Tepw6TrBtAZTITWRjxTQRA==}
 
-  '@instantdb/platform@0.22.140':
-    resolution: {integrity: sha512-hef0/uvIAICy7bAaSxd+8xq/D5QggyIAMAOQ9nhsZ62mzXwr5MLO8zB5ifZ5lTTfhRwMndGdPJasXPrnTkAeSQ==}
+  '@instantdb/platform@0.22.142':
+    resolution: {integrity: sha512-gaLWpz7/1wv6nRnkKnhzHJJQCE62Eb8UKYx5kzRcfBLPPFtDW7VKVABMhhqiAdpdQlFsAdhnlI4ESCdc/Fh9Ug==}
 
   '@instantdb/react-common@0.22.126':
     resolution: {integrity: sha512-K+6lHMg0DpVU/Ta2Xjsl0ZsHh810wHBCjnSgvqev0dufAUc+Cw/vTBkBOPqOzdQtBimktFFmqw+DEJ0ncMzWwQ==}
@@ -2410,8 +2410,8 @@ packages:
   '@instantdb/version@0.22.126':
     resolution: {integrity: sha512-E+jKdg/gZUt10t2TLuv9IRCZWy7Uppy3/X2GkW9ornpjUPC80IOh/+GeoImo1oeipwSEEWatIfJMMSbuPIrTQA==}
 
-  '@instantdb/version@0.22.140':
-    resolution: {integrity: sha512-FnZuZ29NnzNEdRUSZnLlT4toGgGb5pU6jJW6gdRFR6nwaPOkBtZqPLGY4MqVSOLP68E1pOsxcP+v8IhbuXQ4HA==}
+  '@instantdb/version@0.22.142':
+    resolution: {integrity: sha512-C2HTo95PllT0b47EFDBC9/XILHwUbaDL/3pE2Q8aI0htB+1gf1Drodz6T4d2BNHJkdELYuDEK6ZpyPIMZqaV7Q==}
 
   '@isaacs/balanced-match@4.0.1':
     resolution: {integrity: sha512-yzMTt9lEb8Gv7zRioUilSglI0c0smZ9k5D65677DLWLtWJaXIS3CqcGyUFByYKlnUj6TkjLVs54fBl6+TiGQDQ==}
@@ -6551,8 +6551,8 @@ packages:
   inspect-with-kind@1.0.5:
     resolution: {integrity: sha512-MAQUJuIo7Xqk8EVNP+6d3CKq9c80hi4tjIbIAT6lmGW9W6WzlHiu9PS8uSuUYU+Do+j1baiFp3H25XEVxDIG2g==}
 
-  instant-cli@0.22.140:
-    resolution: {integrity: sha512-4L5GVMmJ4A29OJ/1bxkm/hZJv32sOJN28Dhbe3jSmURohNoPnGno7gz0CQUbRq6QFqszabmt4Ny9KPI1gwLTmw==}
+  instant-cli@0.22.142:
+    resolution: {integrity: sha512-hHAnGEunH7tyvj7zUPKL27zPF7e8UJEw0u+WV+nS1MI7vkaMX6ZGQ6APhDpzJv9ibP6/oBKM9lKVmHl42Nve/Q==}
     hasBin: true
 
   internmap@1.0.1:
@@ -11620,9 +11620,9 @@ snapshots:
       mutative: 1.3.0
       uuid: 11.1.0
 
-  '@instantdb/core@0.22.140':
+  '@instantdb/core@0.22.142':
     dependencies:
-      '@instantdb/version': 0.22.140
+      '@instantdb/version': 0.22.142
       mutative: 1.3.0
       uuid: 11.1.0
 
@@ -11633,12 +11633,12 @@ snapshots:
       '@instantdb/core': 0.22.126
       '@instantdb/version': 0.22.126
 
-  '@instantdb/platform@0.22.140':
+  '@instantdb/platform@0.22.142':
     dependencies:
       '@babel/parser': 8.0.0-rc.1
       '@babel/types': 8.0.0-rc.1
-      '@instantdb/core': 0.22.140
-      '@instantdb/version': 0.22.140
+      '@instantdb/core': 0.22.142
+      '@instantdb/version': 0.22.142
 
   '@instantdb/react-common@0.22.126(react@19.2.1)':
     dependencies:
@@ -11656,7 +11656,7 @@ snapshots:
 
   '@instantdb/version@0.22.126': {}
 
-  '@instantdb/version@0.22.140': {}
+  '@instantdb/version@0.22.142': {}
 
   '@isaacs/balanced-match@4.0.1': {}
 
@@ -16633,11 +16633,11 @@ snapshots:
     dependencies:
       kind-of: 6.0.3
 
-  instant-cli@0.22.140:
+  instant-cli@0.22.142:
     dependencies:
-      '@instantdb/core': 0.22.140
-      '@instantdb/platform': 0.22.140
-      '@instantdb/version': 0.22.140
+      '@instantdb/core': 0.22.142
+      '@instantdb/platform': 0.22.142
+      '@instantdb/version': 0.22.142
       acorn: 8.15.0
       acorn-typescript: 1.4.13(acorn@8.15.0)
       ansi-escapes: 4.3.2
