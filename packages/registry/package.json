@@ -37,7 +37,7 @@
                          "@tailwindcss/postcss":  "^4.1.17",
                          "@vercel/analytics":  "^1.5.0",
                          "@xyflow/react":  "^12.9.3",
-                         "@workflow/ai":  "4.1.0-beta.55",
+                         "@workflow/ai":  "4.0.1-beta.52",
                          "ai":  "^5.0.98",
                          "class-variance-authority":  "^0.7.1",
                          "clsx":  "^2.1.1",
