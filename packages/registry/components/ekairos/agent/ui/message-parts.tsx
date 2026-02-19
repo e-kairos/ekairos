@@ -46,6 +46,7 @@ function humanizeToolName(toolName: string): string {
     // Control / escalation
     requestDirection: "Escalar a soporte interno",
     end: "Finalizar",
+    "codex-event": "Codex event",
   };
 
   if (map[toolName]) return map[toolName];
@@ -58,10 +59,30 @@ function humanizeToolName(toolName: string): string {
 }
 
 function summarizeToolPart(part: any): string {
-  const toolName = String(part?.type ?? "").replace(/^tool-/, "");
+  const partType = String(part?.type ?? "");
+  const toolName =
+    partType === "codex-event" ? "codex-event" : partType.replace(/^tool-/, "");
   const state = String(part?.state ?? "");
   const out = part?.output;
   const err = typeof part?.errorText === "string" ? part.errorText : "";
+  const metadata =
+    part?.metadata && typeof part.metadata === "object"
+      ? (part.metadata as Record<string, unknown>)
+      : null;
+
+  if (toolName === "codex-event") {
+    const phase =
+      typeof metadata?.phase === "string" ? metadata.phase : "";
+    const label =
+      out && typeof out === "object" && typeof (out as any).label === "string"
+        ? String((out as any).label)
+        : "";
+    if (label) return label;
+    if (phase) return phase;
+    if (state === "output-available") return "Codex event completed";
+    if (state === "output-error") return "Codex event failed";
+    return "Codex event";
+  }
 
   if (state === "output-error") {
     return err ? `Error: ${err}` : "Error";
@@ -147,7 +168,9 @@ const MessageParts = memo(function MessageParts({
   };
 
   const renderTool = (part: any, i: number) => {
-    const toolName = String(part.type ?? "").replace(/^tool-/, "");
+    const partType = String(part?.type ?? "");
+    const toolName =
+      partType === "codex-event" ? "codex-event" : partType.replace(/^tool-/, "");
     const ToolComponent = toolComponents?.[toolName];
 
     // Special case: createMessage should render like a normal assistant message,
@@ -478,7 +501,10 @@ const MessageParts = memo(function MessageParts({
           );
         }
 
-        if (typeof part.type === "string" && part.type.startsWith("tool-")) {
+        if (
+          typeof part.type === "string" &&
+          (part.type.startsWith("tool-") || part.type === "codex-event")
+        ) {
           return renderTool(part, i);
         }
 

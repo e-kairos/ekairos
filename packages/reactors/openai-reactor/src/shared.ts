@@ -76,12 +76,16 @@ export function buildCodexParts(params: {
   }
 
   parts.push({
-    type: `tool-${params.toolName}`,
+    type: "codex-event",
+    toolName: params.toolName,
     toolCallId: params.result.turnId || params.result.threadId,
     state: "output-available",
     input: { instruction: params.instruction },
     output: metadata,
-    metadata,
+    metadata: {
+      ...metadata,
+      eventType: "codex-event",
+    },
   })
 
   return parts

@@ -1,91 +1,129 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import type { RegistryItem } from "@/lib/registry-types";
+import { MessageList } from "@/components/ekairos/agent/ui/message-list";
+import { Button } from "@/components/ui/button";
+import { useScriptedCodexThread } from "@/components/ekairos/agent/mocks/use-scripted-codex-thread";
 
-const StaticFullAgentDemo = () => {
+function ScriptedCodexAgentDemo() {
+  const thread = useScriptedCodexThread();
+  const [prompt, setPrompt] = useState(
+    "Inspect README.md and reply with a short summary of what it contains.",
+  );
+
+  const isRunning =
+    thread.contextStatus === "streaming" || thread.sendStatus === "submitting";
+
   return (
-    <div className="relative mx-auto flex h-[600px] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl ring-1 ring-border">
-      <div className="flex h-12 items-center justify-between border-b bg-muted/50 px-4">
-        <div className="flex items-center gap-2">
-          <div className="h-3 w-3 rounded-full bg-red-400/80" />
-          <div className="h-3 w-3 rounded-full bg-yellow-400/80" />
-          <div className="h-3 w-3 rounded-full bg-green-400/80" />
-          <span className="ml-4 text-xs font-medium text-muted-foreground">
-            Ekairos Agent Preview (Static)
+    <div className="relative mx-auto flex h-[680px] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl ring-1 ring-border">
+      <div className="flex h-12 items-center justify-between border-b bg-muted/40 px-4">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Codex Agent
           </span>
+          <span className="text-xs text-muted-foreground">{thread.title}</span>
         </div>
-        <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-          No runtime
+        <span className="text-[11px] text-muted-foreground">
+          context: {thread.contextId}
         </span>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto bg-muted/10 p-4 md:p-6">
-        <Message from="assistant">
-          <MessageContent variant="flat" className="bg-transparent px-0 py-0">
-            <MessageResponse>
-              This is a static preview of the full-agent layout. It does not
-              connect to auth, DB, or backend routes.
-            </MessageResponse>
-          </MessageContent>
-        </Message>
-        <Message from="user">
-          <MessageContent variant="contained" className="bg-primary text-primary-foreground">
-            <MessageResponse>Can I still install this component with shadcn?</MessageResponse>
-          </MessageContent>
-        </Message>
-        <Message from="assistant">
-          <MessageContent variant="flat" className="bg-transparent px-0 py-0">
-            <MessageResponse>
-              Yes. Use the registry JSON endpoint and install command shown in
-              docs. Runtime wiring stays in your app.
-            </MessageResponse>
-          </MessageContent>
-        </Message>
+      <div className="flex-1 overflow-y-auto bg-muted/5 p-4 md:p-6">
+        <MessageList
+          thread={thread}
+          toolComponents={{}}
+          showReasoning
+        />
       </div>
 
-      <div className="border-t bg-background/95 p-4">
-        <div className="rounded-xl border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-          Prompt input and agent execution are intentionally disabled in the
-          registry website.
+      <div className="space-y-3 border-t bg-background/95 p-4">
+        <textarea
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          className="min-h-[88px] w-full rounded-xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+        />
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">
+            Emits real-shaped <code>codex-event</code> parts from a captured
+            local Codex run fixture.
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={thread.reset}
+              disabled={isRunning}
+            >
+              Reset
+            </Button>
+            <Button
+              variant="outline"
+              onClick={thread.stop}
+              disabled={!isRunning}
+            >
+              Stop
+            </Button>
+            <Button
+              onClick={async () => {
+                await thread.append({
+                  parts: [{ type: "text", text: prompt }],
+                  reasoningLevel: "low",
+                  webSearch: false,
+                });
+              }}
+              disabled={isRunning || !prompt.trim()}
+            >
+              Run Codex Replay
+            </Button>
+          </div>
         </div>
       </div>
     </div>
   );
-};
+}
 
 export const fullAgentRegistryItem: RegistryItem = {
   id: "full-agent",
   registryName: "full-agent",
-  title: "Full Agent Layout",
-  subtitle: "Static composition preview without auth or database runtime.",
+  title: "Full Agent (Codex Replay)",
+  subtitle:
+    "Interactive coding-agent UI replaying captured Codex stream events via scripted thread state.",
   category: "template",
   props: [],
   code: `"use client"
 
-import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message"
+import { useState } from "react"
+import { MessageList } from "@/components/ekairos/agent/ui/message-list"
+import { useScriptedCodexThread } from "@/components/ekairos/agent/mocks/use-scripted-codex-thread"
+import { Button } from "@/components/ui/button"
 
-export function FullAgentLayout() {
+export function FullAgentCodexReplay() {
+  const thread = useScriptedCodexThread()
+  const [prompt, setPrompt] = useState("Inspect README.md and reply with a short summary.")
+  const isRunning = thread.contextStatus === "streaming" || thread.sendStatus === "submitting"
+
   return (
-    <div className="h-[600px] w-full rounded-2xl border bg-background overflow-hidden shadow-2xl flex flex-col">
-      <header className="h-12 border-b bg-muted/50 px-4 flex items-center">
-        <span className="text-xs font-medium text-muted-foreground">Ekairos Agent Preview (Static)</span>
-      </header>
-      <main className="flex-1 overflow-y-auto p-6 space-y-4 bg-muted/10">
-        <Message from="assistant">
-          <MessageContent variant="flat" className="bg-transparent px-0 py-0">
-            <MessageResponse>Static preview only. Wire runtime in your app.</MessageResponse>
-          </MessageContent>
-        </Message>
-      </main>
-      <footer className="border-t p-4 text-sm text-muted-foreground">
-        Prompt input intentionally disabled in registry.
-      </footer>
+    <div className="h-[680px] w-full max-w-4xl rounded-2xl border bg-background overflow-hidden flex flex-col">
+      <div className="flex-1 overflow-y-auto p-6 bg-muted/5">
+        <MessageList thread={thread} toolComponents={{}} showReasoning />
+      </div>
+      <div className="border-t p-4 space-y-3">
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className="w-full min-h-[88px] rounded-xl border px-3 py-2 text-sm" />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={thread.reset} disabled={isRunning}>Reset</Button>
+          <Button variant="outline" onClick={thread.stop} disabled={!isRunning}>Stop</Button>
+          <Button
+            onClick={() => thread.append({ parts: [{ type: "text", text: prompt }] })}
+            disabled={isRunning || !prompt.trim()}
+          >
+            Run Codex Replay
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }
 `,
-  render: () => <StaticFullAgentDemo />,
+  render: () => <ScriptedCodexAgentDemo />,
 };

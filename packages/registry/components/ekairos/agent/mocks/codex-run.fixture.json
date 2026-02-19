@@ -1,0 +1,61 @@
+{
+  "id": "codex-local-readme",
+  "title": "Codex local run on README",
+  "source": {
+    "runId": "wrun_01KHVPFWTRV14V6CNN9QAWJTMP",
+    "executionId": "ad64c8e6-367d-4a83-94e9-3c08d8535f20",
+    "contextId": "85835b8e-bfcf-494b-b414-de747854f747",
+    "threadId": "a62a3d38-5ffd-4602-807c-6ecaa84b1f7e"
+  },
+  "request": {
+    "prompt": "Inspect README.md and reply with a short summary of what it contains.",
+    "runtime": {
+      "mode": "local",
+      "appServerUrl": "http://127.0.0.1:3436",
+      "approvalPolicy": "never"
+    }
+  },
+  "stream": [
+    {
+      "delayMs": 200,
+      "phase": "runtime.connecting",
+      "label": "Connecting to Codex runtime",
+      "state": "output-streaming"
+    },
+    {
+      "delayMs": 240,
+      "phase": "thread.started",
+      "label": "Thread started",
+      "state": "output-streaming"
+    },
+    {
+      "delayMs": 220,
+      "phase": "turn.started",
+      "label": "Turn started",
+      "state": "output-streaming"
+    },
+    {
+      "delayMs": 280,
+      "phase": "item.started",
+      "label": "agentMessage started",
+      "state": "output-streaming"
+    },
+    {
+      "delayMs": 340,
+      "phase": "item.completed",
+      "label": "agentMessage completed",
+      "state": "output-streaming"
+    },
+    {
+      "delayMs": 260,
+      "phase": "turn.completed",
+      "label": "Turn completed",
+      "state": "output-available"
+    }
+  ],
+  "reaction": {
+    "text": "README.md contains a short description for the Ekairos coding agent trace test. It indicates this repository is used to validate local Codex execution and workflow persistence.",
+    "reasoning": "I read README.md from the local repo path used by the run and extracted the central intent of the file. The output is concise and aligned with the original instruction.",
+    "status": "completed"
+  }
+}
