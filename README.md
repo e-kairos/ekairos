@@ -1,5 +1,12 @@
 # Ekairos Workspace
 
+[![Publish Packages](https://github.com/e-kairos/ekairos/actions/workflows/release.yml/badge.svg)](https://github.com/e-kairos/ekairos/actions/workflows/release.yml)
+[![npm @ekairos/domain](https://img.shields.io/npm/v/@ekairos/domain?label=%40ekairos%2Fdomain)](https://www.npmjs.com/package/@ekairos/domain)
+[![npm @ekairos/domain@beta](https://img.shields.io/npm/v/@ekairos/domain/beta?label=%40ekairos%2Fdomain%40beta)](https://www.npmjs.com/package/@ekairos/domain?activeTab=versions)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+[![Node >= 20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![pnpm >= 10](https://img.shields.io/badge/pnpm-%3E%3D10-F69220?logo=pnpm&logoColor=white)](https://pnpm.io/)
+
 Public monorepo for Ekairos npm packages.
 
 ## What is here
@@ -92,6 +99,15 @@ pnpm run build:publish-packages
 Repository secret required:
 
 - `NPM_TOKEN` (npm automation token with publish permissions)
+- `INSTANT_PERSONAL_ACCESS_TOKEN` (required for thread workflow e2e checks)
+
+## CI checks before publish
+
+All pushes run these checks before the publish job:
+
+- `@ekairos/domain` unit tests
+- `@ekairos/thread` unit tests (`test:ai-sdk-reactor`)
+- `@ekairos/thread` workflow smoke e2e (`test:e2e:thread-engine`)
 
 ## License
 
