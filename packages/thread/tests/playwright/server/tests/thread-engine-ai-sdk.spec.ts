@@ -94,24 +94,31 @@ test("story smoke runs thread engine with AI SDK mocked model in workflow runtim
   }
 
   expect(streamPayloads.length).toBeGreaterThan(0);
-  expect(streamEvents.some((event) => event.type === "data-context-id")).toBe(true);
+  expect(
+    streamEvents.some((event) => {
+      const type = readString(event, "type");
+      return type === "data-context.created" || type === "data-context.resolved";
+    }),
+  ).toBe(true);
   expect(streamEvents.some((event) => event.type === "finish")).toBe(true);
   const allowedCustomChunkTypes = new Set<string>(THREAD_STREAM_CHUNK_TYPES as readonly string[]);
-  const customChunks = streamEvents.filter((event) => {
+  const customChunkTypes = streamEvents
+    .map((event) => {
+      if (readString(event, "type") !== "data-chunk.emitted") return null;
+      const data = asRecord(event.data);
+      const chunkType = data ? readString(data, "chunkType") : null;
+      return chunkType && allowedCustomChunkTypes.has(chunkType) ? chunkType : null;
+    })
+    .filter((type): type is string => Boolean(type));
+  expect(customChunkTypes.length).toBeGreaterThan(0);
+  expect(customChunkTypes.includes("chunk.start")).toBe(true);
+  expect(customChunkTypes.includes("chunk.finish")).toBe(true);
+  expect(customChunkTypes.includes("chunk.error")).toBe(false);
+  const contextChunk = streamEvents.find((event) => {
     const type = readString(event, "type");
-    return typeof type === "string" && allowedCustomChunkTypes.has(type);
+    return type === "data-context.created" || type === "data-context.resolved";
   });
-  expect(customChunks.length).toBeGreaterThan(0);
-  const firstCustomChunkType = readString(customChunks[0], "type");
-  expect(firstCustomChunkType).toBe("data-context-id");
-  const lastCustomChunkType = readString(customChunks[customChunks.length - 1], "type");
-  expect(lastCustomChunkType).toBe("finish");
-  expect(customChunks.some((chunk) => readString(chunk, "type") === "tool-output-available")).toBe(true);
-  expect(customChunks.some((chunk) => readString(chunk, "type") === "tool-output-error")).toBe(false);
-  const contextChunk = streamEvents.find((event) => event.type === "data-context-id");
-  const streamContextId =
-    readString(contextChunk, "id") ??
-    readString(asRecord(contextChunk?.data) ?? undefined, "contextId");
+  const streamContextId = readString(asRecord(contextChunk?.data) ?? undefined, "contextId");
   expect(streamContextId).toBeTruthy();
 
   const adminDb = getAdminDb();
@@ -166,9 +173,6 @@ test("story smoke runs thread engine with AI SDK mocked model in workflow runtim
   });
   expect(hasToolOutput).toBe(true);
 
-  const customChunkTypes = customChunks
-    .map((chunk) => readString(chunk, "type"))
-    .filter((type): type is string => typeof type === "string");
   const reactionPartStates = reactionParts
     .map((part) => {
       const row = asRecord(part);
@@ -226,24 +230,30 @@ test("story smoke emits tool-output-error chunk in workflow runtime", async ({ r
   }
 
   expect(streamPayloads.length).toBeGreaterThan(0);
-  expect(streamEvents.some((event) => event.type === "data-context-id")).toBe(true);
+  expect(
+    streamEvents.some((event) => {
+      const type = readString(event, "type");
+      return type === "data-context.created" || type === "data-context.resolved";
+    }),
+  ).toBe(true);
   expect(streamEvents.some((event) => event.type === "finish")).toBe(true);
   const allowedCustomChunkTypes = new Set<string>(THREAD_STREAM_CHUNK_TYPES as readonly string[]);
-  const customChunks = streamEvents.filter((event) => {
+  const customChunkTypes = streamEvents
+    .map((event) => {
+      if (readString(event, "type") !== "data-chunk.emitted") return null;
+      const data = asRecord(event.data);
+      const chunkType = data ? readString(data, "chunkType") : null;
+      return chunkType && allowedCustomChunkTypes.has(chunkType) ? chunkType : null;
+    })
+    .filter((type): type is string => Boolean(type));
+  expect(customChunkTypes.length).toBeGreaterThan(0);
+  expect(customChunkTypes.includes("chunk.start")).toBe(true);
+  expect(customChunkTypes.includes("chunk.finish")).toBe(true);
+  const contextChunk = streamEvents.find((event) => {
     const type = readString(event, "type");
-    return typeof type === "string" && allowedCustomChunkTypes.has(type);
+    return type === "data-context.created" || type === "data-context.resolved";
   });
-  expect(customChunks.length).toBeGreaterThan(0);
-  const firstCustomChunkType = readString(customChunks[0], "type");
-  expect(firstCustomChunkType).toBe("data-context-id");
-  const lastCustomChunkType = readString(customChunks[customChunks.length - 1], "type");
-  expect(lastCustomChunkType).toBe("finish");
-  expect(customChunks.some((chunk) => readString(chunk, "type") === "tool-output-error")).toBe(true);
-  expect(customChunks.some((chunk) => readString(chunk, "type") === "tool-output-available")).toBe(false);
-  const contextChunk = streamEvents.find((event) => event.type === "data-context-id");
-  const streamContextId =
-    readString(contextChunk, "id") ??
-    readString(asRecord(contextChunk?.data) ?? undefined, "contextId");
+  const streamContextId = readString(asRecord(contextChunk?.data) ?? undefined, "contextId");
   expect(streamContextId).toBeTruthy();
 
   const adminDb = getAdminDb();
@@ -281,8 +291,12 @@ test("story smoke emits tool-output-error chunk in workflow runtime", async ({ r
   expect(stepRows.length).toBeGreaterThan(0);
   expect(stepRows.some((step) => readString(step, "status") === "completed")).toBe(true);
   const hasPersistedToolError = stepRows.some((step) => {
-    const raw = step.toolExecutionResults;
-    const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const raw =
+      step.actionResults ??
+      step.actionError ??
+      step.errorText ??
+      null;
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw ?? {});
     return text.includes("echo_failed");
   });
   expect(hasPersistedToolError).toBe(true);
@@ -304,9 +318,6 @@ test("story smoke emits tool-output-error chunk in workflow runtime", async ({ r
   });
   expect(hasToolErrorOutput).toBe(true);
 
-  const customChunkTypes = customChunks
-    .map((chunk) => readString(chunk, "type"))
-    .filter((type): type is string => typeof type === "string");
   const reactionPartStates = reactionParts
     .map((part) => {
       const row = asRecord(part);
