@@ -46,7 +46,7 @@ export type CodexExecuteTurnArgs<
   iteration: number
   instruction: string
   config: Config
-  writable: WritableStream<unknown>
+  writable?: WritableStream<unknown>
   silent: boolean
   emitChunk: (providerChunk: unknown) => Promise<void>
 }
@@ -502,14 +502,16 @@ export function createCodexReactor<
         raw: mappedChunk.raw ?? mapped.raw ?? toJsonSafe(providerChunk),
       }
 
-      const writer = params.writable.getWriter()
-      try {
-        await writer.write({
-          type: "data-chunk.emitted",
-          data: payload,
-        })
-      } finally {
-        writer.releaseLock()
+      if (params.writable) {
+        const writer = params.writable.getWriter()
+        try {
+          await writer.write({
+            type: "data-chunk.emitted",
+            data: payload,
+          })
+        } finally {
+          writer.releaseLock()
+        }
       }
     }
 
