@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { init } from "@instantdb/admin";
 import { domain } from "@ekairos/domain";
-import { threadDomain, THREAD_STREAM_CHUNK_TYPES } from "@ekairos/thread";
+import { threadDomain, THREAD_STREAM_CHUNK_TYPES } from "@ekairos/events";
 import { config as dotenvConfig } from "dotenv";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
