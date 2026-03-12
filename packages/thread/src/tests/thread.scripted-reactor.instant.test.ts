@@ -169,28 +169,28 @@ describeInstant("thread scripted reactor + Instant runtime", () => {
     })
 
     const snapshot = await currentDb().query({
-      thread_threads: {
+      event_threads: {
         $: { where: { key: contextKey }, limit: 1 },
       },
-      thread_contexts: {
+      event_contexts: {
         $: { where: { id: result.contextId }, limit: 1 },
       },
-      thread_executions: {
+      event_executions: {
         $: { where: { id: result.executionId }, limit: 1 },
       },
-      thread_steps: {
+      event_steps: {
         $: { where: { "execution.id": result.executionId }, limit: 10 },
       },
-      thread_items: {
+      event_items: {
         $: { where: { "context.id": result.contextId }, limit: 20 },
       },
     })
 
-    const threadRow = readRows(snapshot, "thread_threads")[0]
-    const contextRow = readRows(snapshot, "thread_contexts")[0]
-    const executionRow = readRows(snapshot, "thread_executions")[0]
-    const stepRow = readRows(snapshot, "thread_steps")[0]
-    const itemRows = readRows(snapshot, "thread_items")
+    const threadRow = readRows(snapshot, "event_threads")[0]
+    const contextRow = readRows(snapshot, "event_contexts")[0]
+    const executionRow = readRows(snapshot, "event_executions")[0]
+    const stepRow = readRows(snapshot, "event_steps")[0]
+    const itemRows = readRows(snapshot, "event_items")
 
     expect(readString(threadRow, "status")).toBe("idle")
     expect(readString(contextRow, "status")).toBe("closed")
@@ -281,20 +281,20 @@ describeInstant("thread scripted reactor + Instant runtime", () => {
     ).rejects.toThrow("createScriptedReactor: no scripted step available")
 
     const failureSnapshot = await currentDb().query({
-      thread_threads: {
+      event_threads: {
         $: { where: { key: contextKey }, limit: 1 },
       },
-      thread_contexts: {
+      event_contexts: {
         $: { where: { key: contextKey }, limit: 1 },
       },
-      thread_executions: {
+      event_executions: {
         $: { where: { workflowRunId }, limit: 10 },
       },
     })
 
-    const threadRow = readRows(failureSnapshot, "thread_threads")[0]
-    const contextRow = readRows(failureSnapshot, "thread_contexts")[0]
-    const executionRow = readRows(failureSnapshot, "thread_executions")[0]
+    const threadRow = readRows(failureSnapshot, "event_threads")[0]
+    const contextRow = readRows(failureSnapshot, "event_contexts")[0]
+    const executionRow = readRows(failureSnapshot, "event_executions")[0]
     const executionId = readString(executionRow, "id")
 
     expect(readString(threadRow, "status")).toBe("idle")
@@ -304,12 +304,12 @@ describeInstant("thread scripted reactor + Instant runtime", () => {
 
     const stepSnapshot = executionId
       ? await currentDb().query({
-          thread_steps: {
+          event_steps: {
             $: { where: { "execution.id": executionId }, limit: 20 },
           },
         })
       : null
-    const stepRows = stepSnapshot ? readRows(stepSnapshot, "thread_steps") : []
+    const stepRows = stepSnapshot ? readRows(stepSnapshot, "event_steps") : []
     const stepStatuses = new Set(stepRows.map((row) => String(readString(row, "status"))))
     expect(stepStatuses.has("completed")).toBe(true)
     expect(stepStatuses.has("failed")).toBe(true)
@@ -443,3 +443,4 @@ describeInstant("thread scripted reactor + Instant runtime", () => {
     ).toThrow("Unsupported thread stream event type")
   })
 })
+

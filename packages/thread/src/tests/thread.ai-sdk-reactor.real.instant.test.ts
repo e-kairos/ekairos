@@ -277,13 +277,13 @@ describeRealInstant("thread ai sdk reactor + real AI Gateway model", () => {
     const finishedAtMs = Date.now()
 
     const snapshot = await currentDb().query({
-      thread_executions: {
+      event_executions: {
         $: { where: { id: result.executionId }, limit: 1 },
       },
-      thread_steps: {
+      event_steps: {
         $: { where: { "execution.id": result.executionId }, limit: 10 },
       },
-      thread_items: {
+      event_items: {
         $: { where: { "context.id": result.contextId }, limit: 20 },
       },
       thread_trace_events: {
@@ -291,9 +291,9 @@ describeRealInstant("thread ai sdk reactor + real AI Gateway model", () => {
       },
     })
 
-    const executionRow = readRows(snapshot, "thread_executions")[0]
-    const stepRows = readRows(snapshot, "thread_steps")
-    const itemRows = readRows(snapshot, "thread_items")
+    const executionRow = readRows(snapshot, "event_executions")[0]
+    const stepRows = readRows(snapshot, "event_steps")
+    const itemRows = readRows(snapshot, "event_items")
     const traceRows = readRows(snapshot, "thread_trace_events")
 
     type EntityTimelineRow = {
@@ -482,3 +482,4 @@ describeRealInstant("thread ai sdk reactor + real AI Gateway model", () => {
     console.log(JSON.stringify(report, null, 2))
   }, 10 * 60 * 1000)
 })
+
