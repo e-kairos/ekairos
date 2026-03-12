@@ -352,19 +352,19 @@ describeInstant("thread ai sdk reactor + ai/test mock model", () => {
       })
 
       const snapshot = await currentDb().query({
-        thread_threads: {
+        event_threads: {
           $: { where: { key: contextKey }, limit: 1 },
         },
-        thread_contexts: {
+        event_contexts: {
           $: { where: { id: result.contextId }, limit: 1 },
         },
-        thread_executions: {
+        event_executions: {
           $: { where: { id: result.executionId }, limit: 1 },
         },
-        thread_steps: {
+        event_steps: {
           $: { where: { "execution.id": result.executionId }, limit: 10 },
         },
-        thread_items: {
+        event_items: {
           $: { where: { "context.id": result.contextId }, limit: 20 },
         },
       })
@@ -376,11 +376,11 @@ describeInstant("thread ai sdk reactor + ai/test mock model", () => {
     expect(selectModelCalls).toBeGreaterThan(0)
     expect(selectMaxModelStepsCalls).toBeGreaterThan(0)
 
-    const threadRow = readRows(snapshot, "thread_threads")[0]
-    const contextRow = readRows(snapshot, "thread_contexts")[0]
-    const executionRow = readRows(snapshot, "thread_executions")[0]
-    const stepRow = readRows(snapshot, "thread_steps")[0]
-    const itemRows = readRows(snapshot, "thread_items")
+    const threadRow = readRows(snapshot, "event_threads")[0]
+    const contextRow = readRows(snapshot, "event_contexts")[0]
+    const executionRow = readRows(snapshot, "event_executions")[0]
+    const stepRow = readRows(snapshot, "event_steps")[0]
+    const itemRows = readRows(snapshot, "event_items")
 
     expect(readString(threadRow, "status")).toBe("idle")
     expect(readString(contextRow, "status")).toBe("closed")
@@ -477,19 +477,19 @@ describeInstant("thread ai sdk reactor + ai/test mock model", () => {
     expect(canonicalChunkTypes.includes("chunk.finish")).toBe(true)
 
     const snapshot = await currentDb().query({
-      thread_executions: {
+      event_executions: {
         $: { where: { id: result.executionId }, limit: 1 },
       },
-      thread_steps: {
+      event_steps: {
         $: { where: { "execution.id": result.executionId }, limit: 20 },
       },
-      thread_items: {
+      event_items: {
         $: { where: { "context.id": result.contextId }, limit: 50 },
       },
     })
-    const executionRow = readRows(snapshot, "thread_executions")[0]
-    const stepRows = readRows(snapshot, "thread_steps")
-    const itemRows = readRows(snapshot, "thread_items")
+    const executionRow = readRows(snapshot, "event_executions")[0]
+    const stepRows = readRows(snapshot, "event_steps")
+    const itemRows = readRows(snapshot, "event_items")
     const usageChunk = chunks
       .map((chunk) => asRecord(chunk))
       .find((chunk) => chunk?.type === "finish")
@@ -640,17 +640,17 @@ describeInstant("thread ai sdk reactor + ai/test mock model", () => {
     expect(canonicalChunkTypes.includes("chunk.action_input_available")).toBe(true)
 
     const snapshot = await currentDb().query({
-      thread_executions: {
+      event_executions: {
         $: { where: { id: result.executionId }, limit: 1 },
       },
-      thread_items: {
+      event_items: {
         $: { where: { "context.id": result.contextId }, limit: 20 },
       },
     })
-    const executionRow = readRows(snapshot, "thread_executions")[0]
+    const executionRow = readRows(snapshot, "event_executions")[0]
     expect(readString(executionRow, "status")).toBe("completed")
 
-    const itemRows = readRows(snapshot, "thread_items")
+    const itemRows = readRows(snapshot, "event_items")
     const reactionItem = itemRows.find((row) => readString(row, "id") === result.reactionEventId)
     expect(reactionItem).toBeTruthy()
     const reactionContent = asRecord(reactionItem?.content)
@@ -665,3 +665,4 @@ describeInstant("thread ai sdk reactor + ai/test mock model", () => {
     expect(hasToolErrorOutput).toBe(true)
   }, 5 * 60 * 1000)
 })
+

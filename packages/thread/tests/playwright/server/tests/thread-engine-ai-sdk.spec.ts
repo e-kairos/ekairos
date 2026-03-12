@@ -146,11 +146,11 @@ test("story smoke runs thread engine with AI SDK mocked model in workflow runtim
 
   while (Date.now() < deadline) {
     const queryResult = await adminDb.query({
-      thread_executions: {
+      event_executions: {
         $: { where: { workflowRunId: runId }, limit: 50 },
       },
     });
-    executions = readRows(queryResult, "thread_executions");
+    executions = readRows(queryResult, "event_executions");
     if (executions.length > 0) break;
     await new Promise((r) => setTimeout(r, 750));
   }
@@ -163,15 +163,15 @@ test("story smoke runs thread engine with AI SDK mocked model in workflow runtim
   expect(executionId).toBeTruthy();
 
   const verificationQuery = await adminDb.query({
-    thread_steps: {
+    event_steps: {
       $: { where: { "execution.id": executionId }, limit: 50 },
     },
-    thread_items: {
+    event_items: {
       $: { where: { "context.id": streamContextId }, limit: 50 },
     },
   });
-  const stepRows = readRows(verificationQuery, "thread_steps");
-  const itemRows = readRows(verificationQuery, "thread_items");
+  const stepRows = readRows(verificationQuery, "event_steps");
+  const itemRows = readRows(verificationQuery, "event_items");
   expect(stepRows.length).toBeGreaterThan(0);
   expect(stepRows.some((step) => readString(step, "status") === "completed")).toBe(true);
   expect(itemRows.length).toBeGreaterThan(0);
@@ -286,11 +286,11 @@ test("story smoke emits tool-output-error chunk in workflow runtime", async ({ r
 
   while (Date.now() < deadline) {
     const queryResult = await adminDb.query({
-      thread_executions: {
+      event_executions: {
         $: { where: { workflowRunId: runId }, limit: 50 },
       },
     });
-    executions = readRows(queryResult, "thread_executions");
+    executions = readRows(queryResult, "event_executions");
     if (executions.length > 0) break;
     await new Promise((r) => setTimeout(r, 750));
   }
@@ -303,15 +303,15 @@ test("story smoke emits tool-output-error chunk in workflow runtime", async ({ r
   expect(executionId).toBeTruthy();
 
   const verificationQuery = await adminDb.query({
-    thread_steps: {
+    event_steps: {
       $: { where: { "execution.id": executionId }, limit: 50 },
     },
-    thread_items: {
+    event_items: {
       $: { where: { "context.id": streamContextId }, limit: 50 },
     },
   });
-  const stepRows = readRows(verificationQuery, "thread_steps");
-  const itemRows = readRows(verificationQuery, "thread_items");
+  const stepRows = readRows(verificationQuery, "event_steps");
+  const itemRows = readRows(verificationQuery, "event_items");
   expect(stepRows.length).toBeGreaterThan(0);
   expect(stepRows.some((step) => readString(step, "status") === "completed")).toBe(true);
   const hasPersistedToolError = stepRows.some((step) => {
@@ -373,3 +373,4 @@ test("story smoke emits tool-output-error chunk in workflow runtime", async ({ r
     workflowRunArtifacts: recentWorkflowArtifacts.files,
   });
 });
+
