@@ -1,4 +1,4 @@
-import { createThread, didToolExecute, INPUT_TEXT_ITEM_TYPE, WEB_CHANNEL } from "@ekairos/events"
+import { createThread, didToolExecute, INPUT_TEXT_ITEM_TYPE, OUTPUT_ITEM_TYPE, WEB_CHANNEL } from "@ekairos/events"
 import {
   getDatasetOutputPath,
   getDatasetOutputSchemaPath,
@@ -622,6 +622,81 @@ export function structure<Env extends { orgId: string }>(
         } as any
       }
 
+      async function ensureExecutionTrail(params: { status: "success" | "failed"; requestItemId: string; error?: unknown }) {
+        const { getThreadRuntime } = await import("@ekairos/events/runtime")
+        const runtime = (await getThreadRuntime(env)) as any
+        const store = runtime.store as any
+        if (!store?.saveItem || !store?.createExecution || !store?.linkItemToExecution || !store?.getItems) {
+          return
+        }
+
+        const items = await store.getItems({ key: contextKey })
+        const hasRequest = items.some((item: any) => item?.id === params.requestItemId)
+        let requestItemId = params.requestItemId
+
+        if (!hasRequest) {
+          const requestItem = await store.saveItem({ key: contextKey }, {
+            type: INPUT_TEXT_ITEM_TYPE,
+            channel: WEB_CHANNEL,
+            createdAt: new Date().toISOString(),
+            content: {
+              parts: [{ type: "text", text: "[structure-trace] request (recreated)" }],
+              structure_build: {
+                datasetId,
+                status: "input",
+              },
+            },
+          } as any)
+          if (!requestItem?.id) return
+          requestItemId = requestItem.id
+        }
+
+        const outputItem = await store.saveItem({ key: contextKey }, {
+          type: OUTPUT_ITEM_TYPE,
+          channel: WEB_CHANNEL,
+          createdAt: new Date().toISOString(),
+          content: {
+            parts: [{ type: "text", text: `structure:${datasetId} ${params.status}` }],
+            structure_build: {
+              datasetId,
+              status: params.status,
+              output,
+              orgId: (env as any)?.orgId,
+              error: params.error ? String(params.error) : undefined,
+            },
+          },
+        } as any)
+        if (!outputItem?.id) return
+
+        const execution = await store.createExecution({ key: contextKey }, requestItemId, outputItem.id)
+        await store.linkItemToExecution({ itemId: requestItemId, executionId: execution.id })
+        await store.linkItemToExecution({ itemId: outputItem.id, executionId: execution.id })
+      }
+
+      async function markBuildFailed(error: unknown) {
+        try {
+          await structurePatchContextContentStep({
+            env,
+            contextKey,
+            patch: {
+              structure: {
+                kind: "ekairos.structure",
+                version: 1,
+                structureId: datasetId,
+                updatedAt: Date.now(),
+                state: "failed",
+                error: {
+                  message: error instanceof Error ? error.message : String(error),
+                  stage: "structure.build",
+                },
+              },
+            } as any,
+          })
+        } catch {
+          // keep failure explicit even if persistence is partially unavailable
+        }
+      }
+
       async function runStory(evt: any) {
         await story.react(evt, {
           env,
@@ -632,6 +707,7 @@ export function structure<Env extends { orgId: string }>(
         // Tools are intentionally pure: persist completion outputs post-react by reading tool results from events.
         const commit = await structureCommitFromEventsStep({ env, structureId: datasetId })
         if (!commit.ok) {
+          throw new Error(commit.error)
         }
       }
 
@@ -657,68 +733,75 @@ export function structure<Env extends { orgId: string }>(
         )
       }
 
-      await runStory(makeUserMessageEvent(userPrompt ?? "produce structured output"))
-      let ctx = await getContextOrThrow()
+      const initialRequestEvent = makeUserMessageEvent(userPrompt ?? "produce structured output")
 
-      // Auto-mode: if schema is missing after the first pass, explicitly request investigation + generateSchema.
-      if (mode === "auto") {
-        const content = (ctx?.content ?? {}) as any
-        const hasSchema = Boolean(content?.structure?.outputSchema?.schema)
-        if (!hasSchema) {
-          await runStory(
-            makeUserMessageEvent(
-              [
-                "CRITICAL: You did not generate a schema yet.",
-                "1) Investigate Sources using executeCommand (inspect paths, read files, infer structure).",
-                "2) Call generateSchema.",
-                "3) After schema is saved, produce the final output and call complete.",
-              ].join("\n"),
-            ),
-          )
+      try {
+        await runStory(initialRequestEvent)
+        let ctx = await getContextOrThrow()
+
+        // Auto-mode: if schema is missing after the first pass, explicitly request investigation + generateSchema.
+        if (mode === "auto") {
+          const content = (ctx?.content ?? {}) as any
+          const hasSchema = Boolean(content?.structure?.outputSchema?.schema)
+          if (!hasSchema) {
+            await runStory(
+              makeUserMessageEvent(
+                [
+                  "CRITICAL: You did not generate a schema yet.",
+                  "1) Investigate Sources using executeCommand (inspect paths, read files, infer structure).",
+                  "2) Call generateSchema.",
+                  "3) After schema is saved, produce the final output and call complete.",
+                ].join("\n"),
+              ),
+            )
+            ctx = await getContextOrThrow()
+          }
+        }
+
+        const needsSecondPass = output === "rows" ? !(await isRowsCompleted()) : !isObjectCompleted(ctx)
+
+        if (needsSecondPass) {
+          const followUpText =
+            output === "rows"
+              ? "Finalize now: write output.jsonl to OutputPath and call complete."
+              : "Finalize now: call complete with summary and resultJson (inline JSON)."
+
+          await runStory(makeUserMessageEvent(followUpText))
           ctx = await getContextOrThrow()
         }
-      }
 
-      const needsSecondPass = output === "rows" ? !(await isRowsCompleted()) : !isObjectCompleted(ctx)
-
-      if (needsSecondPass) {
-        const followUpText =
-          output === "rows"
-            ? "Finalize now: write output.jsonl to OutputPath and call complete."
-            : "Finalize now: call complete with summary and resultJson (inline JSON)."
-
-        await runStory(makeUserMessageEvent(followUpText))
-        ctx = await getContextOrThrow()
-      }
-
-      const stillIncompleteAfterSecondPass =
-        output === "rows" ? !(await isRowsCompleted()) : !isObjectCompleted(ctx)
-      if (stillIncompleteAfterSecondPass) {
-        const finalText =
-          output === "rows"
-            ? "CRITICAL: Do not do anything else. Ensure output.jsonl exists at OutputPath and immediately call complete."
-            : "CRITICAL: Do not do anything else. Immediately call complete with summary and resultJson (inline JSON)."
-        await runStory(makeUserMessageEvent(finalText))
-        ctx = await getContextOrThrow()
-      }
-
-      if (output === "rows" && !(await isRowsCompleted())) {
-        throw new Error("Rows output not completed")
-      }
-      if (output === "object" && !isObjectCompleted(ctx)) {
-        const persisted = await persistObjectResultFromStoryStep({ env, datasetId })
-        if (persisted.ok) {
+        const stillIncompleteAfterSecondPass =
+          output === "rows" ? !(await isRowsCompleted()) : !isObjectCompleted(ctx)
+        if (stillIncompleteAfterSecondPass) {
+          const finalText =
+            output === "rows"
+              ? "CRITICAL: Do not do anything else. Ensure output.jsonl exists at OutputPath and immediately call complete."
+              : "CRITICAL: Do not do anything else. Immediately call complete with summary and resultJson (inline JSON)."
+          await runStory(makeUserMessageEvent(finalText))
           ctx = await getContextOrThrow()
-        } else {
         }
-      }
 
-      if (output === "object" && !isObjectCompleted(ctx)) {
-        throw new Error("Object output not completed")
-      }
+        if (output === "rows" && !(await isRowsCompleted())) {
+          throw new Error("Rows output not completed")
+        }
+        if (output === "object" && !isObjectCompleted(ctx)) {
+          const persisted = await persistObjectResultFromStoryStep({ env, datasetId })
+          if (persisted.ok) {
+            ctx = await getContextOrThrow()
+          }
+        }
 
-      let rowsSandboxRef: StructureRowsOutputSandboxRef | null = null
-      const reader: StructureRowsReader = {
+        if (output === "object" && !isObjectCompleted(ctx)) {
+          throw new Error("Object output not completed")
+        }
+
+        await ensureExecutionTrail({
+          status: "success",
+          requestItemId: initialRequestEvent.id,
+        })
+
+        let rowsSandboxRef: StructureRowsOutputSandboxRef | null = null
+        const reader: StructureRowsReader = {
         read: async (cursorOrParams?: any, limit?: number) => {
           if (output !== "rows") {
             throw new Error("reader.read() is only supported for output=rows")
@@ -793,9 +876,18 @@ export function structure<Env extends { orgId: string }>(
             done: res.done,
           }
         },
-      }
+        }
 
-      return output === "object" ? { datasetId, reader, dataset: ctx } : { datasetId, reader }
+        return output === "object" ? { datasetId, reader, dataset: ctx } : { datasetId, reader }
+      } catch (error) {
+        await markBuildFailed(error)
+        await ensureExecutionTrail({
+          status: "failed",
+          requestItemId: initialRequestEvent.id,
+          error,
+        })
+        throw error
+      }
     },
   }
 

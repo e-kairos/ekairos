@@ -280,6 +280,21 @@ export async function saveTriggerAndCreateExecution(params: {
     throw error
   }
 
+  try {
+    await store.linkItemToExecution({
+      itemId: saved.id,
+      executionId: execution.id,
+    })
+  } catch (error) {
+    logStepDebug("saveTriggerAndCreateExecution:linkTriggerToExecution:error", {
+      contextIdentifier: summarizeContextIdentifierForLog(params.contextIdentifier),
+      triggerEventId: saved.id,
+      executionId: execution.id,
+      error: summarizeStepError(error),
+    })
+    throw error
+  }
+
   const { runId, meta } = await resolveWorkflowRunId({
     env: params.env,
     db,
@@ -385,6 +400,12 @@ export async function saveReactionItem(
   const runtime = await getThreadRuntime(env)
   const { store, db } = runtime
   const saved = await store.saveItem(contextIdentifier, event)
+  if (opts?.executionId) {
+    await store.linkItemToExecution({
+      itemId: saved.id,
+      executionId: opts.executionId,
+    })
+  }
   const contextId =
     opts?.contextId ??
     (typeof (contextIdentifier as any)?.id === "string"
@@ -396,6 +417,7 @@ export async function saveReactionItem(
     db,
     executionId: opts?.executionId,
   })
+
   if (runId) {
     const events: ThreadTraceEventWrite[] = [
       {
