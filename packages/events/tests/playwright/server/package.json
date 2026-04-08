@@ -17,7 +17,7 @@
     "dependencies":  {
                          "@ekairos/domain":  "workspace:*",
                          "@ekairos/events":  "workspace:*",
-                         "@instantdb/admin":  "0.22.126",
+                         "@instantdb/admin":  "0.22.158",
                          "ai":  "^5.0.98",
                          "dotenv":  "^17.2.3",
                          "next":  "16.0.7",

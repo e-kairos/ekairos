@@ -125,7 +125,6 @@ export async function createPersistedContextStepStream(params: {
     clientId,
     waitUntil,
   })
-  const writer = writeStream.getWriter()
   const streamId = await writeStream.streamId()
 
   await db.transact(

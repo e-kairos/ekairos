@@ -494,8 +494,8 @@ importers:
         specifier: workspace:*
         version: link:../../..
       '@instantdb/admin':
-        specifier: 0.22.126
-        version: 0.22.126
+        specifier: 0.22.158
+        version: 0.22.158
       ai:
         specifier: ^5.0.98
         version: 5.0.98(zod@4.1.12)
