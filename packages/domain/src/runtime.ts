@@ -365,12 +365,19 @@ function createActionRuntimeHandle<
       ? { ...candidate, env: params.env }
       : { env: params.env }
 
+  const resolveHandleDb = async () => {
+    if (typeof handle.db === "function") {
+      return await handle.db()
+    }
+    return handle.db
+  }
+
   if (typeof handle.use !== "function" && params.rootDomain) {
     handle.use = async (subdomain: any) =>
       materializeDomain({
         rootDomain: params.rootDomain as any,
         subdomain,
-        db: handle.db,
+        db: await resolveHandleDb(),
         bindings: {
           env: params.env,
           runtime: handle,

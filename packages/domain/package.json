@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "ekairos-domain": "./dist/cli/bin.js"
+  },
   "sideEffects": false,
   "files": [
     "dist"
@@ -56,6 +59,11 @@
       "import": "./dist/runtime-handle.js",
       "default": "./dist/runtime-handle.js"
     },
+    "./cli": {
+      "types": "./dist/cli/index.d.ts",
+      "import": "./dist/cli/index.js",
+      "default": "./dist/cli/index.js"
+    },
     "./next": {
       "types": "./dist/next.d.ts",
       "import": "./dist/next.js",
@@ -71,6 +79,7 @@
     "test": "pnpm run test:unit",
     "test:workflow": "vitest run -c vitest.workflow.config.mts",
     "test:unit": "vitest run -c vitest.config.ts src/tests/runtime.actions.unit.test.ts src/tests/domain.purity.unit.test.ts",
+    "test:cli": "vitest run -c vitest.config.ts src/tests/cli.instant.e2e.test.ts",
     "test:conflicts": "node dist/__type_tests__/conflict-validation.test.js",
     "test:context": "node dist/context.test-runner.js",
     "test:e2e": "vitest run -c vitest.config.ts src/tests/domain.context.e2e.test.ts"

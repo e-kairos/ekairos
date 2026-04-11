@@ -83,3 +83,8 @@ packages/reactors/openai-reactor/.tmp-audit-*.json
 /skills/esolbay-context-migration/artifacts/
 /skills/esolbay-context-migration/.migration-audit/
 /skills/esolbay-context-migration/.local-sensitive-archive/
+
+# local domain cli smoke artifacts
+tmp/ek-domain-cli-*.log
+tmp/ek-domain-cli-*.json
+tmp/ek-domain-cli-*.mts

@@ -87,6 +87,7 @@ async execute({ runtime, input }) {
 - `composeDomain(...)`
 - `defineDomainAction(...)`
 - `EkairosRuntime`
+- `@ekairos/domain/cli`
 - `domain.context()`
 - `domain.contextString()`
 
@@ -96,4 +97,16 @@ async execute({ runtime, input }) {
 pnpm --filter @ekairos/domain test
 pnpm --filter @ekairos/domain test:workflow
 pnpm --filter @ekairos/domain test:e2e
+pnpm --filter @ekairos/domain test:cli
+```
+
+## CLI
+
+The package also ships a small domain CLI:
+
+```bash
+npx @ekairos/domain login http://localhost:3000 --refreshToken=<token> --appId=<app-id>
+npx @ekairos/domain inspect
+npx @ekairos/domain createTask '{"title":"Ship it"}'
+npx @ekairos/domain query '{"tasks":{}}'
 ```

@@ -25,6 +25,7 @@ export {
   type RuntimeLike,
   type ExplicitRuntimeLike,
 } from "./runtime-handle.js";
+export * as cli from "./cli/index.js";
 
 type DomainIncludeRef = () => unknown;
 
@@ -437,13 +438,18 @@ function getMeta(source: unknown): DomainMeta | null {
   return (source as any)[EKAIROS_META] ?? null;
 }
 
-function getActionBinding(source: unknown): { name: string; domain: unknown } | null {
+function getActionBinding(source: unknown): { name: string; domain: unknown; key?: string } | null {
   if (!source || typeof source !== "object") return null;
   const binding = (source as any)[EKAIROS_ACTION_BINDING];
   if (!binding || typeof binding !== "object") return null;
   const name = typeof binding.name === "string" ? binding.name.trim() : "";
   if (!name) return null;
-  return { name, domain: binding.domain };
+  const key = typeof binding.key === "string" ? binding.key.trim() : "";
+  return {
+    name,
+    domain: binding.domain,
+    ...(key ? { key } : {}),
+  };
 }
 
 function bindAction(
@@ -1378,7 +1384,7 @@ export function getDomainActions(source: unknown): DomainActionRegistration[] {
   return getStoredActions(source);
 }
 
-export function getDomainActionBinding(source: unknown): { name: string; domain: unknown } | null {
+export function getDomainActionBinding(source: unknown): { name: string; domain: unknown; key?: string } | null {
   return getActionBinding(source);
 }
 
