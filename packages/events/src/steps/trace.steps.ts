@@ -1,5 +1,7 @@
 import "../polyfills/dom-events.js";
 import type { ContextEnvironment } from "../context.config.js";
+import type { ContextRuntime } from "../context.runtime.js";
+import { getContextRuntimeServices } from "../context.runtime.js";
 import type { TraceEventKind } from "../context.contract.js";
 import { lookup } from "@instantdb/admin";
 
@@ -122,6 +124,7 @@ async function readProjectId(): Promise<string> {
 }
 
 export async function writeContextTraceEvents(params: {
+  runtime?: ContextRuntime<ContextEnvironment>;
   env: ContextEnvironment;
   events: ContextTraceEventWrite[];
 }) {
@@ -136,8 +139,10 @@ export async function writeContextTraceEvents(params: {
   const strict = envTrace?.strict === true || process.env.EKAIROS_TRACES_STRICT === "1";
   // 1) Local trace persistence (InstantDB source of truth).
   try {
-    const { getContextRuntime } = await import("../runtime.js");
-    const runtime = await getContextRuntime(params.env);
+    if (!params.runtime) {
+      throw new Error("[context/trace] runtime is required");
+    }
+    const runtime = await getContextRuntimeServices(params.runtime);
     const db: any = (runtime as any)?.db;
     if (db) {
       const now = new Date();

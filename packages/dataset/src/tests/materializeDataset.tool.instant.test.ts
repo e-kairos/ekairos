@@ -39,7 +39,9 @@ const appDomain = domain("dataset-tool-tests")
   .includes(sampleDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
 
-await setupInstantTestEnv("materialize-dataset-tool", appDomain.toInstantSchema())
+await setupInstantTestEnv("materialize-dataset-tool", appDomain.toInstantSchema(), {
+  preferExistingApp: false,
+})
 
 const adminDb =
   hasInstantAdmin()

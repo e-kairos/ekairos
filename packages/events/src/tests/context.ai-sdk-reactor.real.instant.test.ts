@@ -2,7 +2,6 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { tool, type UIMessageChunk } from "ai"
-import { configureRuntime } from "@ekairos/domain/runtime"
 import { init } from "@instantdb/admin"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
@@ -19,6 +18,7 @@ import {
   provisionContextTestApp,
 } from "./_env.ts"
 import { createStageTimer, writeBenchmarkReport } from "./_benchmark.ts"
+import { EventsTestRuntime } from "./context.test-runtime.ts"
 
 type ContextTestEnv = {
   actorId: string
@@ -72,6 +72,7 @@ function createChunkCollector() {
 }
 
 let appId: string | null = null
+let adminToken: string | null = null
 let db: ReturnType<typeof init> | null = null
 
 function currentDb() {
@@ -93,14 +94,10 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
     })
 
     appId = app.appId
+    adminToken = app.adminToken
     db = init({
       appId: app.appId,
       adminToken: app.adminToken,
-    })
-
-    configureRuntime({
-      domain: { domain: eventsDomain },
-      runtime: async () => ({ db: currentDb() }),
     })
   }, 10 * 60 * 1000)
 
@@ -114,6 +111,11 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
     const timer = createStageTimer()
     const contextKey = `context-ai-sdk-real-context:${Date.now()}`
     const { chunks, writable } = createChunkCollector()
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      actorId: "user_context_tests_real",
+    })
 
     const realContext = createContext<ContextTestEnv>("context.tests.ai-sdk-reactor.real")
       .context((stored, env) => ({
@@ -137,9 +139,7 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
 
     const result = await timer.measure("reactMs", async () =>
       await realContext.react(createTriggerEvent("set status to ready"), {
-        env: {
-          actorId: "user_context_tests_real",
-        },
+        runtime,
         context: { key: contextKey },
         durable: false,
         __benchmark: timer,

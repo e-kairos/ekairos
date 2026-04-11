@@ -1,6 +1,6 @@
 # @ekairos/toolbar
 
-Lightweight visual feedback toolbar for selecting UI elements, collecting annotations, and exporting structured feedback.
+Lightweight feedback toolbar for selecting UI elements and exporting structured annotations.
 
 ## Install
 
@@ -25,19 +25,17 @@ export function App() {
 
 ## Included
 
-- Single element selection
-- Multi-select by `Cmd/Ctrl + Shift + Click`
-- Drag multi-select and area selection
-- Feedback dialog (add/edit/delete)
-- Stable selector extraction (`stableSelector`) plus readable path (`elementPath`)
-- Markdown output generation and copy/send callbacks
+- single and multi selection
+- drag area selection
+- feedback dialog
+- selector extraction
+- markdown export
 
-## Keyboard
+## Shortcuts
 
-- `Cmd/Ctrl + Shift + F`: toggle feedback mode
-- `Esc`: cancel current interaction / close
-- `C`: copy output
-- `S`: send output callback
-- `X`: clear annotations
-- `H`: show/hide markers
-
+- `Cmd/Ctrl + Shift + F`
+- `Esc`
+- `C`
+- `S`
+- `X`
+- `H`

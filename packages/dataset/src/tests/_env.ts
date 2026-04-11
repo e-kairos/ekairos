@@ -17,9 +17,19 @@ export function hasInstantProvisionToken(): boolean {
   return Boolean(String(process.env.INSTANT_PERSONAL_ACCESS_TOKEN ?? "").trim())
 }
 
-export async function setupInstantTestEnv(title: string, schema?: AnyInstantSchema): Promise<true> {
+export async function setupInstantTestEnv(
+  title: string,
+  schema?: AnyInstantSchema,
+  options?: { preferExistingApp?: boolean },
+): Promise<true> {
   delete process.env.DATASET_TEST_LOCAL_SANDBOX
   delete process.env.DATASET_SANDBOX_WORKDIR_BASE
+  const preferExistingApp = options?.preferExistingApp ?? true
+  if (preferExistingApp && hasInstantAdmin()) return true
+  if (!preferExistingApp) {
+    delete process.env.NEXT_PUBLIC_INSTANT_APP_ID
+    delete process.env.INSTANT_APP_ADMIN_TOKEN
+  }
   if (hasInstantAdmin()) return true
   if (!hasInstantProvisionToken()) {
     throw new Error("INSTANT_PERSONAL_ACCESS_TOKEN is required for dataset Instant tests.")

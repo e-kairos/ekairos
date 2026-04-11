@@ -43,7 +43,9 @@ const appDomain = domain("dataset-builder-tests")
   .includes(sampleDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
 
-await setupInstantTestEnv("dataset-builder-materialization", appDomain.toInstantSchema())
+await setupInstantTestEnv("dataset-builder-materialization", appDomain.toInstantSchema(), {
+  preferExistingApp: false,
+})
 
 const adminDb =
   hasInstantAdmin()
@@ -490,7 +492,9 @@ describeInstant("dataset() builder direct API", () => {
 
       const snapshot = await getDatasetSnapshot(result.datasetId)
       expect(snapshot.dataset.sandboxId).toBe(suiteSandboxId)
-      expect(snapshot.rows).toEqual([
+      expect(snapshot.rows).toHaveLength(2)
+      const normalizedRows = [...snapshot.rows].sort((a, b) => Number(a.priceUsd ?? 0) - Number(b.priceUsd ?? 0))
+      expect(normalizedRows).toEqual([
         { sku: expect.any(String), priceUsd: 10 },
         { sku: expect.any(String), priceUsd: 20 },
       ])

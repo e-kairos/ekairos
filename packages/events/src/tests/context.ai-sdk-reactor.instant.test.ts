@@ -3,7 +3,6 @@
 import { afterAll, beforeAll, expect } from "vitest"
 import { simulateReadableStream, tool, type UIMessageChunk } from "ai"
 import { MockLanguageModelV2 } from "ai/test"
-import { configureRuntime } from "@ekairos/domain/runtime"
 import { init } from "@instantdb/admin"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
@@ -16,6 +15,7 @@ import {
 } from "../index.ts"
 import { describeInstant, itInstant, destroyContextTestApp, provisionContextTestApp } from "./_env.ts"
 import { createStageTimer, writeBenchmarkReport } from "./_benchmark.ts"
+import { EventsTestRuntime } from "./context.test-runtime.ts"
 
 type ContextTestEnv = {
   actorId: string
@@ -124,6 +124,7 @@ function createMockModel(toolName: string): MockLanguageModelV2 {
 }
 
 let appId: string | null = null
+let adminToken: string | null = null
 let db: ReturnType<typeof init> | null = null
 
 function currentDb() {
@@ -142,14 +143,10 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
     })
 
     appId = app.appId
+    adminToken = app.adminToken
     db = init({
       appId: app.appId,
       adminToken: app.adminToken,
-    })
-
-    configureRuntime({
-      domain: { domain: eventsDomain },
-      runtime: async () => ({ db: currentDb() }),
     })
   }, 5 * 60 * 1000)
 
@@ -163,6 +160,11 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
     const timer = createStageTimer()
     const contextKey = `context-ai-sdk-context:${Date.now()}`
     const { chunks, writable } = createChunkCollector()
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      actorId: "user_context_tests",
+    })
 
     const aiSdkContext = createContext<ContextTestEnv>("context.tests.ai-sdk-reactor")
       .context((stored, env) => ({
@@ -183,9 +185,7 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
 
     const result = await timer.measure("reactMs", async () =>
       await aiSdkContext.react(createTriggerEvent("set status to ready"), {
-        env: {
-          actorId: "user_context_tests",
-        },
+        runtime,
         context: { key: contextKey },
         durable: false,
         __benchmark: timer,
@@ -249,6 +249,11 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
   itInstant("persists tool output errors in non-durable mode", async () => {
     const timer = createStageTimer()
     const contextKey = `context-ai-sdk-error-context:${Date.now()}`
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      actorId: "user_context_tests",
+    })
 
     const failingToolContext = createContext<ContextTestEnv>("context.tests.ai-sdk-reactor.error")
       .context((stored, env) => ({
@@ -271,9 +276,7 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
 
     const result = await timer.measure("reactMs", async () =>
       await failingToolContext.react(createTriggerEvent("set status to ready"), {
-        env: {
-          actorId: "user_context_tests",
-        },
+        runtime,
         context: { key: contextKey },
         durable: false,
         __benchmark: timer,

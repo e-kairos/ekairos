@@ -19,10 +19,12 @@ export {
   type RegistrableContextBuilder,
   type ContextReactParams,
   type ContextReactResult,
+  type ContextWorkflowRun,
   type ContextDurableWorkflowPayload,
   type ContextDurableWorkflowFunction,
   type ContextModelInit,
   type ContextTool,
+  type ContextToolExecuteContext,
   runContextReactionDirect,
 } from "./context.js"
 

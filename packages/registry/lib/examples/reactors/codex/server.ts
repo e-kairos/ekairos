@@ -31,7 +31,7 @@ import type {
   LiveReactorShowcaseRunResponse,
   ReactorShowcaseEntitiesResponse,
 } from "@/lib/examples/reactors/types";
-import { resolveRegistryRuntime } from "@/runtime";
+import { createRegistryRuntime, resolveRegistryRuntime } from "@/runtime";
 
 export const runtime = "nodejs";
 
@@ -243,39 +243,31 @@ export async function handleCodexShowcaseRunRequest(request: Request) {
     const contextId = rawContextId && isUuid(rawContextId) ? rawContextId : undefined;
     const providerContextId = asString(body.providerContextId).trim() || undefined;
     const triggerEvent = buildTriggerEvent(prompt, body.triggerEventId);
+    const runtime = createRegistryRuntime({
+      instant: {
+        appId: credentials.appId,
+        adminToken: credentials.adminToken,
+      },
+      appServerUrl: resolveAppServerUrl(),
+      repoPath,
+      providerContextId,
+      model: model || undefined,
+      approvalPolicy,
+    } as CodexShowcaseEnv);
 
     const reaction = await codexShowcaseContext.react(triggerEvent, {
-      env: {
-        instant: {
-          appId: credentials.appId,
-          adminToken: credentials.adminToken,
-        },
-        appServerUrl: resolveAppServerUrl(),
-        repoPath,
-        providerContextId,
-        model: model || undefined,
-        approvalPolicy,
-      },
+      runtime,
       context: contextId ? { id: contextId } : null,
       options: {
         maxIterations: 1,
         maxModelSteps: 1,
       },
     });
-
-    const runtime = await resolveRegistryRuntime(
-      {
-        instant: {
-          appId: credentials.appId,
-          adminToken: credentials.adminToken,
-        },
-      },
-      appDomain,
-    );
-    const runtimeDb: any = runtime.db;
+    const resolvedRuntime = await runtime.resolve();
+    const runtimeDb: any = resolvedRuntime.db;
 
     const [triggerSnapshot, assistantSnapshot] = await Promise.all([
-      runtime.db.query({
+      runtimeDb.query({
         event_items: {
           $: {
             where: { id: reaction.trigger.id as any },
@@ -283,7 +275,7 @@ export async function handleCodexShowcaseRunRequest(request: Request) {
           },
         },
       }),
-      runtime.db.query({
+      runtimeDb.query({
         event_items: {
           $: {
             where: { id: reaction.reaction.id as any },
@@ -303,13 +295,13 @@ export async function handleCodexShowcaseRunRequest(request: Request) {
     const normalizedTrigger = normalizeContextItem(triggerRow, reaction.trigger);
     const normalizedAssistant = normalizeContextItem(assistantRow, reaction.reaction);
     const streamPointer = await resolveContextExecutionStreamPointer({
-      db: runtime.db,
+      db: runtimeDb,
       contextId: reaction.context.id,
     });
     const persistedTrace =
       streamPointer && (streamPointer.clientId || streamPointer.streamId)
         ? await readPersistedContextStepStream({
-            db: runtime.db,
+            db: runtimeDb,
             clientId: streamPointer.clientId ?? undefined,
             streamId: streamPointer.streamId ?? undefined,
           })
@@ -413,7 +405,7 @@ export async function handleCodexShowcaseEntitiesRequest(request: Request) {
         }
       : await resolveDemoTenantCredentials({ appId });
 
-    const runtime = await resolveRegistryRuntime(
+    const resolvedRuntime = await resolveRegistryRuntime(
       {
         instant: {
           appId: credentials.appId,
@@ -423,7 +415,7 @@ export async function handleCodexShowcaseEntitiesRequest(request: Request) {
       appDomain,
     );
 
-    const base = await runtime.db.query({
+    const base = await resolvedRuntime.db.query({
       event_contexts: {
         $: { where: { id: contextId as any }, limit: 1 },
       },
@@ -454,7 +446,7 @@ export async function handleCodexShowcaseEntitiesRequest(request: Request) {
       });
     }
 
-    const query = await runtime.db.query({
+    const query = await resolvedRuntime.db.query({
       event_executions: {
         $: {
           where: { "context.id": contextId as any },

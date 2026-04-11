@@ -1,6 +1,8 @@
 import type { UIMessageChunk } from "ai"
 
 import type { ContextEnvironment } from "../context.config.js"
+import type { ContextRuntime } from "../context.runtime.js"
+import { getContextRuntimeServices } from "../context.runtime.js"
 import type {
   ContextExecution,
   ContextItem,
@@ -16,6 +18,16 @@ import {
   toolApprovalHookToken,
   toolApprovalWebhookToken,
 } from "../context.hooks.js"
+
+type RuntimeParams<Env extends ContextEnvironment = ContextEnvironment> = {
+  runtime: ContextRuntime<Env>
+}
+
+async function getRuntimeAndEnv<Env extends ContextEnvironment>(params: RuntimeParams<Env>) {
+  const env = params.runtime.env
+  const runtime = await getContextRuntimeServices(params.runtime)
+  return { runtime, env }
+}
 
 async function maybeWriteTraceEvents(
   env: ContextEnvironment,
@@ -133,27 +145,27 @@ function logStepDebug(message: string, payload: Record<string, unknown>) {
  * This is the "context init" boundary for the story engine.
  */
 export async function initializeContext<C>(
-  env: ContextEnvironment,
-  contextIdentifier: ContextIdentifier | null,
-  opts?: { silent?: boolean; writable?: WritableStream<UIMessageChunk> },
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier | null
+    opts?: { silent?: boolean; writable?: WritableStream<UIMessageChunk> }
+  },
 ): Promise<{ context: StoredContext<C>; isNew: boolean }> {
   "use step"
 
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(env)
+  const { runtime, env } = await getRuntimeAndEnv(params)
   const { store, db } = runtime
 
   // Detect creation explicitly so the engine can run onContextCreated hooks.
   let result: { context: StoredContext<C>; isNew: boolean }
-  if (!contextIdentifier) {
+  if (!params.contextIdentifier) {
     const context = await store.getOrCreateContext<C>(null)
     result = { context, isNew: true }
   } else {
-    const existing = await store.getContext<C>(contextIdentifier)
+    const existing = await store.getContext<C>(params.contextIdentifier)
     if (existing) {
       result = { context: existing, isNew: false }
     } else {
-      const created = await store.getOrCreateContext<C>(contextIdentifier)
+      const created = await store.getOrCreateContext<C>(params.contextIdentifier)
       result = { context: created, isNew: true }
     }
   }
@@ -180,41 +192,40 @@ export async function initializeContext<C>(
 }
 
 export async function updateContextContent<C>(
-  env: ContextEnvironment,
-  contextIdentifier: ContextIdentifier,
-  content: C,
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier
+    content: C
+  },
 ): Promise<StoredContext<C>> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const { store } = await getContextRuntime(env)
-  return await store.updateContextContent<C>(contextIdentifier, content)
+  const { runtime } = await getRuntimeAndEnv(params)
+  return await runtime.store.updateContextContent<C>(params.contextIdentifier, params.content)
 }
 
 export async function updateContextStatus(
-  env: ContextEnvironment,
-  contextIdentifier: ContextIdentifier,
-  status: ContextStatus,
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier
+    status: ContextStatus
+  },
 ): Promise<void> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const { store } = await getContextRuntime(env)
-  await store.updateContextStatus(contextIdentifier, status)
+  const { runtime } = await getRuntimeAndEnv(params)
+  await runtime.store.updateContextStatus(params.contextIdentifier, params.status)
 }
 
 export async function saveTriggerItem(
-  env: ContextEnvironment,
-  contextIdentifier: ContextIdentifier,
-  event: ContextItem,
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier
+    event: ContextItem
+  },
 ): Promise<ContextItem> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const { store } = await getContextRuntime(env)
-  const saved = await store.saveItem(contextIdentifier, event)
-  return saved
+  const { runtime } = await getRuntimeAndEnv(params)
+  return await runtime.store.saveItem(params.contextIdentifier, params.event)
 }
 
 export async function saveTriggerAndCreateExecution(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   contextIdentifier: ContextIdentifier
   triggerEvent: ContextItem
 }): Promise<{
@@ -223,8 +234,7 @@ export async function saveTriggerAndCreateExecution(params: {
   execution: ContextExecution
 }> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(params.env)
+  const { runtime, env } = await getRuntimeAndEnv(params)
   const { store, db } = runtime
   logStepDebug("saveTriggerAndCreateExecution:start", {
     contextIdentifier: summarizeContextIdentifierForLog(params.contextIdentifier),
@@ -320,7 +330,7 @@ export async function saveTriggerAndCreateExecution(params: {
   }
 
   const { runId, meta } = await resolveWorkflowRunId({
-    env: params.env,
+    env,
     db,
     executionId: execution.id,
   })
@@ -410,7 +420,7 @@ export async function saveTriggerAndCreateExecution(params: {
       },
     ]
 
-    await maybeWriteTraceEvents(params.env, events)
+    await maybeWriteTraceEvents(env, events)
   }
 
   return {
@@ -424,36 +434,36 @@ export async function saveTriggerAndCreateExecution(params: {
 }
 
 export async function saveReactionItem(
-  env: ContextEnvironment,
-  contextIdentifier: ContextIdentifier,
-  event: ContextItem,
-  opts?: {
-    executionId?: string
-    contextId?: string
-    reviewRequests?: ContextReviewRequest[]
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier
+    event: ContextItem
+    opts?: {
+      executionId?: string
+      contextId?: string
+      reviewRequests?: ContextReviewRequest[]
+    }
   },
 ): Promise<ContextItem> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(env)
+  const { runtime, env } = await getRuntimeAndEnv(params)
   const { store, db } = runtime
-  const saved = await store.saveItem(contextIdentifier, event)
-  if (opts?.executionId) {
+  const saved = await store.saveItem(params.contextIdentifier, params.event)
+  if (params.opts?.executionId) {
     await store.linkItemToExecution({
       itemId: saved.id,
-      executionId: opts.executionId,
+      executionId: params.opts.executionId,
     })
   }
   const contextId =
-    opts?.contextId ??
-    (typeof (contextIdentifier as any)?.id === "string"
-      ? String((contextIdentifier as any).id)
+    params.opts?.contextId ??
+    (typeof (params.contextIdentifier as any)?.id === "string"
+      ? String((params.contextIdentifier as any).id)
       : undefined)
 
   const { runId, meta } = await resolveWorkflowRunId({
     env,
     db,
-    executionId: opts?.executionId,
+    executionId: params.opts?.executionId,
   })
 
   if (runId) {
@@ -464,7 +474,7 @@ export async function saveReactionItem(
         eventKind: "context.item",
         eventAt: new Date().toISOString(),
         contextId,
-        executionId: opts?.executionId,
+        executionId: params.opts?.executionId,
         contextEventId: String(saved.id),
         payload: {
           ...saved,
@@ -473,31 +483,31 @@ export async function saveReactionItem(
       },
     ]
 
-    if (opts?.executionId && opts.reviewRequests?.length) {
+    if (params.opts?.executionId && params.opts.reviewRequests?.length) {
       const resumeHookUrl = getClientResumeHookUrl()
       const workflowUrl =
         meta && typeof meta.url === "string" && meta.url.trim()
           ? String(meta.url)
           : undefined
-      for (const rr of opts.reviewRequests) {
+      for (const rr of params.opts.reviewRequests) {
         const toolCallId = String(rr.toolCallId)
         events.push({
           workflowRunId: runId,
-          eventId: `context_review:${String(opts.executionId)}:${toolCallId}`,
+          eventId: `context_review:${String(params.opts.executionId)}:${toolCallId}`,
           eventKind: "context.review",
           eventAt: new Date().toISOString(),
           contextId,
-          executionId: String(opts.executionId),
+          executionId: String(params.opts.executionId),
           toolCallId,
           payload: {
             status: "in_review",
             toolName: rr.toolName ?? "",
             hookToken: toolApprovalHookToken({
-              executionId: String(opts.executionId),
+              executionId: String(params.opts.executionId),
               toolCallId,
             }),
             webhookToken: toolApprovalWebhookToken({
-              executionId: String(opts.executionId),
+              executionId: String(params.opts.executionId),
               toolCallId,
             }),
             resumeHookUrl,
@@ -513,21 +523,21 @@ export async function saveReactionItem(
 }
 
 export async function updateItem(
-  env: ContextEnvironment,
-  eventId: string,
-  event: ContextItem,
-  opts?: { executionId?: string; contextId?: string },
+  params: RuntimeParams & {
+    eventId: string
+    event: ContextItem
+    opts?: { executionId?: string; contextId?: string }
+  },
 ): Promise<ContextItem> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(env)
+  const { runtime, env } = await getRuntimeAndEnv(params)
   const { store, db } = runtime
-  const saved = await store.updateItem(eventId, event)
+  const saved = await store.updateItem(params.eventId, params.event)
 
   const { runId } = await resolveWorkflowRunId({
     env,
     db,
-    executionId: opts?.executionId,
+    executionId: params.opts?.executionId,
   })
   if (runId) {
     await maybeWriteTraceEvents(env, [
@@ -536,8 +546,8 @@ export async function updateItem(
         eventId: `context_item:${String(saved.id)}`,
         eventKind: "context.item",
         eventAt: new Date().toISOString(),
-        contextId: opts?.contextId,
-        executionId: opts?.executionId,
+        contextId: params.opts?.contextId,
+        executionId: params.opts?.executionId,
         contextEventId: String(saved.id),
         payload: {
           ...saved,
@@ -550,25 +560,29 @@ export async function updateItem(
 }
 
 export async function createExecution(
-  env: ContextEnvironment,
-  contextIdentifier: ContextIdentifier,
-  triggerEventId: string,
-  reactionEventId: string,
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier
+    triggerEventId: string
+    reactionEventId: string
+  },
 ): Promise<{ id: string }> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const { store } = await getContextRuntime(env)
-  return await store.createExecution(contextIdentifier, triggerEventId, reactionEventId)
+  const { runtime } = await getRuntimeAndEnv(params)
+  return await runtime.store.createExecution(
+    params.contextIdentifier,
+    params.triggerEventId,
+    params.reactionEventId,
+  )
 }
 
 export async function createReactionItem(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   contextIdentifier: ContextIdentifier
   triggerEventId: string
 }): Promise<{ reactionEventId: string; executionId: string }> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const { store } = await getContextRuntime(params.env)
+  const { runtime } = await getRuntimeAndEnv(params)
+  const { store } = runtime
 
   // Generate a new reaction event id inside the step boundary.
   const uuid = (globalThis.crypto as any)?.randomUUID?.()
@@ -587,37 +601,37 @@ export async function createReactionItem(params: {
 }
 
 export async function completeExecution(
-  env: ContextEnvironment,
-  contextIdentifier: ContextIdentifier,
-  executionId: string,
-  status: "completed" | "failed",
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier
+    executionId: string
+    status: "completed" | "failed"
+  },
 ): Promise<void> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(env)
+  const { runtime, env } = await getRuntimeAndEnv(params)
   const { store, db } = runtime
-  await store.completeExecution(contextIdentifier, executionId, status)
+  await store.completeExecution(params.contextIdentifier, params.executionId, params.status)
   const contextId =
-    typeof (contextIdentifier as any)?.id === "string"
-      ? String((contextIdentifier as any).id)
+    typeof (params.contextIdentifier as any)?.id === "string"
+      ? String((params.contextIdentifier as any).id)
       : undefined
 
   const { runId } = await resolveWorkflowRunId({
     env,
     db,
-    executionId,
+    executionId: params.executionId,
   })
   if (runId) {
     await maybeWriteTraceEvents(env, [
       {
         workflowRunId: runId,
-        eventId: `context_execution:${String(executionId)}:${status}`,
+        eventId: `context_execution:${String(params.executionId)}:${params.status}`,
         eventKind: "context.execution",
         eventAt: new Date().toISOString(),
         contextId,
-        executionId: String(executionId),
+        executionId: String(params.executionId),
         payload: {
-          status,
+          status: params.status,
         },
       },
     ])
@@ -625,14 +639,13 @@ export async function completeExecution(
 }
 
 export async function updateExecutionWorkflowRun(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   executionId: string
   workflowRunId: string
 }): Promise<void> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(params.env)
-  const db: any = (runtime as any)?.db
+  const { runtime } = await getRuntimeAndEnv(params)
+  const db: any = runtime.db
   if (db) {
     await db.transact([
       db.tx.event_executions[params.executionId].update({
@@ -644,13 +657,13 @@ export async function updateExecutionWorkflowRun(params: {
 }
 
 export async function createContextStep(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   executionId: string
   iteration: number
 }): Promise<{ stepId: string }> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const { store } = await getContextRuntime(params.env)
+  const { runtime } = await getRuntimeAndEnv(params)
+  const { store } = runtime
   const res = await store.createStep({
     executionId: params.executionId,
     iteration: params.iteration,
@@ -659,7 +672,7 @@ export async function createContextStep(params: {
 }
 
 export async function updateContextStep(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   stepId: string
   executionId?: string
   contextId?: string
@@ -678,8 +691,7 @@ export async function updateContextStep(params: {
   }
 }): Promise<void> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(params.env)
+  const { runtime, env } = await getRuntimeAndEnv(params)
   const { store, db } = runtime
   await store.updateStep(params.stepId, {
     ...(params.patch as any),
@@ -687,12 +699,12 @@ export async function updateContextStep(params: {
   })
 
   const { runId } = await resolveWorkflowRunId({
-    env: params.env,
+    env,
     db,
     executionId: params.executionId,
   })
   if (runId) {
-    await maybeWriteTraceEvents(params.env, [
+    await maybeWriteTraceEvents(env, [
       {
         workflowRunId: runId,
         eventId: `context_step:${String(params.stepId)}`,
@@ -720,18 +732,18 @@ export async function updateContextStep(params: {
 }
 
 export async function linkItemToExecutionStep(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   itemId: string
   executionId: string
 }): Promise<void> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const { store } = await getContextRuntime(params.env)
+  const { runtime } = await getRuntimeAndEnv(params)
+  const { store } = runtime
   await store.linkItemToExecution({ itemId: params.itemId, executionId: params.executionId })
 }
 
 export async function saveContextPartsStep(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   stepId: string
   executionId?: string
   contextId?: string
@@ -739,13 +751,12 @@ export async function saveContextPartsStep(params: {
   parts: any[]
 }): Promise<void> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(params.env)
+  const { runtime, env } = await getRuntimeAndEnv(params)
   const { store, db } = runtime
   await store.saveStepParts({ stepId: params.stepId, parts: params.parts })
 
   const { runId } = await resolveWorkflowRunId({
-    env: params.env,
+    env,
     db,
     executionId: params.executionId,
   })
@@ -766,7 +777,7 @@ export async function saveContextPartsStep(params: {
         payload: part,
       })
     }
-    await maybeWriteTraceEvents(params.env, events)
+    await maybeWriteTraceEvents(env, events)
   }
 }
 

@@ -1,4 +1,5 @@
 import type { ContextEnvironment } from "../context.config.js"
+import type { ContextRuntime } from "../context.runtime.js"
 import type { ContextModelInit } from "../context.engine.js"
 import type { ContextIdentifier, StoredContext, ContextItem } from "../context.store.js"
 import { executeAiSdkReaction } from "./ai-sdk.step.js"
@@ -13,6 +14,7 @@ export type CreateAiSdkReactorOptions<
   Config = unknown,
 > = {
   resolveConfig?: (params: {
+    runtime: ContextRuntime<Env>
     env: Env
     context: StoredContext<Context>
     contextIdentifier: ContextIdentifier
@@ -25,6 +27,7 @@ export type CreateAiSdkReactorOptions<
     iteration: number
   }) => Promise<Config> | Config
   selectModel?: (params: {
+    runtime: ContextRuntime<Env>
     env: Env
     context: StoredContext<Context>
     triggerEvent: ContextItem
@@ -32,6 +35,7 @@ export type CreateAiSdkReactorOptions<
     config: Config
   }) => Promise<ContextModelInit> | ContextModelInit
   selectMaxModelSteps?: (params: {
+    runtime: ContextRuntime<Env>
     env: Env
     context: StoredContext<Context>
     triggerEvent: ContextItem
@@ -51,6 +55,7 @@ export function createAiSdkReactor<
     let config: Config | undefined
     if (options?.resolveConfig) {
       config = await options.resolveConfig({
+        runtime: params.runtime,
         env: params.env,
         context: params.context,
         contextIdentifier: params.contextIdentifier,
@@ -67,6 +72,7 @@ export function createAiSdkReactor<
     const model =
       options?.selectModel && config !== undefined
         ? await options.selectModel({
+            runtime: params.runtime,
             env: params.env,
             context: params.context,
             triggerEvent: params.triggerEvent,
@@ -78,6 +84,7 @@ export function createAiSdkReactor<
     const maxSteps =
       options?.selectMaxModelSteps && config !== undefined
         ? await options.selectMaxModelSteps({
+            runtime: params.runtime,
             env: params.env,
             context: params.context,
             triggerEvent: params.triggerEvent,
@@ -87,6 +94,7 @@ export function createAiSdkReactor<
         : params.maxModelSteps
 
     const result = await executeAiSdkReaction({
+      runtime: params.runtime,
       env: params.env,
       contextIdentifier: params.contextIdentifier,
       model,

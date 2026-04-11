@@ -1,20 +1,26 @@
 # Skill: ekairos-domain
 
 ## Goal
-Provide consistent guidance for working with @ekairos/domain in agents and codegen.
+Provide consistent guidance for working with `@ekairos/domain` in agents and codegen.
 
 ## Minimum requirement
-- Runtime is configured via `configureRuntime(...)` in app bootstrap (`src/runtime.ts` by convention).
-- Always scope the database by calling `runtime(domain, env)`.
+- Prefer explicit runtimes via `new AppRuntime(env)` over hidden globals.
+- Read through the composed InstantDB schema when no write boundary is needed.
+- Put writes and invariants behind domain actions.
+- For new domain actions, use:
+  `async execute({ runtime, input }) { "use step"; const domain = await runtime.use(exportedDomain); ... }`
 
 ## Workflow
-1) Identify the domain package and open its `DOMAIN.md`.
-2) Start from the domain name and follow the documented entrypoints (Navigation/Responsibilities).
-3) Import the domain schema (e.g. `threadDomain`) and call `runtime(domain, env)`.
-4) Use the scoped `db` when calling exported functions/workflows from the domain package.
-5) Use `meta()` or `domain.contextString()` for AI/system prompts if needed.
+1) Open the domain package `DOMAIN.md` when available.
+2) Identify the root domain and any included subdomains.
+3) For reads, prefer the typed InstantDB client bound to the composed root domain.
+4) For writes, call `runtime.use(domain).actions.<name>(input)` or `executeRuntimeAction(...)`.
+5) Treat domain actions as step-safe building blocks. Reconstruct a local scoped handle with `await runtime.use(exportedDomain)` inside `execute(...)`. Durable orchestration belongs in separate workflow functions that call those actions.
+6) Use `domain.context()` or `domain.contextString()` when AI/system context is needed.
 
 ## Notes
-- Domain runtime does **not** expose actions. Public API lives in package exports.
-- `domain.toInstantSchema()` returns the flattened InstantDB schema for the composed domain.
-- If you need strict typing for helpers, use `CompatibleSchemaForDomain` in function signatures.
+- A domain is a bounded-context contract, not a transport API.
+- `runtime.use(subdomain)` narrows to one domain-scoped handle while keeping the same real DB and env.
+- Actions should reconstruct a local scoped handle with `runtime.use(exportedDomain)` and then call `domain.actions.*`.
+- `"use workflow"` is not the action contract. For now, action bodies should be `"use step"` and workflows should orchestrate above them.
+- `domain.toInstantSchema()` returns the flattened InstantDB schema for the composed domain graph.

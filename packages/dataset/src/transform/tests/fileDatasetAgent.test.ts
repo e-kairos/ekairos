@@ -5,6 +5,7 @@ import { config as dotenvConfig } from "dotenv"
 import * as path from "path"
 import { promises as fs } from "fs"
 import { init } from "@instantdb/admin"
+import { createVercelSandbox, getVercelSandboxCredsFromEnv } from "@ekairos/sandbox"
 import { datasetDomain } from "../../schema"
 import { FileParseStory } from "../../file/file-dataset.agent"
 import { TransformDatasetAgent } from "../transform-dataset.agent"
@@ -328,10 +329,9 @@ Updated Schema: ${JSON.stringify(input.updatedSchema, null, 2)}`
 }
 
 export async function createSandbox(): Promise<any> {
-    const { Sandbox } = await import("@vercel/sandbox")
-    const sandbox = await Sandbox.create({
+    return await createVercelSandbox({
+        creds: getVercelSandboxCredsFromEnv(),
         runtime: 'python3.13',
-        timeout: 10 * 60 * 1000,
-    } as any)
-    return sandbox
+        timeoutMs: 10 * 60 * 1000,
+    })
 }

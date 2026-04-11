@@ -8,6 +8,7 @@ import { id } from "@instantdb/admin"
 import { generateSourcePreview, TransformSourcePreviewContext } from "./filepreview"
 import { datasetReadOutputJsonlStep, datasetUpdateSchemaStep } from "../dataset/steps"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps"
+import { createEventsReactRuntime } from "../eventsReactRuntime"
 
 export type TransformDatasetContext = {
     datasetId: string
@@ -243,8 +244,9 @@ export function createTransformDatasetStory<Env extends { orgId: string }>(
             },
         } as any
 
+        const runtime = createEventsReactRuntime(env)
         await story.react(triggerEvent, {
-                env,
+                runtime,
                 context: { key: `dataset:${datasetId}` },
             options: { silent: true, preventClose: true, sendFinish: false, maxIterations: 20, maxModelSteps: 5 },
         })

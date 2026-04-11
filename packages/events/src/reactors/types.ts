@@ -1,6 +1,7 @@
 import type { ModelMessage, UIMessageChunk } from "ai"
 
 import type { ContextEnvironment } from "../context.config.js"
+import type { ContextRuntime } from "../context.runtime.js"
 import type { ContextModelInit } from "../context.engine.js"
 import type { ContextIdentifier, StoredContext, ContextItem } from "../context.store.js"
 import type { ContextSkillPackage } from "../context.skill.js"
@@ -36,6 +37,7 @@ export type ContextReactorParams<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
 > = {
+  runtime: ContextRuntime<Env>
   env: Env
   context: StoredContext<Context>
   contextIdentifier: ContextIdentifier

@@ -2,19 +2,19 @@
 
 Convenience package that re-exports the main Ekairos surfaces.
 
-## Main entrypoints
+## Entry points
 
-- `ekairos` -> `@ekairos/events` + `@ekairos/domain`
-- `ekairos/context` -> context runtime/builder surface
-- `ekairos/dataset`
+- `ekairos`
+- `ekairos/context`
 - `ekairos/domain`
+- `ekairos/dataset`
 
 ## Example
 
 ```ts
 import { createContext } from "ekairos/context";
 
-const demoContext = createContext("demo")
+const demo = createContext("demo")
   .context((stored) => stored.content ?? {})
   .narrative(() => "Demo context")
   .actions(() => ({}))

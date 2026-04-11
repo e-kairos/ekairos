@@ -3,28 +3,79 @@ import { config as dotenvConfig } from "dotenv"
 import * as path from "path"
 import { promises as fs } from "fs"
 import { init } from "@instantdb/admin"
+import { SandboxService } from "@ekairos/sandbox"
+import { configureRuntime } from "@ekairos/domain/runtime"
+import { domain } from "@ekairos/domain"
+import { eventsDomain } from "@ekairos/events"
+import { sandboxDomain } from "@ekairos/sandbox"
 import { datasetDomain } from "../../schema"
-import { FileParseStory } from "../../file/file-dataset.agent"
-import { TransformDatasetAgent } from "../transform-dataset.agent"
-import { describeInstant, hasInstantAdmin } from "../../tests/_env"
+import { createFileParseStory } from "../../file/file-dataset.agent"
+import { createTransformDatasetStory } from "../transform-dataset.agent"
+import { DatasetService } from "../../service"
+import { describeInstant, hasInstantAdmin, setupInstantTestEnv } from "../../tests/_env"
+import { attachMockInstantStreams } from "../../tests/_streams"
 
 dotenvConfig({ path: path.resolve(process.cwd(), ".env.local") })
+
+const appDomain = domain("dataset-transform-multi-group-rfq")
+    .includes(datasetDomain)
+    .includes(eventsDomain)
+    .includes(sandboxDomain)
+    .schema({
+        entities: {},
+        links: {},
+        rooms: {},
+    })
+
+await setupInstantTestEnv("dataset-transform-multi-group-rfq", appDomain.toInstantSchema(), {
+    preferExistingApp: false,
+})
+
+const registryVercelCwd = path.resolve(__dirname, "..", "..", "..", "registry")
 
 const adminDb = hasInstantAdmin()
     ? init({
         appId: process.env.NEXT_PUBLIC_INSTANT_APP_ID as string,
         adminToken: process.env.INSTANT_APP_ADMIN_TOKEN as string,
-        schema: datasetDomain.toInstantSchema(),
+        schema: appDomain.toInstantSchema(),
       })
     : null as any
 
+if (adminDb) {
+    attachMockInstantStreams(adminDb)
+}
+
+if (adminDb) {
+    configureRuntime({
+        runtime: async () => ({ db: adminDb } as any),
+    })
+}
+
 export async function createSandbox(): Promise<any> {
-    const { Sandbox } = await import("@vercel/sandbox")
-    const sandbox = await Sandbox.create({
-        runtime: 'python3.13',
-        timeout: 10 * 60 * 1000,
-    } as any)
-    return sandbox
+    const service = new SandboxService(adminDb as any)
+    const created = await service.createSandbox({
+        provider: "vercel",
+        runtime: "python3.13",
+        timeoutMs: 10 * 60 * 1000,
+        purpose: "dataset.transform.tests",
+        vercel: {
+            cwd: registryVercelCwd,
+            scope: "ekairos-dev",
+            environment: "development",
+        },
+        env: { orgId: "test-org" },
+        domain: appDomain,
+        dataset: { enabled: true },
+    })
+    if (!created.ok) {
+        throw new Error(created.error)
+    }
+    return {
+        sandboxId: created.data.sandboxId,
+        async stop() {
+            await service.stopSandbox(created.data.sandboxId)
+        },
+    }
 }
 
 function buildGroupTransformSchema() {
@@ -206,36 +257,78 @@ describeInstant("Multi Group RFQ Dataset", () => {
         const sandbox = await createSandbox()
 
         try {
-            const fileAgent = new FileParseStory({
-                fileId: uploadedFileId,
+            const fileParse = createFileParseStory(uploadedFileId, {
                 instructions: "Ingest the multi-group RFQ workbook and produce the raw dataset output without transformations",
+                sandboxId: sandbox.sandboxId,
             })
 
-            const sourceDataset = await fileAgent.getDataset()
+            const datasetService = new DatasetService(adminDb as any)
+            const seededSourceDataset = await datasetService.createDataset({
+                id: fileParse.datasetId,
+                status: "building",
+                organizationId: "test-org",
+                sandboxId: sandbox.sandboxId,
+            })
+            if (!seededSourceDataset.ok) {
+                throw new Error(seededSourceDataset.error)
+            }
+
+            const parsed = await fileParse.parse({ orgId: "test-org" })
+            const sourceDatasetResult = await datasetService.getDatasetById(parsed.datasetId)
+            if (!sourceDatasetResult.ok) {
+                throw new Error(sourceDatasetResult.error)
+            }
+            const sourceDataset = sourceDatasetResult.data
 
             expect(sourceDataset.id).toBeTruthy()
             expect(sourceDataset.schema).toBeTruthy()
             expect(sourceDataset.calculatedTotalRows).toBeGreaterThan(0)
 
-            const groupTransformAgent = new TransformDatasetAgent({
+            const groupTransform = createTransformDatasetStory({
                 sourceDatasetIds: sourceDataset.id,
                 outputSchema: buildGroupTransformSchema(),
-                sandbox,
+                sandboxId: sandbox.sandboxId,
             })
-
-            const groupsDataset = await groupTransformAgent.getDataset()
+            const seededGroupsDataset = await datasetService.createDataset({
+                id: groupTransform.datasetId,
+                status: "building",
+                organizationId: "test-org",
+                sandboxId: sandbox.sandboxId,
+            })
+            if (!seededGroupsDataset.ok) {
+                throw new Error(seededGroupsDataset.error)
+            }
+            const groupsTransformResult = await groupTransform.transform({ orgId: "test-org" })
+            const groupsDatasetResult = await datasetService.getDatasetById(groupsTransformResult.datasetId)
+            if (!groupsDatasetResult.ok) {
+                throw new Error(groupsDatasetResult.error)
+            }
+            const groupsDataset = groupsDatasetResult.data
 
             expect(groupsDataset.id).toBeTruthy()
             expect(groupsDataset.schema).toBeTruthy()
             expect(groupsDataset.schema?.schema?.properties?.groups).toBeTruthy()
 
-            const itemTransformAgent = new TransformDatasetAgent({
+            const itemTransform = createTransformDatasetStory({
                 sourceDatasetIds: [sourceDataset.id, groupsDataset.id],
                 outputSchema: buildItemTransformSchema(),
-                sandbox,
+                sandboxId: sandbox.sandboxId,
             })
-
-            const itemsDataset = await itemTransformAgent.getDataset()
+            const seededItemsDataset = await datasetService.createDataset({
+                id: itemTransform.datasetId,
+                status: "building",
+                organizationId: "test-org",
+                sandboxId: sandbox.sandboxId,
+            })
+            if (!seededItemsDataset.ok) {
+                throw new Error(seededItemsDataset.error)
+            }
+            const itemsTransformResult = await itemTransform.transform({ orgId: "test-org" })
+            const itemsDatasetResult = await datasetService.getDatasetById(itemsTransformResult.datasetId)
+            if (!itemsDatasetResult.ok) {
+                throw new Error(itemsDatasetResult.error)
+            }
+            const itemsDataset = itemsDatasetResult.data
 
             expect(itemsDataset.id).toBeTruthy()
             expect(itemsDataset.schema).toBeTruthy()

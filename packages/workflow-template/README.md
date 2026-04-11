@@ -1,22 +1,25 @@
-# Workflow Template (AI Session)
+# workflow-template
 
-This package is the per-session template used by the agent to generate durable workflows.
+Template package used to author a single durable workflow session.
 
-## Key Rules
-- The AI writes **TypeScript** directly in `src/session.workflow.ts`.
-- The workflow function must include the `"use workflow"` directive.
-- Any I/O must live inside `"use step"` functions.
-- Avoid static imports inside modules that contain `use workflow` / `use step`.
+## Rules
 
-## Compile
-```
+- write TypeScript in `src/session.workflow.ts`
+- top-level workflow must use `"use workflow"`
+- I/O belongs in `"use step"`
+- avoid static imports inside workflow/step modules when they pull Node-only code
+
+## Commands
+
+```bash
 pnpm compile
-```
-
-## Run (local world)
-```
 pnpm run:local
+pnpm test
 ```
 
-Input is read from `WORKFLOW_INPUT` (JSON) or env vars:
-`ORG_ID`, `EKAIROS_DOMAIN_BASE_URL`, `EKAIROS_DOMAIN_OIDC_TOKEN`, `QUERY`.
+Input is read from `WORKFLOW_INPUT` or env vars such as:
+
+- `ORG_ID`
+- `EKAIROS_DOMAIN_BASE_URL`
+- `EKAIROS_DOMAIN_OIDC_TOKEN`
+- `QUERY`

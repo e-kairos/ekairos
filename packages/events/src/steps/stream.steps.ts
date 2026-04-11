@@ -1,6 +1,8 @@
 import type { UIMessageChunk } from "ai"
 
 import type { ContextEnvironment } from "../context.config.js"
+import type { ContextRuntime } from "../context.runtime.js"
+import { getContextRuntimeServices } from "../context.runtime.js"
 import {
   contextStreamByteLength,
   parseContextStepStreamChunk,
@@ -24,7 +26,9 @@ export async function writeContextEvents(params: {
       } as any)
     }
   } finally {
-    writer.releaseLock()
+    if (typeof (writer as any)?.releaseLock === "function") {
+      writer.releaseLock()
+    }
   }
 }
 
@@ -44,7 +48,9 @@ export async function closeContextStream(params: {
     try {
       await writer.write({ type: "finish" } as any)
     } finally {
-      writer.releaseLock()
+      if (typeof (writer as any)?.releaseLock === "function") {
+        writer.releaseLock()
+      }
     }
   }
 
@@ -91,14 +97,13 @@ export type PersistedContextStepStreamSession = {
 }
 
 export async function createPersistedContextStepStream(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   executionId: string
   stepId: string
   clientId?: string
 }): Promise<PersistedContextStepStreamSession> {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(params.env)
+  const runtime = await getContextRuntimeServices(params.runtime)
   const db: any = (runtime as any)?.db
   if (!db?.streams?.createWriteStream) {
     throw new Error(
@@ -147,14 +152,13 @@ export async function createPersistedContextStepStream(params: {
 }
 
 async function finalizePersistedContextStepStream(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   session: PersistedContextStepStreamSession
   mode: "close" | "abort"
   abortReason?: string | null
 }) {
   "use step"
-  const { getContextRuntime } = await import("../runtime.js")
-  const runtime = await getContextRuntime(params.env)
+  const runtime = await getContextRuntimeServices(params.runtime)
   const db: any = (runtime as any)?.db
 
   const writer = params.session.stream.getWriter()
@@ -165,7 +169,9 @@ async function finalizePersistedContextStepStream(params: {
       await writer.close()
     }
   } finally {
-    writer.releaseLock()
+    if (typeof (writer as any)?.releaseLock === "function") {
+      writer.releaseLock()
+    }
   }
 
   const now = new Date()
@@ -195,23 +201,23 @@ async function finalizePersistedContextStepStream(params: {
 }
 
 export async function closePersistedContextStepStream(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   session: PersistedContextStepStreamSession
 }) {
   return await finalizePersistedContextStepStream({
-    env: params.env,
+    runtime: params.runtime,
     session: params.session,
     mode: "close",
   })
 }
 
 export async function abortPersistedContextStepStream(params: {
-  env: ContextEnvironment
+  runtime: ContextRuntime<ContextEnvironment>
   session: PersistedContextStepStreamSession
   reason?: string | null
 }) {
   return await finalizePersistedContextStepStream({
-    env: params.env,
+    runtime: params.runtime,
     session: params.session,
     mode: "abort",
     abortReason: params.reason,

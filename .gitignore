@@ -71,6 +71,10 @@ packages/structure/workflow-smoke/src/app/.well-known/
 # Context playwright local artifacts
 packages/events/tests/playwright/server/*.log
 packages/events/tests/playwright/server/test-results/
+packages/events/.workflow-data/
+packages/events/.workflow-vitest/
+packages/domain/.workflow-data/
+packages/domain/.workflow-vitest/
 
 # local codex reactor audit artifacts
 packages/reactors/openai-reactor/.tmp-audit-*.json

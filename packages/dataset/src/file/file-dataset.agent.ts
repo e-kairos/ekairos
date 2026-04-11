@@ -10,6 +10,7 @@ import { id } from "@instantdb/admin"
 import { getDatasetWorkstation } from "../datasetFiles"
 import { readInstantFileStep } from "./steps"
 import { datasetGetByIdStep } from "../dataset/steps"
+import { createEventsReactRuntime } from "../eventsReactRuntime"
 
 export type FileParseStoryContext = {
     datasetId: string
@@ -296,8 +297,9 @@ export function createFileParseStory<Env extends { orgId: string }>(
             },
         } as any
 
+        const runtime = createEventsReactRuntime((env ?? ({} as any)) as Env)
         await story.react(triggerEvent, {
-                env: (env ?? ({} as any)) as Env,
+                runtime,
                 context: { key: `dataset:${datasetId}` },
             options: { silent: true, preventClose: true, sendFinish: false, maxIterations: 20, maxModelSteps: 5 },
         })

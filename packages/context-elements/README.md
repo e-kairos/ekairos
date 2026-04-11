@@ -1,11 +1,11 @@
 # context-elements
 
-UI catalog and examples built around the context-first `@ekairos/events` surface.
+Internal UI playground for `@ekairos/events`.
 
-## Focus
+Use this package to iterate on:
 
-- `useContext`-based reading
-- persisted `event_*` entities
-- context-oriented agent UI primitives
+- `useContext`-driven reads
+- context/event UI primitives
+- registry-facing examples
 
-This package is internal and used as a component playground for the registry experience.
+This package is not a public runtime surface. It is a DX and component sandbox.

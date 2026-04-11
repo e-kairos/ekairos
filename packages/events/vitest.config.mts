@@ -7,7 +7,7 @@ export default defineConfig({
     hookTimeout: 6 * 60 * 1000,
     reporters: ["default"],
     include: ["src/tests/**/*.test.ts"],
-    exclude: ["tests/playwright/**"],
+    exclude: ["tests/playwright/**", "src/tests/**/*.workflow.integration.test.ts"],
   },
 })
 

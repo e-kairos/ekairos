@@ -1,6 +1,7 @@
 import type { ModelMessage, UIMessage, UIMessageChunk } from "ai"
 
 import type { ContextEnvironment } from "../context.config.js"
+import { getContextRuntimeServices } from "../context.runtime.js"
 import type { ContextModelInit } from "../context.engine.js"
 import type { ContextItem, ContextIdentifier } from "../context.store.js"
 import { OUTPUT_ITEM_TYPE } from "../context.events.js"
@@ -98,6 +99,7 @@ function safeErrorJson(error: unknown) {
  * - emit UI chunks and persist step stream chunks
  */
 export async function executeAiSdkReaction(params: {
+  runtime: import("../context.runtime.js").ContextRuntime<ContextEnvironment>
   env: ContextEnvironment
   contextIdentifier: ContextIdentifier
   model: ContextModelInit
@@ -132,8 +134,7 @@ export async function executeAiSdkReaction(params: {
 }> {
   "use step"
 
-  const { getContextRuntime } = await import("../runtime.js")
-  const { store } = await getContextRuntime(params.env)
+  const { store } = await getContextRuntimeServices(params.runtime)
 
   let events: ContextItem[]
   try {
@@ -295,7 +296,10 @@ export async function executeAiSdkReaction(params: {
       }
     }
   } finally {
-    contextStepStreamWriter?.releaseLock()
+    const streamWriter: any = contextStepStreamWriter
+    if (typeof streamWriter?.releaseLock === "function") {
+      streamWriter.releaseLock()
+    }
   }
 
   const assistantEvent = await finishPromise

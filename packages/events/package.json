@@ -108,6 +108,7 @@
     "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run -c vitest.config.mts",
+    "test:workflow": "vitest run -c vitest.workflow.config.mts",
     "pretest:ai-sdk-reactor": "pnpm --filter @ekairos/domain build",
     "test:ai-sdk-reactor": "vitest run -c vitest.config.mts src/tests/context.ai-sdk-reactor.instant.test.ts",
     "test:ai-sdk-reactor:real": "vitest run -c vitest.config.mts src/tests/context.ai-sdk-reactor.real.instant.test.ts",
@@ -133,6 +134,8 @@
   "devDependencies": {
     "@ekairos/testing": "workspace:*",
     "@ekairos/tsconfig": "workspace:*",
+    "@workflow/serde": "^4.1.0",
+    "@workflow/vitest": "^4.0.1",
     "@types/node": "^24.5.0",
     "@types/react": "^19.2.2",
     "dotenv": "^17.2.3",

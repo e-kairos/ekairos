@@ -6,6 +6,7 @@
   },
   "include": [
     "src",
-    "src/__type_tests__/domain-builder.typecheck.ts"
+    "src/__type_tests__/domain-builder.typecheck.ts",
+    "src/__type_tests__/runtime.use.typecheck.ts"
   ]
 }

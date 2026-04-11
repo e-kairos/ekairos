@@ -1,20 +1,20 @@
 # Ekairos Registry
 
-Registry de componentes compatible con shadcn CLI para distribuir componentes de UI de Ekairos.
+shadcn-compatible component registry for Ekairos UI packages.
 
-## Uso
-
-### 1. Iniciar el Registry
+## Start
 
 ```bash
 pnpm --filter registry dev
 ```
 
-Servidor disponible en `http://localhost:3001`
+Default URL:
 
-### 2. Importar componentes en proyectos
+```txt
+http://localhost:3001
+```
 
-En `packages/web/components.json` está configurado:
+## Consume from another app
 
 ```json
 {
@@ -24,29 +24,14 @@ En `packages/web/components.json` está configurado:
 }
 ```
 
-Para importar un componente:
+Example:
 
 ```bash
-cd packages/web
 pnpm dlx shadcn@latest add @ekairos/agent
 ```
 
-### 3. Flujo de desarrollo
-
-1. Editar componentes en `packages/registry/components/ekairos/`
-2. El servidor recarga automáticamente (hot reload)
-3. Re-importar en web: `pnpm dlx shadcn@latest add @ekairos/{component-name}`
-4. Los cambios se copian a `packages/web/src/components/ekairos/`
-
-## Estructura
-
-- `components/ekairos/`: Componentes principales
-- `components/ai-elements/`: Componentes base de AI SDK
-- `app/[component]/route.ts`: API route que expone componentes
-
-## Ver componentes disponibles
+## E2E
 
 ```bash
-curl http://localhost:3001/registry
+pnpm --filter registry test:e2e
 ```
-

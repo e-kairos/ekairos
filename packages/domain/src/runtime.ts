@@ -2,14 +2,19 @@ import {
   configureDomainDocLoader,
   getDomainActionBinding,
   getDomainActions,
+  materializeDomain,
   type DomainActionDefinition,
   type DomainActionExecuteParams,
   type DomainDocLoader,
 } from "./index.js";
+export {
+  EkairosRuntime,
+  type CompatibleRuntimeForDomain,
+  type RuntimeLike,
+  type ExplicitRuntimeLike,
+} from "./runtime-handle.js";
 import type { InstantAdminDatabase } from "@instantdb/admin";
 import type { InstantSchemaDef } from "@instantdb/core";
-import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
 
 export type RuntimeDomainSource = {
   toInstantSchema?: () => any;
@@ -180,9 +185,33 @@ function getRuntimeResolver(): StoredRuntimeResolver | null {
   return runtimeResolver ?? getGlobalRuntimeResolver();
 }
 
+function getNodeBuiltinModules():
+  | {
+      fs: typeof import("node:fs");
+      path: typeof import("node:path");
+    }
+  | null {
+  if (
+    typeof process === "undefined" ||
+    !process.versions?.node ||
+    typeof process.getBuiltinModule !== "function"
+  ) {
+    return null;
+  }
+
+  const fs = process.getBuiltinModule("node:fs") as typeof import("node:fs") | undefined;
+  const path = process.getBuiltinModule("node:path") as typeof import("node:path") | undefined;
+  if (!fs || !path) return null;
+  return { fs, path };
+}
+
 function ensureDomainDocLoader() {
   if (docLoaderConfigured) return;
-  if (typeof process === "undefined" || !process.versions?.node) return;
+  const modules = getNodeBuiltinModules();
+  if (!modules) return;
+  const { fs, path } = modules;
+  const { existsSync, readFileSync } = fs;
+  const { isAbsolute, join, relative, resolve } = path;
   const cache = new Map<string, { doc: string; docPath?: string } | null>();
 
   const readDoc = (absPath: string) => {
@@ -308,6 +337,48 @@ function resolveDb(resolved: unknown): unknown | null {
     return resolved.db;
   }
   return resolved;
+}
+
+function createActionRuntimeHandle<
+  Env extends Record<string, unknown>,
+  Runtime,
+>(params: {
+  runtime: Runtime
+  env: Env
+  rootDomain: RuntimeDomainSource | null
+}): Runtime & {
+  env: Env
+  use?: (subdomain: any, options?: RuntimeResolveOptions) => Promise<any>
+} {
+  const candidate = params.runtime as any
+  if (
+    candidate &&
+    typeof candidate === "object" &&
+    typeof candidate.use === "function" &&
+    "env" in candidate
+  ) {
+    return candidate
+  }
+
+  const handle: any =
+    candidate && typeof candidate === "object"
+      ? { ...candidate, env: params.env }
+      : { env: params.env }
+
+  if (typeof handle.use !== "function" && params.rootDomain) {
+    handle.use = async (subdomain: any) =>
+      materializeDomain({
+        rootDomain: params.rootDomain as any,
+        subdomain,
+        db: handle.db,
+        bindings: {
+          env: params.env,
+          runtime: handle,
+        },
+      })
+  }
+
+  return handle
 }
 
 function normalizeAction(
@@ -480,7 +551,8 @@ type ExecuteRuntimeActionParams<
   Runtime,
 > = {
   action: RuntimeDomainAction<Env, Input, Output, Runtime> | string;
-  env: Env;
+  env?: Env;
+  runtime?: Runtime;
   input: Input;
   options?: RuntimeResolveOptions;
   _stack?: string[];
@@ -515,30 +587,44 @@ export async function executeRuntimeAction<
   }
 
   const domain = action.domain ?? runtimeDomainConfig?.domain ?? null;
-  if (!domain) {
+  if (!params.runtime && !domain) {
     throw new Error(`runtime_action_domain_required:${actionName}`);
   }
 
-  const runtime = (await resolveRuntime(domain as any, params.env, params.options)) as unknown as Runtime;
-  const call = async <NestedInput = unknown, NestedOutput = unknown>(
-    nestedAction: DomainActionDefinition<Env, NestedInput, NestedOutput, Runtime>,
-    nestedInput: NestedInput,
-  ) => {
-    return (await executeRuntimeAction({
-      action: nestedAction as RuntimeDomainAction<Env, NestedInput, NestedOutput, Runtime>,
-      env: params.env,
-      input: nestedInput,
-      options: params.options,
-      _stack: [...stack, actionName],
-    })) as NestedOutput;
-  };
+  const env =
+    params.runtime && typeof params.runtime === "object" && params.runtime !== null && "env" in (params.runtime as any)
+      ? ((params.runtime as any).env as Env)
+      : params.env;
 
-  const output = await action.execute({
-    env: params.env,
+  if (!env) {
+    throw new Error(`runtime_action_env_required:${actionName}`);
+  }
+
+  const resolvedRuntime = params.runtime
+    ? params.runtime
+    : ((await resolveRuntime(domain as any, env, params.options)) as unknown as Runtime);
+  const runtime = createActionRuntimeHandle({
+    runtime: resolvedRuntime,
+    env,
+    rootDomain: (domain as RuntimeDomainSource | null) ?? null,
+  }) as Runtime;
+
+  const executeParams: DomainActionExecuteParams<
+    Env,
+    Input,
+    Runtime
+  > = {
+    env,
     input: params.input,
     runtime,
-    call,
-  } as DomainActionExecuteParams<Env, Input, Runtime>);
+  };
+
+  const execute = action.execute;
+  if (typeof execute !== "function") {
+    throw new Error(`runtime_action_not_executable:${actionName}`);
+  }
+
+  const output = await execute(executeParams);
   return output as Output;
 }
 

@@ -2,114 +2,87 @@
 
 Context-first durable execution runtime for Ekairos.
 
-## Surface
+## What this package does
 
-- `createContext`, `context`, `ContextEngine`
-- `createAiSdkReactor`, `createScriptedReactor`
-- `useContext`
+- creates durable contexts with `createContext(...)`
+- persists executions, steps, parts, and items
+- runs direct or durable `react(...)` loops
+- adapts model/tool output into canonical `event_parts`
+
+## Main APIs
+
+- `createContext`
+- `ContextEngine`
+- `createAiSdkReactor`
+- `createScriptedReactor`
+- `runContextReactionDirect`
 - `eventsDomain`
-- `getContextRuntime`, `getContextEnv`, `registerContextEnv`
 
 ## Runtime model
+
+Canonical entities:
 
 - `event_contexts`
 - `event_items`
 - `event_executions`
 - `event_steps`
 - `event_parts`
-- `event_trace_events`
-- `event_trace_runs`
-- `event_trace_spans`
+- `event_trace_*`
 
-The aggregate is `context`. Executions, steps, parts, and items are scoped to a context.
-
-## Canonical Parts
-
-`event_parts` is the canonical content model for produced output.
-
-Rules:
-
-- `event_parts.part` is the source of truth for replay and inspection.
-- `event_items.content.parts` on output items is maintained as a compatibility mirror and is deprecated as a replay source.
-- Provider/model-specific values must live under `metadata`, never as first-class semantic fields.
-
-Canonical part kinds:
-
-- `content`
-- `reasoning`
-- `source`
-- `tool-call`
-- `tool-result`
-
-Each canonical part stores a `content` array. The entries inside that array define the payload type:
-
-- `text`
-- `file`
-- `json`
-- `source-url`
-- `source-document`
-
-Example tool result:
-
-```ts
-{
-  type: "tool-result",
-  toolCallId: "call_123",
-  toolName: "inspectCanvasRegion",
-  state: "output-available",
-  content: [
-    {
-      type: "text",
-      text: "Zoomed crop of the requested region.",
-    },
-    {
-      type: "file",
-      mediaType: "image/png",
-      filename: "inspect-region.png",
-      data: "iVBORw0KGgoAAAANSUhEUgAA...",
-    },
-  ],
-  metadata: {
-    provider: {
-      itemId: "fc_041cb...",
-    },
-  },
-}
-```
-
-The AI SDK bridge projects canonical parts to:
-
-- assistant messages with text/file/reasoning/source/tool-call parts
-- tool messages with `tool-result` or `tool-error`
-
-That means multipart tool outputs are replayed from `event_parts` instead of relying on the deprecated output-item mirror.
-
-## Install
-
-```bash
-pnpm add @ekairos/events
-```
+`event_parts` is the source of truth for replay.
 
 ## Example
 
 ```ts
-import { createContext, createAiSdkReactor } from "@ekairos/events";
+import { createContext } from "@ekairos/events";
 
-type Env = { orgId: string };
-
-export const supportContext = createContext<Env>("support.agent")
+const supportContext = createContext<{ orgId: string }>("support.agent")
   .context((stored, env) => ({
-    orgId: env.orgId,
     ...stored.content,
+    orgId: env.orgId,
   }))
   .narrative(() => "You are a precise assistant.")
   .actions(() => ({}))
-  .reactor(createAiSdkReactor())
   .build();
 ```
 
-## Notes
+Run directly:
 
-- Public continuity is context-based.
-- Provider-specific IDs such as `providerContextId` may still exist when an upstream provider requires them.
-- Runtime wiring for stores lives under `@ekairos/events/runtime`.
+```ts
+await supportContext.react(triggerEvent, {
+  runtime,
+  context: { key: "support:org_123" },
+});
+```
+
+Run durably:
+
+```ts
+const shell = await supportContext.react(triggerEvent, {
+  runtime,
+  context: { key: "support:org_123" },
+  durable: true,
+});
+
+const final = await shell.run?.returnValue;
+```
+
+## Tool execution model
+
+Context tools now receive runtime-aware execution context.
+That lets a tool do this inside `"use step"`:
+
+```ts
+async function execute(input, ctx) {
+  "use step";
+  const domain = await ctx.runtime.use(myDomain);
+  return await domain.actions.doSomething(input);
+}
+```
+
+## Tests
+
+```bash
+pnpm --filter @ekairos/events test
+pnpm --filter @ekairos/events test:workflow
+```

@@ -2,7 +2,6 @@
 
 import { afterAll, beforeAll, expect } from "vitest"
 import { tool } from "ai"
-import { configureRuntime } from "@ekairos/domain/runtime"
 import { init } from "@instantdb/admin"
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
@@ -16,6 +15,7 @@ import {
 } from "../index.ts"
 import { describeInstant, itInstant, destroyContextTestApp, provisionContextTestApp } from "./_env.ts"
 import { createStageTimer, writeBenchmarkReport } from "./_benchmark.ts"
+import { EventsTestRuntime } from "./context.test-runtime.ts"
 
 type ContextTestEnv = {
   orgId: string
@@ -55,6 +55,7 @@ function createTriggerEvent(text: string): ContextItem {
 }
 
 let appId: string | null = null
+let adminToken: string | null = null
 let db: ReturnType<typeof init> | null = null
 
 function currentDb() {
@@ -72,15 +73,12 @@ describeInstant("context scripted reactor + Instant runtime", () => {
       schema,
     })
     appId = app.appId
+    adminToken = app.adminToken
     db = init({
       appId: app.appId,
       adminToken: app.adminToken,
     })
 
-    configureRuntime({
-      domain: { domain: eventsDomain },
-      runtime: async () => ({ db: currentDb() }),
-    })
   }, 5 * 60 * 1000)
 
   afterAll(async () => {
@@ -92,6 +90,12 @@ describeInstant("context scripted reactor + Instant runtime", () => {
   itInstant("executes directly in non-durable mode and completes persisted shell state", async () => {
     const timer = createStageTimer()
     const contextKey = `context-scripted-context:${Date.now()}`
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      orgId: "org_context_tests",
+      actorId: "user_context_tests",
+    })
 
     const scriptedContext = createContext<ContextTestEnv>("context.tests.scripted.lifecycle")
       .context((stored, env) => ({
@@ -140,10 +144,7 @@ describeInstant("context scripted reactor + Instant runtime", () => {
 
     const result = await timer.measure("reactMs", async () =>
       await scriptedContext.react(createTriggerEvent("set status to ready"), {
-        env: {
-          orgId: "org_context_tests",
-          actorId: "user_context_tests",
-        },
+        runtime,
         context: { key: contextKey },
         durable: false,
         __benchmark: timer,
@@ -227,6 +228,12 @@ describeInstant("context scripted reactor + Instant runtime", () => {
   itInstant("marks execution as failed when scripted steps are exhausted in non-durable mode", async () => {
     const timer = createStageTimer()
     const contextKey = `context-scripted-fail-context:${Date.now()}`
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      orgId: "org_context_tests",
+      actorId: "user_context_tests",
+    })
 
     const failingContext = createContext<ContextTestEnv>("context.tests.scripted.failure")
       .context((stored) => ({ ...(stored.content ?? {}) }))
@@ -273,10 +280,7 @@ describeInstant("context scripted reactor + Instant runtime", () => {
     await expect(
       timer.measure("reactMs", async () =>
         await failingContext.react(createTriggerEvent("force scripted exhaustion"), {
-          env: {
-            orgId: "org_context_tests",
-            actorId: "user_context_tests",
-          },
+          runtime,
           context: { key: contextKey },
           durable: false,
           __benchmark: timer,

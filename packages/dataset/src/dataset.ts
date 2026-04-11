@@ -278,6 +278,7 @@ async function createOrUpdateDatasetMetadata(
   const service = new DatasetService(db)
   const result = await service.createDataset({
     id: params.datasetId,
+    sandboxId: params.sandboxId,
     title: params.title ?? params.datasetId,
     instructions: params.instructions ?? "",
     sources: params.sources,

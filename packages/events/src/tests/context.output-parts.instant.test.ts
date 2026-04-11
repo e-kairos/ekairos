@@ -2,7 +2,6 @@
 
 import { afterAll, beforeAll, expect } from "vitest"
 import { tool, type ModelMessage } from "ai"
-import { configureRuntime } from "@ekairos/domain/runtime"
 import { init } from "@instantdb/admin"
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
@@ -12,10 +11,12 @@ import {
   createScriptedReactor,
   didToolExecute,
   eventsDomain,
+  type ContextToolExecuteContext,
   type ContextItem,
 } from "../index.ts"
 import { InstantStore } from "../stores/instant.store.ts"
 import { describeInstant, itInstant, destroyContextTestApp, provisionContextTestApp } from "./_env.ts"
+import { EventsTestRuntime } from "./context.test-runtime.ts"
 
 type ContextTestEnv = {
   actorId: string
@@ -53,7 +54,29 @@ function createTriggerEvent(text: string): ContextItem {
   }
 }
 
+async function inspectRuntimeExecute(
+  { note }: { note: string },
+  ctx: ContextToolExecuteContext<{ actorId: string }, ContextTestEnv>,
+) {
+  "use step"
+
+  const db = await ctx.runtime.db()
+  return {
+    type: "json" as const,
+    value: {
+      note,
+      envActorId: ctx.env.actorId,
+      runtimeActorId: String((ctx.runtime as any).env?.actorId ?? ""),
+      contextId: String(ctx.context.id),
+      stepId: String(ctx.stepId),
+      iteration: ctx.iteration,
+      hasDb: Boolean(db),
+    },
+  }
+}
+
 let appId: string | null = null
+let adminToken: string | null = null
 let db: ReturnType<typeof init> | null = null
 
 function currentDb() {
@@ -71,14 +94,10 @@ describeInstant("context output parts + Instant runtime", () => {
       schema,
     })
     appId = app.appId
+    adminToken = app.adminToken
     db = init({
       appId: app.appId,
       adminToken: app.adminToken,
-    })
-
-    configureRuntime({
-      domain: { domain: eventsDomain },
-      runtime: async () => ({ db: currentDb() }),
     })
   }, 5 * 60 * 1000)
 
@@ -90,6 +109,11 @@ describeInstant("context output parts + Instant runtime", () => {
 
   itInstant("persists multipart tool outputs on event_parts and replays from event_parts as the source of truth", async () => {
     const contextKey = `context-output-parts:${Date.now()}`
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      actorId: "user_context_tests",
+    })
 
     const previewContext = createContext<ContextTestEnv>("context.tests.output-parts")
       .context((stored, env) => ({
@@ -162,9 +186,7 @@ describeInstant("context output parts + Instant runtime", () => {
       .build()
 
     const result = await previewContext.react(createTriggerEvent("zoom here"), {
-      env: {
-        actorId: "user_context_tests",
-      },
+      runtime,
       context: { key: contextKey },
       durable: false,
       options: {
@@ -234,5 +256,114 @@ describeInstant("context output parts + Instant runtime", () => {
     const replayedOutputParts = Array.isArray(toolResultOutput?.value) ? toolResultOutput?.value : []
     expect(replayedOutputParts).toHaveLength(2)
     expect(readString(asRecord(replayedOutputParts[1]) ?? undefined, "type")).toBe("media")
+  }, 5 * 60 * 1000)
+
+  itInstant("passes runtime and env into context tool execution", async () => {
+    const contextKey = `context-tool-runtime:${Date.now()}`
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      actorId: "user_runtime_tests",
+    })
+
+    const runtimeAwareContext = createContext<ContextTestEnv>("context.tests.tool-runtime")
+      .context((stored, env) => ({
+        ...(stored.content ?? {}),
+        actorId: env.actorId,
+      }))
+      .narrative(() => "Create one runtime-aware tool call and complete it.")
+      .actions(() => ({
+        inspect_runtime: tool({
+          description: "Return runtime/env metadata as structured JSON.",
+          inputSchema: z.object({
+            note: z.string(),
+          }),
+          execute: inspectRuntimeExecute,
+        }),
+      }))
+      .reactor(
+        createScriptedReactor({
+          steps: [
+            {
+              assistantEvent: {
+                content: {
+                  parts: [
+                    { type: "text", text: "Inspecting runtime metadata." },
+                    {
+                      type: "tool-inspect_runtime",
+                      toolCallId: "tc_inspect_runtime_1",
+                      state: "input-available",
+                      input: {
+                        note: "hello-runtime",
+                      },
+                    },
+                  ],
+                },
+              },
+              actionRequests: [
+                {
+                  actionRef: "tc_inspect_runtime_1",
+                  actionName: "inspect_runtime",
+                  input: {
+                    note: "hello-runtime",
+                  },
+                },
+              ],
+              messagesForModel: [],
+            },
+          ],
+        }),
+      )
+      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "inspect_runtime"))
+      .build()
+
+    const result = await runtimeAwareContext.react(createTriggerEvent("inspect runtime"), {
+      runtime,
+      context: { key: contextKey },
+      durable: false,
+      options: {
+        silent: true,
+        maxIterations: 2,
+        maxModelSteps: 1,
+      },
+    })
+
+    const snapshot = await currentDb().query({
+      event_steps: {
+        $: { where: { "execution.id": result.execution.id }, limit: 10 },
+      },
+    })
+
+    const stepRows = readRows(snapshot, "event_steps")
+    const stepId = readString(stepRows[0], "id")
+    expect(stepId).toBeTruthy()
+    const partsSnapshot = await currentDb().query({
+      event_parts: {
+        $: {
+          where: { stepId: stepId as any },
+          limit: 50,
+          order: { idx: "asc" },
+        },
+      },
+    })
+
+    const partRows = readRows(partsSnapshot, "event_parts")
+    const persistedToolResultPart = asRecord(
+      partRows.find((row) => readString(row, "type") === "tool-result")?.part,
+    )
+    expect(readString(persistedToolResultPart ?? undefined, "state")).toBe("output-available")
+    const persistedContent = Array.isArray(persistedToolResultPart?.content)
+      ? persistedToolResultPart?.content
+      : []
+    expect(persistedContent).toHaveLength(1)
+    expect(readString(asRecord(persistedContent[0]) ?? undefined, "type")).toBe("json")
+    const jsonPayload = asRecord(asRecord(persistedContent[0])?.value)
+    expect(readString(jsonPayload ?? undefined, "note")).toBe("hello-runtime")
+    expect(readString(jsonPayload ?? undefined, "envActorId")).toBe("user_runtime_tests")
+    expect(readString(jsonPayload ?? undefined, "runtimeActorId")).toBe("user_runtime_tests")
+    expect(readString(jsonPayload ?? undefined, "contextId")).toBe(String(result.context.id))
+    expect(readString(jsonPayload ?? undefined, "stepId")).toBe(String(stepId))
+    expect(readString(jsonPayload ?? undefined, "hasDb")).toBe(null)
+    expect((jsonPayload as any)?.hasDb).toBe(true)
   }, 5 * 60 * 1000)
 })

@@ -1,4 +1,5 @@
 import { i } from "@instantdb/core";
+import type { InstantAdminDatabase } from "@instantdb/admin";
 import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef } from "@instantdb/core";
 import {
   filterDomainDoc,
@@ -18,6 +19,12 @@ export {
   type DomainDocRenderOptions,
   type ParsedDomainDoc,
 } from "./domain-doc.js";
+export {
+  EkairosRuntime,
+  type CompatibleRuntimeForDomain,
+  type RuntimeLike,
+  type ExplicitRuntimeLike,
+} from "./runtime-handle.js";
 
 type DomainIncludeRef = () => unknown;
 
@@ -55,14 +62,11 @@ export type DomainActionExecuteParams<
   Env extends Record<string, unknown> = Record<string, unknown>,
   Input = unknown,
   Runtime = unknown,
+  Domain = unknown,
 > = {
   env: Env;
   input: Input;
   runtime: Runtime;
-  call: <NestedInput = unknown, NestedOutput = unknown>(
-    action: DomainActionDefinition<Env, NestedInput, NestedOutput, Runtime>,
-    input: NestedInput,
-  ) => Promise<NestedOutput>;
 };
 
 export type DomainActionDefinition<
@@ -70,23 +74,42 @@ export type DomainActionDefinition<
   Input = unknown,
   Output = unknown,
   Runtime = unknown,
+  Domain = unknown,
 > = {
   name?: string;
   description?: string;
   inputSchema?: unknown;
   requiredScopes?: string[];
+  /**
+   * Domain actions are step-safe command units.
+   *
+   * Recommended pattern:
+   *
+   * `async execute({ runtime, input }) { "use step"; const domain = await runtime.use(myDomain); ... }`
+   *
+   * Action execution receives `env`, `input`, and `runtime`. If action logic
+   * needs a scoped domain handle, reconstruct it locally with
+   * `await runtime.use(exportedDomain)`. `"use workflow"` inside `execute(...)`
+   * is intentionally out of scope.
+   */
   execute: (
-    params: DomainActionExecuteParams<Env, Input, Runtime>,
+    params: DomainActionExecuteParams<Env, Input, Runtime, Domain>,
   ) => Promise<Output> | Output;
 };
 
-export type DomainActionRegistration = DomainActionDefinition<any, any, any, any> & {
+export type DomainActionRegistration<
+  Env extends Record<string, unknown> = Record<string, unknown>,
+  Input = unknown,
+  Output = unknown,
+  Runtime = unknown,
+  Domain = unknown,
+> = DomainActionDefinition<Env, Input, Output, Runtime, Domain> & {
   name: string;
 };
 
 export type DomainActionLike =
-  | DomainActionDefinition<any, any, any, any>
-  | ((params: DomainActionExecuteParams<any, any, any>) => unknown);
+  | DomainActionDefinition<any, any, any, any, any>
+  | ((params: DomainActionExecuteParams<any, any, any, any>) => unknown);
 
 export type DomainActionCollection =
   | Record<string, DomainActionLike>
@@ -122,7 +145,9 @@ export type DomainContextOptions = {
 
 const EKAIROS_META = Symbol.for("@ekairos/domain/meta");
 const EKAIROS_ACTIONS = Symbol.for("@ekairos/domain/actions");
+const EKAIROS_ACTION_MAP = Symbol.for("@ekairos/domain/action-map");
 const EKAIROS_ACTION_BINDING = Symbol.for("@ekairos/domain/action-binding");
+const EKAIROS_ACTION_STACK = Symbol.for("@ekairos/domain/action-stack");
 
 // No hard-coded base entities here. InstantDB adds base entities at runtime inside i.schema.
 // We only add them at the TYPE level via WithBase<> so links can reference them.
@@ -145,6 +170,9 @@ export type SchemaOf<D extends DomainDefinition<any, any, any> | DomainSchemaRes
   D extends DomainSchemaResult<any, any, any>
     ? ReturnType<D["toInstantSchema"]>
     : InstantSchemaDef<D["entities"], LinksDef<D["entities"]>, D["rooms"]>;
+
+export type DomainDbFor<D extends DomainDefinition<any, any, any> | DomainSchemaResult<any, any, any>> =
+  InstantAdminDatabase<SchemaOf<D>, true>;
 
 // --- Schema compatibility helpers for domain composition ---
 
@@ -211,6 +239,57 @@ type ExtractRooms<T> = T extends { rooms: infer R } ? R extends RoomsDef ? R : n
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
+type DomainActionMap = Record<string, DomainActionRegistration<any, any, any, any, any>>;
+
+type InferActionRegistrationFromLike<Value, Key extends string> =
+  Value extends DomainActionDefinition<
+    infer Env,
+    infer Input,
+    infer Output,
+    infer Runtime,
+    infer Domain
+  >
+    ? DomainActionRegistration<Env, Input, Output, Runtime, Domain>
+    : Value extends (params: DomainActionExecuteParams<
+        infer Env,
+        infer Input,
+        infer Runtime,
+        infer Domain
+      >) => infer Output
+      ? DomainActionRegistration<Env, Input, Awaited<Output>, Runtime, Domain>
+      : DomainActionRegistration;
+
+type ActionMapFromCollection<Input> =
+  Input extends Record<string, any>
+    ? {
+        [K in keyof Input & string]: InferActionRegistrationFromLike<Input[K], K>;
+      }
+    : {};
+
+type MergeActionMaps<
+  Current extends DomainActionMap,
+  Next extends DomainActionMap,
+> = Simplify<Omit<Current, keyof Next> & Next>;
+
+type ActionMapOf<D> =
+  D extends { readonly __actionMap?: infer Actions }
+    ? NonNullable<Actions>
+    : {};
+
+type ActionInputOf<Action> =
+  Action extends DomainActionDefinition<any, infer Input, any, any, any> ? Input : never;
+
+type ActionOutputOf<Action> =
+  Action extends DomainActionDefinition<any, any, infer Output, any, any>
+    ? Awaited<Output>
+    : never;
+
+type DomainActionMethods<Actions extends DomainActionMap> = {
+  [K in keyof Actions]: (
+    input: ActionInputOf<Actions[K]>,
+  ) => Promise<ActionOutputOf<Actions[K]>>;
+};
+
 // Strip link metadata from entity definitions to avoid nested EntityDef links
 type StripEntityLinks<E extends EntitiesDef> = {
   [K in keyof E]: E[K] extends EntityDef<infer Attrs, any, infer AsType>
@@ -254,11 +333,17 @@ type EntityNames<T> = T extends Record<string, any> ? keyof T : never;
 // The key is that DomainSchemaResult extends InstantDB's schema type completely,
 // so typeof domain works with InstaQLParams and validates queries correctly (like InstantDB does)
 // InstaQLParams uses the enriched entities from the schema to validate link names in queries
-export type DomainSchemaResult<E extends EntitiesDef = EntitiesDef, L extends LinksDef<any> = LinksDef<any>, R extends RoomsDef = RoomsDef> = 
+export type DomainSchemaResult<
+  E extends EntitiesDef = EntitiesDef,
+  L extends LinksDef<any> = LinksDef<any>,
+  R extends RoomsDef = RoomsDef,
+  Actions extends DomainActionMap = {},
+> = 
   ReturnType<typeof i.schema<WithBase<E>, L, R>> & {
     // Add originalEntities property for type-safe access to original entity definitions
     // This preserves type safety while InstaQLParams uses enriched entities for validation
     readonly originalEntities: E;
+    readonly __actionMap?: Actions;
     // Ensure toInstantSchema method is available
     toInstantSchema: () => ReturnType<typeof i.schema<WithBase<E>, L, R>>;
     // Build full domain context (schema + registry + docs) for AI/system prompts.
@@ -266,23 +351,45 @@ export type DomainSchemaResult<E extends EntitiesDef = EntitiesDef, L extends Li
     // Render a prompt-friendly context string for AI system prompts.
     contextString: (options?: DomainContextOptions) => string;
     // Bind a concrete database to this domain for runtime usage.
-    fromDB: <DB = any>(db: DB) => ConcreteDomain<DomainSchemaResult<E, L, R>, DB>;
+    fromDB: <DB = any>(
+      db: DB,
+      bindings?: { env?: unknown; runtime?: unknown },
+    ) => ConcreteDomain<DomainSchemaResult<E, L, R, Actions>, DB>;
     // Optional metadata for this domain.
     meta?: Record<string, unknown>;
     // Attach explicit domain actions to this domain result.
-    actions: (actions: DomainActionCollection) => DomainSchemaResult<E, L, R>;
+    actions: {
+      <Input extends Record<string, DomainActionLike>>(
+        actions: Input,
+      ): DomainSchemaResult<E, L, R, MergeActionMaps<Actions, ActionMapFromCollection<Input>>>;
+      (actions: DomainActionLike[] | DomainActionRegistration[]): DomainSchemaResult<E, L, R, Actions>;
+    };
     // Retrieve actions explicitly attached to this domain result.
     getActions: () => DomainActionRegistration[];
+    getActionMap: () => Actions;
   };
 
-export type ConcreteDomain<D extends DomainSchemaResult = DomainSchemaResult, DB = any> = {
+export type ConcreteDomain<
+  D extends DomainSchemaResult = DomainSchemaResult,
+  DB = any,
+> = {
   domain: D;
   db: DB;
   schema: ReturnType<D["toInstantSchema"]>;
   context: (options?: DomainContextOptions) => DomainContext;
   contextString: (options?: DomainContextOptions) => string;
-  fromDomain: <SubD extends DomainSchemaResult>(subdomain: SubD) => ConcreteDomain<SubD, DB>;
 };
+
+export type ActiveDomain<
+  D extends DomainSchemaResult = DomainSchemaResult,
+  Env = unknown,
+  Bound extends boolean = true,
+> = ConcreteDomain<D, DomainDbFor<D>> & (Bound extends true
+  ? {
+      env: Env;
+      actions: DomainActionMethods<ActionMapOf<D>>;
+    }
+  : {});
 
 // Base entities phantom (type-only) so links can reference $users and $files
 type AnyEntityDef = EntitiesDef[string];
@@ -341,7 +448,7 @@ function getActionBinding(source: unknown): { name: string; domain: unknown } | 
 
 function bindAction(
   action: DomainActionDefinition<any, any, any, any>,
-  params: { name: string; domain: unknown },
+  params: { name: string; domain: unknown; key?: string },
 ): DomainActionRegistration {
   const registration: DomainActionRegistration = {
     ...action,
@@ -351,6 +458,7 @@ function bindAction(
     value: {
       name: params.name,
       domain: params.domain,
+      key: params.key,
     },
     enumerable: false,
     configurable: false,
@@ -372,6 +480,13 @@ function getStoredActions(source: unknown): DomainActionRegistration[] {
   ) as DomainActionRegistration[];
 }
 
+function getStoredActionMap(source: unknown): DomainActionMap {
+  if (!source || typeof source !== "object") return {};
+  const raw = (source as any)[EKAIROS_ACTION_MAP];
+  if (!raw || typeof raw !== "object") return {};
+  return raw as DomainActionMap;
+}
+
 function setStoredActions(source: unknown, actions: DomainActionRegistration[]) {
   if (!source || typeof source !== "object") return;
   const frozenActions = Object.freeze([...actions]) as unknown as DomainActionRegistration[];
@@ -383,9 +498,40 @@ function setStoredActions(source: unknown, actions: DomainActionRegistration[]) 
   });
 }
 
+function setStoredActionMap(source: unknown, actionMap: DomainActionMap) {
+  if (!source || typeof source !== "object") return;
+  Object.defineProperty(source, EKAIROS_ACTION_MAP, {
+    value: Object.freeze({ ...actionMap }),
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+}
+
+function readRuntimeActionStack(runtime: unknown): string[] {
+  if (!runtime || typeof runtime !== "object") return [];
+  const stack = (runtime as any)[EKAIROS_ACTION_STACK];
+  return Array.isArray(stack) ? [...stack] : [];
+}
+
+function cloneRuntimeWithActionStack<Runtime>(runtime: Runtime, stack: string[]): Runtime {
+  if (!runtime || typeof runtime !== "object") return runtime;
+  const scoped = Object.assign(
+    Object.create(Object.getPrototypeOf(runtime)),
+    runtime,
+  ) as Runtime;
+  Object.defineProperty(scoped as object, EKAIROS_ACTION_STACK, {
+    value: [...stack],
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  return scoped;
+}
+
 function normalizeActionLike(
   value: DomainActionLike,
-  params: { fallbackName: string; domain: unknown },
+  params: { fallbackName: string; domain: unknown; key?: string },
 ): DomainActionRegistration {
   const action: DomainActionDefinition<any, any, any, any> =
     typeof value === "function"
@@ -404,20 +550,31 @@ function normalizeActionLike(
   }
 
   const domain = bound?.domain ?? params.domain;
-  return bindAction(action, { name, domain });
+  return bindAction(action, { name, domain, key: params.key ?? params.fallbackName });
 }
 
 function normalizeActionCollection(
   source: unknown,
   input: DomainActionCollection,
-): DomainActionRegistration[] {
+): { actions: DomainActionRegistration[]; actionMap: DomainActionMap } {
   const current = getStoredActions(source);
+  const currentActionMap = getStoredActionMap(source);
   const byName = new Set(current.map((action) => action.name));
+  const byKey = new Set(Object.keys(currentActionMap));
   const normalized: DomainActionRegistration[] = [];
+  const actionMap: DomainActionMap = {};
 
-  const push = (candidate: DomainActionRegistration) => {
+  const push = (candidate: DomainActionRegistration, key?: string) => {
     if (byName.has(candidate.name)) {
       throw new Error(`Duplicate domain action name: ${candidate.name}`);
+    }
+    const localKey = String(key ?? (candidate as any)?.name ?? "").trim();
+    if (localKey) {
+      if (byKey.has(localKey)) {
+        throw new Error(`Duplicate domain action key: ${localKey}`);
+      }
+      byKey.add(localKey);
+      actionMap[localKey] = candidate;
     }
     byName.add(candidate.name);
     normalized.push(candidate);
@@ -432,19 +589,20 @@ function normalizeActionCollection(
             : "",
         domain: source,
       });
-      push(normalizedEntry);
+      push(normalizedEntry, (normalizedEntry as any)?.name);
     }
-    return normalized;
+    return { actions: normalized, actionMap };
   }
 
   for (const [key, value] of Object.entries(input ?? {})) {
     const normalizedEntry = normalizeActionLike(value as DomainActionLike, {
       fallbackName: key,
       domain: source,
+      key,
     });
-    push(normalizedEntry);
+    push(normalizedEntry, key);
   }
-  return normalized;
+  return { actions: normalized, actionMap };
 }
 
 function attachMeta(target: object, meta: DomainMeta) {
@@ -567,21 +725,71 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
   domainInstance: D,
   db: DB,
   fullSchema?: any,
+  bindings?: { env?: unknown; runtime?: unknown },
 ): ConcreteDomain<D, DB> {
   const baseSchema = fullSchema ?? resolveSchema(domainInstance);
+  const actionMap = getStoredActionMap(domainInstance);
   const concrete: ConcreteDomain<D, DB> = {
     domain: domainInstance,
     db,
     schema: resolveSchema(domainInstance),
     context: (options?: DomainContextOptions) => domainInstance.context(options),
     contextString: (options?: DomainContextOptions) => domainInstance.contextString(options),
-    fromDomain<SubD extends DomainSchemaResult>(subdomain: SubD) {
-      const requiredSchema = resolveSchema(subdomain);
-      assertSchemaIncludes(baseSchema, requiredSchema);
-      return createConcreteDomain(subdomain, db, baseSchema);
-    },
   };
+  if (bindings?.env !== undefined && bindings?.runtime !== undefined) {
+    const inheritedStack = readRuntimeActionStack(bindings.runtime);
+
+    const buildActions = (stack: string[]) =>
+      Object.fromEntries(
+        Object.entries(actionMap).map(([key, action]) => [
+          key,
+          async (input: unknown) => {
+            const execute = (action as any)?.execute;
+            if (typeof execute !== "function") {
+              throw new Error(`domain_action_not_executable:${key}`);
+            }
+            if (stack.includes(key)) {
+              throw new Error(`domain_action_cycle:${key}`);
+            }
+
+            const nextStack = [...stack, key];
+            const scopedRuntime = cloneRuntimeWithActionStack(
+              bindings.runtime,
+              nextStack,
+            );
+
+            const params: DomainActionExecuteParams<any, unknown, unknown> = {
+              env: bindings.env,
+              input,
+              runtime: scopedRuntime,
+            }
+
+            return await execute(params);
+          },
+        ]),
+      );
+
+    ;(concrete as any).env = bindings.env;
+    ;(concrete as any).actions = buildActions(inheritedStack);
+  }
   return concrete;
+}
+
+export function materializeDomain<SubD extends DomainSchemaResult>(params: {
+  rootDomain: DomainSchemaResult;
+  subdomain: SubD;
+  db: DomainDbFor<SubD>;
+  bindings?: { env?: unknown; runtime?: unknown };
+}): ActiveDomain<SubD, unknown> {
+  const baseSchema = resolveSchema(params.rootDomain);
+  const requiredSchema = resolveSchema(params.subdomain);
+  assertSchemaIncludes(baseSchema, requiredSchema);
+  return createConcreteDomain(
+    params.subdomain,
+    params.db,
+    baseSchema,
+    params.bindings,
+  ) as ActiveDomain<SubD, unknown>;
 }
 
 function loadDomainDoc(scope: "root" | "subdomain", meta: DomainMeta | null): DomainDocInfo | null {
@@ -996,6 +1204,7 @@ export function domain(arg?: unknown): any {
         
         const createDomainResult = (
           seedActions: DomainActionRegistration[] = [],
+          seedActionMap: DomainActionMap = {},
         ): DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms> => {
           type InstantSchemaResult = ReturnType<
             DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms>["toInstantSchema"]
@@ -1090,24 +1299,36 @@ export function domain(arg?: unknown): any {
             buildContext(result, options);
           (result as any).contextString = (options?: DomainContextOptions) =>
             contextToString(buildContext(result, options));
-          (result as any).fromDB = <DB = any>(db: DB) =>
-            createConcreteDomain(result as any, db, resolveSchema(result));
+          (result as any).fromDB = <DB = any>(
+            db: DB,
+            bindings?: { env?: unknown; runtime?: unknown },
+          ) => createConcreteDomain(result as any, db, resolveSchema(result), bindings);
 
           const reboundActions = seedActions.map((action) =>
-            bindAction(action, { name: action.name, domain: result }),
+            bindAction(action, {
+              name: action.name,
+              domain: result,
+              key: (getActionBinding(action) as any)?.key,
+            }),
           );
           setStoredActions(result as any, [...reboundActions]);
+          setStoredActionMap(result as any, { ...seedActionMap });
           (result as any).actions = (actionsInput: DomainActionCollection) => {
             const current = getStoredActions(result as any);
+            const currentMap = getStoredActionMap(result as any);
             const additions = normalizeActionCollection(result as any, actionsInput);
-            return createDomainResult([...current, ...additions]);
+            return createDomainResult(
+              [...current, ...additions.actions],
+              { ...currentMap, ...additions.actionMap },
+            );
           };
           (result as any).getActions = () => [...getStoredActions(result as any)];
+          (result as any).getActionMap = () => ({ ...getStoredActionMap(result as any) });
 
           return Object.freeze(result as any);
         };
 
-        return createDomainResult();
+        return createDomainResult([], {});
       },
     };
   }
@@ -1132,6 +1353,16 @@ export function composeDomain(
   return builder.schema({ entities: {}, links: {}, rooms: {} });
 }
 
+/**
+ * Define a domain action without changing the public action contract.
+ *
+ * Convention for new actions:
+ *
+ * `async execute({ runtime, input }) { "use step"; const domain = await runtime.use(myDomain); ... }`
+ *
+ * Actions remain callable directly, from nested `runtime.use(domain).actions.*`
+ * composition, and from higher-level workflows that orchestrate them.
+ */
 export function defineDomainAction<
   Env extends Record<string, unknown> = Record<string, unknown>,
   Input = unknown,

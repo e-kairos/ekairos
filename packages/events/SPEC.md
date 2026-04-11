@@ -20,6 +20,27 @@ Canonical persistence uses:
 - `event_parts`
 - `event_items`
 
+### Durable React Contract
+
+When `react(...)` is called with `durable: true`, the call returns the persisted shell immediately
+and also exposes an optional workflow run handle.
+
+Immediate shell:
+
+- `context`
+- `trigger`
+- `reaction`
+- `execution`
+
+Durable handle:
+
+- `run.runId`
+- `run.status`
+- `run.returnValue`
+
+`run.returnValue` resolves to the final `ContextReactResult` once the durable workflow completes.
+This handle is runtime/server state, not canonical persisted domain data.
+
 ### Canonical Output Contract
 
 `event_parts` is the canonical persisted representation of produced content.

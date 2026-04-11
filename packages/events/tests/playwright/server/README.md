@@ -1,56 +1,20 @@
-# Context workflow smoke tests
+# events workflow smoke
 
-This package validates that `@ekairos/events` runs correctly in a Workflow runtime with:
+Browser/framework smoke harness for `@ekairos/events`.
 
-- `Context` engine orchestration
-- AI SDK reactor path
-- deterministic mocked model behavior
-- persisted execution state in InstantDB
-- stream chunk contract for custom context chunks
+Use this only for app-level behavior that really needs a running Next.js server.
+The primary workflow contract is now tested with Workflow-Vitest in the package itself.
+
+## Main commands
+
+```bash
+pnpm --filter @ekairos/events test:workflow
+pnpm --filter @ekairos/events-workflow-smoke test:e2e:context-engine:ai-sdk
+pnpm --filter @ekairos/events-workflow-smoke test:e2e:context-engine:scripted
+```
 
 ## Required env
 
-Set these in `packages/events/tests/playwright/server/.env.local` or workspace root `.env.local`:
+- `INSTANT_PERSONAL_ACCESS_TOKEN`
 
-- `NEXT_PUBLIC_INSTANT_APP_ID` (or `INSTANT_APP_ID` / `INSTANTDB_APP_ID`)
-- `INSTANT_APP_ADMIN_TOKEN` (or `INSTANT_ADMIN_TOKEN` / `INSTANTDB_ADMIN_TOKEN`)
-- `INSTANT_PERSONAL_ACCESS_TOKEN` (for schema push/bootstrap scripts)
-
-## Commands
-
-Run the AI SDK mocked-model unit test:
-
-```bash
-pnpm --filter @ekairos/events exec vitest run -c vitest.config.mts src/tests/context.ai-sdk-reactor.instant.test.ts
-```
-
-Run the Workflow + Playwright smoke e2e:
-
-```bash
-pnpm test:e2e -- tests/context-engine-ai-sdk.spec.ts --reporter=list
-```
-
-or using the dedicated script:
-
-```bash
-pnpm run test:e2e:context-engine
-```
-
-Repeat for quick stability check:
-
-```bash
-pnpm run test:e2e:context-engine:repeat
-```
-
-## What must pass
-
-1. Unit test confirms configurable AI SDK reactor with `ai/test` mocked model.
-2. Unit test confirms context custom chunk contract emission:
-   - starts with `data-context-id`
-   - includes `tool-output-available`
-   - includes `tool-output-error` in tool-failure scenario
-   - ends with `finish`
-3. E2E confirms Workflow runtime execution reaches `completed` state in:
-   - success mode (`/api/internal/workflow/story-smoke`)
-   - tool-error mode (`/api/internal/workflow/story-smoke?mode=tool-error`)
-4. E2E confirms persisted rows exist for execution/steps/items and emitted chunks match the expected contract for each mode.
+Optional app creds can be supplied in local env files when needed by the smoke app.
