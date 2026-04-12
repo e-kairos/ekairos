@@ -43,6 +43,7 @@ function patchWorkflowStepRouteToImportBootstrap(bootstrapModule: string) {
     const routeDir = dirname(routeFile)
     let spec = relative(routeDir, bootstrapAbs).replace(/\\/g, "/")
     if (!spec.startsWith(".")) spec = `./${spec}`
+    spec = spec.replace(/\.(cjs|mjs|js|jsx|ts|tsx)$/, "")
 
     const importLine = `import * as __ekairosBootstrap from "${spec}";`
     const touchLine = `__ekairosBootstrap?.runtimeConfig?.setup?.();`
@@ -111,6 +112,7 @@ function ensureDomainRouteFile(bootstrapModule: string) {
   const bootstrapAbs = resolve(cwd, bootstrapModule)
   let spec = relative(routeDir, bootstrapAbs).replace(/\\/g, "/")
   if (!spec.startsWith(".")) spec = `./${spec}`
+  spec = spec.replace(/\.(cjs|mjs|js|jsx|ts|tsx)$/, "")
 
   mkdirSync(routeDir, { recursive: true })
 
@@ -151,6 +153,28 @@ function injectBootstrapIntoEntries(entries: Record<string, any>, bootstrap: str
   }
 }
 
+function resolveBootstrapModulePath(contextDir: string, bootstrapModule: string) {
+  const req = createRequire(import.meta.url)
+
+  try {
+    return req.resolve(bootstrapModule, { paths: [contextDir] })
+  } catch {
+    // Relative TypeScript bootstrap modules are often passed extensionless so
+    // generated route imports stay bundler-friendly. Node's require.resolve()
+    // does not try .ts, so resolve the real file for webpack entry injection.
+  }
+
+  if (bootstrapModule.startsWith(".") || bootstrapModule.startsWith("/")) {
+    const base = resolve(contextDir, bootstrapModule)
+    for (const ext of ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]) {
+      const candidate = `${base}${ext}`
+      if (existsSync(candidate)) return candidate
+    }
+  }
+
+  return req.resolve(bootstrapModule, { paths: [contextDir] })
+}
+
 /**
  * Next.js helper to ensure the runtime bootstrap is registered in *every* server bundle.
  *
@@ -182,11 +206,10 @@ export function withRuntime(
 
         if (!options?.isServer) return out
 
-        const req = createRequire(import.meta.url)
         const contextDir = (out && out.context) || process.cwd()
 
         // Resolve relative to the app project (webpack context), not to this package.
-        const resolvedBootstrap = req.resolve(bootstrapModule, { paths: [contextDir] })
+        const resolvedBootstrap = resolveBootstrapModulePath(contextDir, bootstrapModule)
 
         const originalEntry = out.entry
         out.entry = async () => {
