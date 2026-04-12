@@ -127,15 +127,15 @@
     "jose": "^6.1.3",
     "llamaindex": "^0.12.0",
     "react": "^19.2.0",
-    "workflow": "4.1.0-beta.55",
+    "workflow": "5.0.0-beta.1",
     "xmlbuilder2": "^3.1.1",
-    "zod": "^4.1.8"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@ekairos/testing": "workspace:*",
     "@ekairos/tsconfig": "workspace:*",
-    "@workflow/serde": "^4.1.0",
-    "@workflow/vitest": "^4.0.1",
+    "@workflow/serde": "5.0.0-beta.0",
+    "@workflow/vitest": "5.0.0-beta.1",
     "@types/node": "^24.5.0",
     "@types/react": "^19.2.2",
     "dotenv": "^17.2.3",

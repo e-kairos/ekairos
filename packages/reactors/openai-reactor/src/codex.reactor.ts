@@ -50,9 +50,24 @@ export type CodexExecuteTurnArgs<
   instruction: string
   config: Config
   skills: ContextSkillPackage[]
+  contextStepStream?: WritableStream<string>
   writable?: WritableStream<unknown>
   silent: boolean
   emitChunk: (providerChunk: unknown) => Promise<void>
+}
+
+export type CodexAppServerTurnStepArgs<
+  Config extends CodexConfig = CodexConfig,
+> = {
+  config: Config
+  instruction: string
+  contextId: string
+  eventId: string
+  executionId: string
+  stepId: string
+  contextStepStream?: WritableStream<string>
+  writable?: WritableStream<unknown>
+  silent: boolean
 }
 
 export type CodexChunkMappingResult = {
@@ -88,6 +103,17 @@ export type CodexStreamTrace = {
   chunks?: CodexMappedChunk[]
 }
 
+type CodexEmitPayload = {
+  at: string
+  sequence: number
+  chunkType: ContextStreamChunkType
+  provider: "codex"
+  providerChunkType?: string
+  actionRef?: string
+  data?: unknown
+  raw?: unknown
+}
+
 export type CreateCodexReactorOptions<
   Context,
   Config extends CodexConfig = CodexConfig,
@@ -110,7 +136,7 @@ export type CreateCodexReactorOptions<
     stepId: string
     iteration: number
   }) => Promise<Config>
-  executeTurn: (
+  executeTurn?: (
     args: CodexExecuteTurnArgs<Context, Config, Env>,
   ) => Promise<CodexTurnResult>
   mapChunk?: (providerChunk: unknown) => CodexChunkMappingResult | null
@@ -402,6 +428,330 @@ function extractUsageMetrics(usageSource: unknown) {
   }
 }
 
+function asUnknownArray<T = unknown>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : []
+}
+
+function asNumberRecord(value: unknown): Record<string, number> {
+  const record = asRecord(value)
+  const out: Record<string, number> = {}
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry === "number" && Number.isFinite(entry)) {
+      out[key] = entry
+    }
+  }
+  return out
+}
+
+function isValidProviderContextId(value: string): boolean {
+  const normalized = value.trim()
+  if (!normalized) return false
+  if (/^[0-9a-fA-F-]{36}$/.test(normalized)) return true
+  if (/^urn:uuid:[0-9a-fA-F-]{36}$/.test(normalized)) return true
+  return false
+}
+
+function normalizeAppServerBaseUrl(raw: string): string {
+  const trimmed = String(raw || "").trim().replace(/\/+$/, "")
+  if (trimmed.endsWith("/turn")) return trimmed.slice(0, -"/turn".length)
+  if (trimmed.endsWith("/rpc")) return trimmed.slice(0, -"/rpc".length)
+  if (trimmed.endsWith("/events")) return trimmed.slice(0, -"/events".length)
+  return trimmed
+}
+
+function parseSseDataBlock(block: string): string | null {
+  const lines = block.split("\n").map((line) => line.trimEnd())
+  const dataLines = lines.filter((line) => line.startsWith("data:"))
+  if (!dataLines.length) return null
+  return dataLines.map((line) => line.replace(/^data:\s*/, "")).join("\n")
+}
+
+async function readJsonResponse(response: Response): Promise<AnyRecord> {
+  const text = await response.text().catch(() => "")
+  if (!text.trim()) return {}
+  try {
+    return asRecord(JSON.parse(text))
+  } catch {
+    return {}
+  }
+}
+
+async function codexAppServerRpc<T = AnyRecord>(
+  baseUrl: string,
+  method: string,
+  params: AnyRecord,
+): Promise<T> {
+  const response = await fetch(`${baseUrl}/rpc`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ method, params }),
+  })
+  const payload = await readJsonResponse(response)
+  if (!response.ok) {
+    const error = asString(payload.error) || asString(asRecord(payload.error).message)
+    throw new Error(error || `codex_rpc_http_${response.status}`)
+  }
+  if (payload.error) {
+    const error = asString(payload.error) || asString(asRecord(payload.error).message)
+    throw new Error(error || "codex_rpc_error")
+  }
+  return payload as T
+}
+
+export async function executeCodexAppServerTurnStep<
+  Config extends CodexConfig = CodexConfig,
+>(args: CodexAppServerTurnStepArgs<Config>): Promise<CodexTurnResult> {
+  "use step"
+
+  const baseUrl = normalizeAppServerBaseUrl(args.config.appServerUrl)
+  if (!baseUrl) throw new Error("codex_app_server_url_required")
+
+  let sequence = 0
+  const mappedChunks: CodexMappedChunk[] = []
+  const chunkTypeCounters = new Map<string, number>()
+  const providerChunkTypeCounters = new Map<string, number>()
+  const contextWriter = args.contextStepStream?.getWriter()
+  const workflowWriter = args.writable?.getWriter()
+
+  const emitProviderChunk = async (providerChunk: unknown) => {
+    const mapped = defaultMapCodexChunk(providerChunk)
+    if (!mapped || mapped.skip) return
+
+    sequence += 1
+    const mappedChunk: CodexMappedChunk = {
+      at: new Date().toISOString(),
+      sequence,
+      chunkType: mapped.chunkType,
+      providerChunkType: mapped.providerChunkType,
+      actionRef: mapped.actionRef,
+      data: mapped.data,
+      raw: mapped.raw ?? toJsonSafe(providerChunk),
+    }
+    mappedChunks.push(mappedChunk)
+    chunkTypeCounters.set(
+      mappedChunk.chunkType,
+      (chunkTypeCounters.get(mappedChunk.chunkType) ?? 0) + 1,
+    )
+    const providerType = mappedChunk.providerChunkType || "unknown"
+    providerChunkTypeCounters.set(
+      providerType,
+      (providerChunkTypeCounters.get(providerType) ?? 0) + 1,
+    )
+
+    const payload: CodexEmitPayload = {
+      at: mappedChunk.at,
+      sequence,
+      chunkType: mappedChunk.chunkType,
+      provider: "codex",
+      providerChunkType: mappedChunk.providerChunkType,
+      actionRef: mappedChunk.actionRef,
+      data: mappedChunk.data,
+      raw: mappedChunk.raw,
+    }
+
+    await contextWriter?.write(
+      encodeContextStepStreamChunk(createContextStepStreamChunk(payload)),
+    )
+    await workflowWriter?.write({
+      type: "data-chunk.emitted",
+      data: {
+        type: "chunk.emitted",
+        contextId: args.contextId,
+        executionId: args.executionId,
+        stepId: args.stepId,
+        itemId: args.eventId,
+        ...payload,
+      },
+    } as any)
+  }
+
+  const streamTrace = () => ({
+    totalChunks: mappedChunks.length,
+    chunkTypes: Object.fromEntries(chunkTypeCounters.entries()),
+    providerChunkTypes: Object.fromEntries(providerChunkTypeCounters.entries()),
+    chunks: mappedChunks,
+  })
+
+  try {
+    if (String(args.config.appServerUrl || "").trim().replace(/\/+$/, "").endsWith("/turn")) {
+      const response = await fetch(args.config.appServerUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          instruction: args.instruction,
+          config: args.config,
+          runtime: { source: "openai-reactor" },
+        }),
+      })
+      const payload = await readJsonResponse(response)
+      if (!response.ok) {
+        throw new Error(asString(payload.error) || `codex_turn_http_${response.status}`)
+      }
+      for (const chunk of asUnknownArray(payload.stream)) {
+        await emitProviderChunk(chunk)
+      }
+      return {
+        providerContextId:
+          asString(payload.providerContextId) ||
+          asString(payload.contextId) ||
+          asString(args.config.providerContextId),
+        turnId: asString(payload.turnId),
+        assistantText: asString(payload.assistantText) || asString(payload.text),
+        reasoningText: asString(payload.reasoningText) || asString(payload.reasoning),
+        diff: asString(payload.diff),
+        toolParts: asUnknownArray(payload.toolParts),
+        usage: asRecord(payload.usage),
+        metadata: {
+          provider: "codex-app-server",
+          response: payload,
+          streamTrace: streamTrace(),
+        },
+      }
+    }
+
+    const eventsResponse = await fetch(`${baseUrl}/events`, {
+      method: "GET",
+      headers: { accept: "text/event-stream" },
+    })
+    if (!eventsResponse.ok || !eventsResponse.body) {
+      throw new Error(`codex_events_unavailable_${eventsResponse.status}`)
+    }
+
+    const requestedThreadId = asString(args.config.providerContextId).trim()
+    let providerContextId = requestedThreadId
+    if (providerContextId && isValidProviderContextId(providerContextId)) {
+      await codexAppServerRpc(baseUrl, "thread/resume", { threadId: providerContextId })
+    } else {
+      const startParams: AnyRecord = {
+        cwd: args.config.repoPath,
+        approvalPolicy: args.config.approvalPolicy ?? "never",
+        sandboxPolicy:
+          args.config.sandboxPolicy && Object.keys(args.config.sandboxPolicy).length > 0
+            ? args.config.sandboxPolicy
+            : { type: "externalSandbox", networkAccess: "enabled" },
+      }
+      if (args.config.model) startParams.model = args.config.model
+      const started = await codexAppServerRpc(baseUrl, "thread/start", startParams)
+      providerContextId =
+        asString(asRecord(asRecord(started.result).thread).id) ||
+        asString(asRecord(started.result).id) ||
+        asString(started.threadId)
+    }
+    if (!providerContextId) throw new Error("codex_thread_id_missing")
+
+    const turnParams: AnyRecord = {
+      threadId: providerContextId,
+      input: [{ type: "text", text: args.instruction }],
+      cwd: args.config.repoPath,
+      approvalPolicy: args.config.approvalPolicy ?? "never",
+      sandboxPolicy:
+        args.config.sandboxPolicy && Object.keys(args.config.sandboxPolicy).length > 0
+          ? args.config.sandboxPolicy
+          : { type: "externalSandbox", networkAccess: "enabled" },
+    }
+    if (args.config.model) turnParams.model = args.config.model
+    const turnStart = await codexAppServerRpc(baseUrl, "turn/start", turnParams)
+    let turnId =
+      asString(asRecord(asRecord(turnStart.result).turn).id) ||
+      asString(asRecord(turnStart.result).id) ||
+      asString(turnStart.turnId)
+
+    const reader = eventsResponse.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    let assistantText = ""
+    let reasoningText = ""
+    let diff = ""
+    let usage: AnyRecord = {}
+    let completedTurn: AnyRecord = {}
+
+    try {
+      while (true) {
+        const read = await reader.read()
+        if (read.done) break
+        if (!read.value) continue
+        buffer += decoder.decode(read.value, { stream: true })
+        const blocks = buffer.split("\n\n")
+        buffer = blocks.pop() ?? ""
+        for (const block of blocks) {
+          const data = parseSseDataBlock(block)
+          if (!data || data === "[DONE]") continue
+          const evt = asRecord(JSON.parse(data))
+          const method = asString(evt.method)
+          if (!method) continue
+          const params = asRecord(evt.params)
+          const evtTurnId = asString(params.turnId) || asString(asRecord(params.turn).id)
+          const evtThreadId =
+            asString(params.threadId) ||
+            asString(params.providerContextId) ||
+            asString(asRecord(params.turn).threadId) ||
+            asString(asRecord(params.turn).providerContextId)
+          const scopedToTurn =
+            (evtTurnId && turnId && evtTurnId === turnId) ||
+            (evtThreadId && evtThreadId === providerContextId) ||
+            method.startsWith("thread/") ||
+            method.startsWith("context/")
+          if (!scopedToTurn) continue
+
+          await emitProviderChunk(evt)
+
+          if (method === "turn/started" && !turnId) {
+            turnId = asString(asRecord(params.turn).id) || evtTurnId
+          }
+          if (method === "item/agentMessage/delta") {
+            assistantText += asString(params.delta)
+          }
+          if (method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta") {
+            reasoningText += asString(params.delta)
+          }
+          if (method === "turn/diff/updated") {
+            diff = asString(params.diff)
+          }
+          if (method === "thread/tokenUsage/updated" || method === "context/tokenUsage/updated") {
+            usage = asRecord(params.tokenUsage)
+          }
+          if (method === "item/completed") {
+            const item = asRecord(params.item)
+            if (asString(item.type) === "agentMessage" && asString(item.text).trim()) {
+              assistantText = asString(item.text)
+            }
+            if (asString(item.type) === "reasoning" && asString(item.summary).trim()) {
+              reasoningText = asString(item.summary)
+            }
+          }
+          if (method === "turn/completed") {
+            completedTurn = asRecord(params.turn)
+            return {
+              providerContextId,
+              turnId: asString(completedTurn.id) || turnId,
+              assistantText,
+              reasoningText,
+              diff,
+              toolParts: asUnknownArray(completedTurn.toolParts),
+              usage,
+              metadata: {
+                provider: "codex-app-server",
+                providerResponse: completedTurn,
+                streamTrace: streamTrace(),
+              },
+            }
+          }
+          if (method === "turn/failed") {
+            throw new Error(`codex_turn_failed_${evtTurnId || turnId || "unknown"}`)
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+
+    throw new Error("codex_turn_completion_missing")
+  } finally {
+    contextWriter?.releaseLock()
+    workflowWriter?.releaseLock()
+  }
+}
+
 /**
  * Codex App Server reactor for @ekairos/events.
  *
@@ -432,7 +782,6 @@ export function createCodexReactor<
     params: ContextReactorParams<Context, Env>,
   ): Promise<ContextReactionResult> => {
     let chunkSequence = 0
-    const contextStepStreamWriter = params.contextStepStream?.getWriter()
     const chunkTypeCounters = new Map<string, number>()
     const providerChunkTypeCounters = new Map<string, number>()
     const capturedChunks: CodexMappedChunk[] = []
@@ -600,7 +949,7 @@ export function createCodexReactor<
         await persistCompletedReactionParts()
       }
 
-      const payload = {
+      const payload: CodexEmitPayload = {
         at: now,
         sequence: mappedChunk.sequence,
         chunkType: mappedChunk.chunkType,
@@ -611,12 +960,17 @@ export function createCodexReactor<
         raw: mapped.raw ?? toJsonSafe(providerChunk),
       }
 
-      if (contextStepStreamWriter) {
-        await contextStepStreamWriter.write(
-          encodeContextStepStreamChunk(
-            createContextStepStreamChunk(payload),
-          ),
-        )
+      if (params.contextStepStream) {
+        const writer = params.contextStepStream.getWriter()
+        try {
+          await writer.write(
+            encodeContextStepStreamChunk(
+              createContextStepStreamChunk(payload),
+            ),
+          )
+        } finally {
+          writer.releaseLock()
+        }
       }
 
       if (params.writable) {
@@ -639,8 +993,8 @@ export function createCodexReactor<
       }
     }
 
-    try {
-      const turn = await options.executeTurn({
+    const turn = options.executeTurn
+      ? await options.executeTurn({
         env: params.env,
         context,
         triggerEvent: params.triggerEvent,
@@ -652,72 +1006,99 @@ export function createCodexReactor<
         instruction,
         config,
         skills: params.skills,
+        contextStepStream: params.contextStepStream,
         writable: params.writable,
         silent: params.silent,
         emitChunk,
       })
-      const finishedAtMs = Date.now()
+      : await executeCodexAppServerTurnStep({
+          config,
+          instruction,
+          contextId: params.contextId,
+          eventId: params.eventId,
+          executionId: params.executionId,
+          stepId: params.stepId,
+          contextStepStream: params.contextStepStream,
+          writable: params.writable as WritableStream<unknown> | undefined,
+          silent: params.silent,
+        })
+    const finishedAtMs = Date.now()
+    const returnedStreamTrace = asRecord(asRecord(turn.metadata).streamTrace)
+    const returnedChunks = Array.isArray(returnedStreamTrace.chunks)
+      ? (returnedStreamTrace.chunks as CodexMappedChunk[])
+      : []
+    const effectiveRawChunks = allCapturedChunks.length > 0 ? allCapturedChunks : returnedChunks
+    const effectiveSemanticChunks = semanticChunks.length > 0 ? semanticChunks : returnedChunks
+    const returnedChunkTypes = asNumberRecord(returnedStreamTrace.chunkTypes)
+    const returnedProviderChunkTypes = asNumberRecord(returnedStreamTrace.providerChunkTypes)
+    const returnedTotalChunks =
+      typeof returnedStreamTrace.totalChunks === "number"
+        ? returnedStreamTrace.totalChunks
+        : returnedChunks.length
 
-      const streamTrace: CodexStreamTrace | undefined = includeStreamTraceInOutput
-        ? {
-            totalChunks: chunkSequence,
-            chunkTypes: Object.fromEntries(chunkTypeCounters.entries()),
-            providerChunkTypes: Object.fromEntries(providerChunkTypeCounters.entries()),
-          }
-        : undefined
+    const streamTrace: CodexStreamTrace | undefined = includeStreamTraceInOutput
+      ? {
+          totalChunks: chunkSequence || returnedTotalChunks,
+          chunkTypes:
+            chunkSequence > 0
+              ? Object.fromEntries(chunkTypeCounters.entries())
+              : returnedChunkTypes,
+          providerChunkTypes:
+            chunkSequence > 0
+              ? Object.fromEntries(providerChunkTypeCounters.entries())
+              : returnedProviderChunkTypes,
+        }
+      : undefined
 
-      const usagePayload = toJsonSafe(turn.usage ?? asRecord(turn.metadata).usage)
-      const usageMetrics = extractUsageMetrics(usagePayload)
+    const usagePayload = toJsonSafe(turn.usage ?? asRecord(turn.metadata).usage)
+    const usageMetrics = extractUsageMetrics(usagePayload)
 
-      const assistantEvent: ContextItem = {
-        id: params.eventId,
-        type: OUTPUT_ITEM_TYPE,
-        channel: "web",
-        createdAt: new Date().toISOString(),
-        status: "completed",
-        content: {
-          parts: buildCodexParts({
-            toolName,
-            includeReasoningPart,
-            semanticChunks,
-            rawChunks: allCapturedChunks,
-            result: turn,
-            instruction,
-            streamTrace,
-          }),
-        },
-      }
+    const assistantEvent: ContextItem = {
+      id: params.eventId,
+      type: OUTPUT_ITEM_TYPE,
+      channel: "web",
+      createdAt: new Date().toISOString(),
+      status: "completed",
+      content: {
+        parts: buildCodexParts({
+          toolName,
+          includeReasoningPart,
+          semanticChunks: effectiveSemanticChunks,
+          rawChunks: effectiveRawChunks,
+          result: turn,
+          instruction,
+          streamTrace,
+        }),
+      },
+    }
 
-      return {
-        assistantEvent,
-        actionRequests: [],
-        messagesForModel: [],
-        llm: {
-          provider: "codex",
-          model: asString(config.model || "codex"),
-          promptTokens: usageMetrics.promptTokens,
-          promptTokensCached: usageMetrics.promptTokensCached,
-          promptTokensUncached: usageMetrics.promptTokensUncached,
-          completionTokens: usageMetrics.completionTokens,
-          totalTokens: usageMetrics.totalTokens,
-          latencyMs: Math.max(0, finishedAtMs - startedAtMs),
-          rawUsage: usagePayload,
-          rawProviderMetadata: toJsonSafe({
-            providerContextId: turn.providerContextId,
-            turnId: turn.turnId,
-            metadata: turn.metadata ?? null,
-            streamTrace: streamTrace
-              ? {
-                  totalChunks: streamTrace.totalChunks,
-                  chunkTypes: streamTrace.chunkTypes,
-                  providerChunkTypes: streamTrace.providerChunkTypes,
-                }
-              : undefined,
-          }),
-        },
-      }
-    } finally {
-      contextStepStreamWriter?.releaseLock()
+    return {
+      assistantEvent,
+      actionRequests: [],
+      messagesForModel: [],
+      llm: {
+        provider: "codex",
+        model: asString(config.model || "codex"),
+        promptTokens: usageMetrics.promptTokens,
+        promptTokensCached: usageMetrics.promptTokensCached,
+        promptTokensUncached: usageMetrics.promptTokensUncached,
+        completionTokens: usageMetrics.completionTokens,
+        totalTokens: usageMetrics.totalTokens,
+        latencyMs: Math.max(0, finishedAtMs - startedAtMs),
+        rawUsage: usagePayload,
+        rawProviderMetadata: toJsonSafe({
+          providerContextId: turn.providerContextId,
+          turnId: turn.turnId,
+          metadata: turn.metadata ?? null,
+          streamTrace: streamTrace
+            ? {
+                totalChunks: streamTrace.totalChunks,
+                chunkTypes: streamTrace.chunkTypes,
+                providerChunkTypes: streamTrace.providerChunkTypes,
+              }
+            : undefined,
+        }),
+      },
     }
   }
 }

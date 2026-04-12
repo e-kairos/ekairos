@@ -22,7 +22,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:reactor": "vitest run src/tests/codex.reactor.test.ts --reporter=verbose",
-    "test:reactor:instant": "vitest run src/tests/codex.reactor.instant.test.ts --reporter=verbose"
+    "test:reactor:instant": "vitest run src/tests/codex.reactor.instant.test.ts --reporter=verbose",
+    "test:reactor:workflow": "vitest run -c vitest.workflow.config.mts"
   },
   "peerDependencies": {
     "@ekairos/events": "workspace:*"
@@ -33,9 +34,12 @@
     "@instantdb/admin": "0.22.158",
     "@ekairos/tsconfig": "workspace:*",
     "@types/node": "^24.5.0",
+    "@workflow/serde": "5.0.0-beta.0",
+    "@workflow/vitest": "5.0.0-beta.1",
     "dotenv": "^17.2.3",
     "typescript": "^5.9.2",
-    "vitest": "^4.0.8"
+    "vitest": "^4.0.8",
+    "workflow": "5.0.0-beta.1"
   },
   "repository": {
     "type": "git",

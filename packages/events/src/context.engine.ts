@@ -1420,10 +1420,8 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
                 const { createHook, createWebhook } = await import("workflow")
                 const toolCallId = String(actionRequest.actionRef)
                 const hookToken = toolApprovalHookToken({ executionId, toolCallId })
-                const webhookToken = toolApprovalWebhookToken({ executionId, toolCallId })
-
                 const hook = createHook<ContextToolApprovalPayload>({ token: hookToken })
-                const webhook = createWebhook({ token: webhookToken })
+                const webhook = createWebhook()
 
                 const approvalOrRequest = await Promise.race([
                   hook.then((approval) => ({ source: "hook" as const, approval })),

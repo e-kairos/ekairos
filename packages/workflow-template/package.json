@@ -12,10 +12,10 @@
                          "@ekairos/workflow-compiler":  "workspace:*",
                          "@instantdb/admin":  "0.22.126",
                          "@swc/core":  "1.15.3",
-                         "@workflow/swc-plugin":  "4.1.0-beta.18",
-                         "@workflow/world-local":  "4.1.0-beta.31",
+                         "@workflow/swc-plugin":  "5.0.0-beta.1",
+                         "@workflow/world-local":  "5.0.0-beta.1",
                          "esbuild":  "^0.25.11",
-                         "workflow":  "4.1.0-beta.55"
+                         "workflow":  "5.0.0-beta.1"
                      },
     "optionalDependencies":  {
                                  "@swc/core-win32-x64-msvc":  "1.15.3"

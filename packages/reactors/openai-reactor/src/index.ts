@@ -1,11 +1,13 @@
 export {
   createCodexReactor,
+  executeCodexAppServerTurnStep,
   defaultMapCodexChunk,
   mapCodexAppServerNotification,
   mapCodexChunkType,
   type CodexConfig,
   type CodexTurnResult,
   type CodexExecuteTurnArgs,
+  type CodexAppServerTurnStepArgs,
   type CodexChunkMappingResult,
   type CodexMappedChunk,
   type CodexStreamTrace,

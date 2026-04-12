@@ -25,7 +25,7 @@
     "shadcn"
   ],
   "dependencies": {
-    "@ekairos/dataset": "^1.21.96",
+    "@ekairos/dataset": "workspace:*",
     "@instantdb/admin": "0.22.126",
     "chalk": "^5.3.0",
     "execa": "^8.0.0",

@@ -13,7 +13,7 @@ catalog:
   '@vercel/sandbox': ^0.0.23
   ai: ^5.0.97
   typescript: ^5.9.2
-  zod: ^4.1.8
+  zod: ^4.3.6
 
 overrides:
   '@excalidraw/excalidraw': link:../ekairos-drawer/packages/excalidraw

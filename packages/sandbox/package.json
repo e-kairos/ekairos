@@ -57,7 +57,7 @@
     "@instantdb/admin": "0.22.126",
     "@instantdb/core": "0.22.126",
     "@vercel/sandbox": "^1.8.1",
-    "zod": "^4.1.8"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@ekairos/tsconfig": "workspace:*",

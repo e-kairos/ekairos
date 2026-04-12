@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/tests/**/*.test.ts"],
+    exclude: ["src/tests/**/*.workflow.integration.test.ts"],
     reporters: "verbose",
     globalSetup: ["src/tests/setup/codex-real.setup.ts"],
     testTimeout: 300_000,
