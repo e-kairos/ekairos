@@ -3,7 +3,7 @@ import { config as dotenvConfig } from "dotenv";
 import { resolve } from "node:path";
 import { storySmoke, storySmokeScripted, storySmokeToolError } from "../../../../../src/lib/story-smoke.story";
 import type { ContextItem } from "@ekairos/events";
-import "../../../../../src/ekairos";
+import { createStorySmokeRuntime } from "../../../../../src/ekairos";
 
 // Ensure env is available in dev (turbopack) even if the bootstrap module isn't evaluated.
 dotenvConfig({ path: resolve(process.cwd(), ".env.local"), quiet: true });
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
           : storySmoke;
 
     const result = await context.react(buildTriggerEvent(), {
-      env: { mode },
+      runtime: createStorySmokeRuntime({ mode }),
       context: null,
       durable: true,
       options: {

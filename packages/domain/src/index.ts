@@ -25,7 +25,6 @@ export {
   type RuntimeLike,
   type ExplicitRuntimeLike,
 } from "./runtime-handle.js";
-export * as cli from "./cli/index.js";
 
 type DomainIncludeRef = () => unknown;
 

@@ -8,6 +8,7 @@ import {
 } from "../runtime.js"
 import type { RuntimeDomainSource } from "../runtime.js"
 import { getDomainActionBinding } from "../index.js"
+import { createRemoteJWKSet, jwtVerify } from "jose"
 
 type RefreshTokenUser = {
   id: string
@@ -115,6 +116,7 @@ function resolveInstantApiUri() {
 
 const DEFAULT_OIDC_JWKS = "https://oidc.vercel.com/.well-known/jwks.json"
 const DEFAULT_OIDC_ISSUER = "https://oidc.vercel.com"
+const oidcJwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>()
 
 function parseOptionalBoolean(value: unknown) {
   const normalized = String(value ?? "").trim().toLowerCase()
@@ -155,13 +157,23 @@ function isAuthRequired() {
 }
 
 async function verifyOidcToken(token: string) {
-  const { verifyOidcToken: verify } = await import("@ekairos/events/oidc")
+  if (!token) return false
+  const jwksUrl = resolveOidcJwksUrl()
+  const cached = oidcJwksCache.get(jwksUrl)
+  const jwks =
+    cached ??
+    (() => {
+      const created = createRemoteJWKSet(new URL(jwksUrl))
+      oidcJwksCache.set(jwksUrl, created)
+      return created
+    })()
   const audience = resolveOidcAudience()
-  return await verify(token, {
-    jwksUrl: resolveOidcJwksUrl(),
+  const options: { issuer?: string; audience?: string | string[] } = {
     issuer: resolveOidcIssuer(),
-    ...(audience ? { audience } : {}),
-  })
+  }
+  if (audience) options.audience = audience
+  await jwtVerify(token, jwks, options)
+  return true
 }
 
 async function verifyRefreshToken(token: string, appId: string): Promise<RefreshTokenUser | null> {

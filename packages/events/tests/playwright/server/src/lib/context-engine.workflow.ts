@@ -68,7 +68,7 @@ export async function contextEngineDurableWorkflow(
 
   const benchmark = createStageTimer();
   const result = await runContextReactionDirect(context, payload.triggerEvent, {
-    env: payload.env,
+    runtime: payload.runtime,
     context: payload.context ?? null,
     durable: false,
     __benchmark: benchmark,

@@ -8,7 +8,9 @@
   "bin": {
     "ekairos-domain": "./dist/cli/bin.js"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/runtime-handle.js"
+  ],
   "files": [
     "dist"
   ],
@@ -88,6 +90,7 @@
     "@instantdb/core": "0.22.126",
     "@instantdb/platform": "0.22.126",
     "@workflow/serde": "^4.1.0",
+    "jose": "^6.1.3",
     "json5": "^2.2.3",
     "yaml": "^2.8.2"
   },
