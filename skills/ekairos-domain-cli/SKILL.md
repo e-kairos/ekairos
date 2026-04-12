@@ -29,13 +29,16 @@ npx @ekairos/domain create-app my-app --next --workspace /path/to/ekairos
 
 ## Operate A Running App
 
-No login is required for local apps that accept admin queries through the endpoint:
+No login is required for local apps that accept admin queries through the runtime route:
 
 ```bash
 npx @ekairos/domain inspect --baseUrl=http://localhost:3000 --admin --pretty
 npx @ekairos/domain seedDemo --baseUrl=http://localhost:3000 --admin --pretty
 npx @ekairos/domain query "{ app_tasks: { comments: {} } }" --baseUrl=http://localhost:3000 --admin --pretty
 ```
+
+New apps expose `/api/ekairos/domain`.
+The CLI tries that route first and falls back to legacy `/.well-known/ekairos/v1/domain`.
 
 ## Use JSON5 And Files
 

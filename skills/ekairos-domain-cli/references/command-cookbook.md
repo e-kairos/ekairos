@@ -13,6 +13,8 @@ npx @ekairos/domain create-app my-app --next --instantToken=$INSTANT_PERSONAL_AC
 npx @ekairos/domain inspect --baseUrl=http://localhost:3000 --admin --pretty
 ```
 
+The CLI defaults to `/api/ekairos/domain` and falls back to legacy `.well-known`.
+
 ## Run An Action
 
 ```bash

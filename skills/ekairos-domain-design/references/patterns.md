@@ -36,14 +36,14 @@ export const appDomain = baseDomain.actions({
 
 ```ts
 import { init } from "@instantdb/admin";
-import { EkairosRuntime } from "@ekairos/domain";
+import { EkairosRuntime } from "@ekairos/domain/runtime-handle";
 import { configureRuntime } from "@ekairos/domain/runtime";
 import appDomain from "./domain";
 
 export class AppRuntime extends EkairosRuntime<{
   appId?: string;
   adminToken?: string;
-}, typeof appDomain> {
+}, typeof appDomain, any> {
   protected getDomain() {
     return appDomain;
   }
@@ -58,20 +58,40 @@ export class AppRuntime extends EkairosRuntime<{
   }
 }
 
+export function createRuntime(env: {
+  appId?: string;
+  adminToken?: string;
+} = {}) {
+  return new AppRuntime(env);
+}
+
 export const runtimeConfig = configureRuntime({
   runtime: async (env) => {
-    const runtime = new AppRuntime(env);
+    const runtime = createRuntime(env);
     return { db: await runtime.db() };
   },
   domain: { domain: appDomain },
 });
 ```
 
+## Next Route
+
+```ts
+// src/app/api/ekairos/domain/route.ts
+import { createRuntimeRouteHandler } from "@ekairos/domain/next";
+import { createRuntime } from "@/runtime";
+
+export const { GET, POST } = createRuntimeRouteHandler({
+  createRuntime,
+});
+```
+
+Do not use `withRuntime(...)` in `next.config.ts`.
+
 ## Workflow
 
 ```ts
 import { executeRuntimeAction } from "@ekairos/domain/runtime";
-import { createInvoiceAction } from "../domain";
 import { createRuntime } from "../runtime";
 
 export async function runBillingWorkflow(input: { title: string }) {
@@ -79,7 +99,7 @@ export async function runBillingWorkflow(input: { title: string }) {
   const runtime = createRuntime();
   return await executeRuntimeAction({
     runtime,
-    action: createInvoiceAction,
+    action: "billing.invoice.create",
     input,
   });
 }

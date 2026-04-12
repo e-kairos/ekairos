@@ -16,6 +16,7 @@ credentials.
 
 ## What it does
 - Sends a POST request to `/api/ekairos/domain`.
+- Falls back to `/.well-known/ekairos/v1/domain` for legacy apps.
 - Passes `org_id` + InstaQL query.
 - Returns the JSON response (includes `data` + `truncated` when applicable).
 

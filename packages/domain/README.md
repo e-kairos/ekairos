@@ -35,10 +35,44 @@ npx @ekairos/domain seedDemo --baseUrl=http://localhost:3000 --admin --pretty
 npx @ekairos/domain query "{ app_tasks: { comments: {} } }" --baseUrl=http://localhost:3000 --admin --pretty
 ```
 
+## Next.js Route
+
+New Next.js apps expose the domain adapter explicitly:
+
+```ts
+// src/app/api/ekairos/domain/route.ts
+import { createRuntimeRouteHandler } from "@ekairos/domain/next";
+import { createRuntime } from "@/runtime";
+
+export const { GET, POST } = createRuntimeRouteHandler({
+  createRuntime,
+});
+```
+
+This replaces the old `withRuntime(...)` pattern.
+There is no Next config patching and no generated `.well-known` domain route in new apps.
+
+Your `next.config.ts` should stay focused on Workflow:
+
+```ts
+import type { NextConfig } from "next";
+import { withWorkflow } from "workflow/next";
+
+const nextConfig: NextConfig = {
+  transpilePackages: ["@ekairos/domain"],
+};
+
+export default withWorkflow(nextConfig) as NextConfig;
+```
+
+The CLI uses `/api/ekairos/domain` by default and falls back to the legacy
+`/.well-known/ekairos/v1/domain` endpoint for older apps.
+
 ## Core Pattern
 
 ```ts
-import { defineDomainAction, domain, EkairosRuntime } from "@ekairos/domain";
+import { defineDomainAction, domain } from "@ekairos/domain";
+import { EkairosRuntime } from "@ekairos/domain/runtime-handle";
 import { executeRuntimeAction } from "@ekairos/domain/runtime";
 import { init } from "@instantdb/admin";
 import { i } from "@instantdb/core";
@@ -71,7 +105,7 @@ export const appDomain = baseDomain.actions({
 export class AppRuntime extends EkairosRuntime<{
   appId?: string;
   adminToken?: string;
-}, typeof appDomain> {
+}, typeof appDomain, any> {
   protected getDomain() {
     return appDomain;
   }
@@ -86,9 +120,13 @@ export class AppRuntime extends EkairosRuntime<{
   }
 }
 
+export function createRuntime(env = {}) {
+  return new AppRuntime(env);
+}
+
 export async function runWorkflow() {
   "use workflow";
-  const runtime = new AppRuntime({
+  const runtime = createRuntime({
     appId: process.env.NEXT_PUBLIC_INSTANT_APP_ID,
     adminToken: process.env.INSTANT_ADMIN_TOKEN,
   });
