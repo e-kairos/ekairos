@@ -621,7 +621,15 @@ export async function runCli(
 
 const isDirectExecution = (() => {
   const current = process.argv[1] ?? ""
-  return current.endsWith("bin.js") || current.endsWith("bin.ts")
+  const normalized = current.replace(/\\/g, "/")
+  const fileName = normalized.split("/").pop() ?? ""
+  return (
+    current.endsWith("bin.js") ||
+    current.endsWith("bin.ts") ||
+    fileName === "ekairos-domain" ||
+    fileName === "ekairos-domain.cmd" ||
+    fileName === "ekairos-domain.ps1"
+  )
 })()
 
 if (isDirectExecution) {
