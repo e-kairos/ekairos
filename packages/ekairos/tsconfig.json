@@ -5,8 +5,7 @@
     "rootDir": "src",
     "baseUrl": ".",
     "paths": {
-      "@ekairos/domain/runtime": ["../domain/dist/runtime.d.ts"],
-      "@ekairos/domain/next": ["../domain/dist/next.d.ts"]
+      "@ekairos/domain/runtime": ["../domain/dist/runtime.d.ts"]
     }
   },
   "include": ["src"],

@@ -57,12 +57,6 @@
       "import": "./dist/runtime.js",
       "require": "./dist/runtime.js",
       "default": "./dist/runtime.js"
-    },
-    "./next": {
-      "types": "./dist/next.d.ts",
-      "import": "./dist/next.js",
-      "require": "./dist/next.js",
-      "default": "./dist/next.js"
     }
   },
   "scripts": {
