@@ -5,7 +5,24 @@ import { PlatformApi } from "@instantdb/platform"
 import { i } from "@instantdb/core"
 import { domain } from "../index.js"
 
-type CreateDomainAppParams = {
+export type CreateDomainAppProgressStage =
+  | "prepare-target"
+  | "detect-package-manager"
+  | "resolve-version"
+  | "provision-instant"
+  | "write-files"
+  | "write-env"
+  | "install"
+  | "complete"
+
+export type CreateDomainAppProgressEvent = {
+  stage: CreateDomainAppProgressStage
+  status: "running" | "completed" | "log"
+  message: string
+  progress?: number
+}
+
+export type CreateDomainAppParams = {
   directory: string
   framework: "next"
   install: boolean
@@ -16,9 +33,10 @@ type CreateDomainAppParams = {
   orgId?: string
   appId?: string
   adminToken?: string
+  onProgress?: (event: CreateDomainAppProgressEvent) => void | Promise<void>
 }
 
-type CreateDomainAppResult = {
+export type CreateDomainAppResult = {
   ok: true
   directory: string
   framework: "next"
@@ -39,6 +57,14 @@ const TEMPLATE_WORLD_LOCAL_VERSION = "4.1.0-beta.31"
 
 function trimOrEmpty(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
+}
+
+async function emitProgress(
+  onProgress: CreateDomainAppParams["onProgress"],
+  event: CreateDomainAppProgressEvent,
+) {
+  if (!onProgress) return
+  await onProgress(event)
 }
 
 function toPosix(value: string) {
@@ -183,7 +209,11 @@ async function provisionInstantApp(params: {
   }
 }
 
-async function runInstall(targetDir: string, packageManager: string) {
+async function runInstall(
+  targetDir: string,
+  packageManager: string,
+  onProgress?: CreateDomainAppParams["onProgress"],
+) {
   const command =
     packageManager === "yarn"
       ? "yarn"
@@ -203,6 +233,24 @@ async function runInstall(targetDir: string, packageManager: string) {
           : ["install"]
 
   await new Promise<void>((resolveInstall, rejectInstall) => {
+    const emitChunk = (() => {
+      let buffer = ""
+      return async (chunk: string) => {
+        buffer += chunk
+        const lines = buffer.split(/\r?\n/)
+        buffer = lines.pop() ?? ""
+        for (const line of lines) {
+          const text = line.trim()
+          if (!text) continue
+          await emitProgress(onProgress, {
+            stage: "install",
+            status: "log",
+            message: text,
+          })
+        }
+      }
+    })()
+
     const child = spawn(command, args, {
       cwd: targetDir,
       env: process.env,
@@ -211,8 +259,13 @@ async function runInstall(targetDir: string, packageManager: string) {
     })
 
     let stderr = ""
+    child.stdout.on("data", (chunk) => {
+      void emitChunk(chunk.toString())
+    })
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString()
+      const text = chunk.toString()
+      stderr += text
+      void emitChunk(text)
     })
 
     child.on("error", rejectInstall)
@@ -715,10 +768,47 @@ export async function createDomainApp(
   }
 
   const targetDir = resolve(params.directory || ".")
+  await emitProgress(params.onProgress, {
+    stage: "prepare-target",
+    status: "running",
+    message: `Preparing ${targetDir}`,
+    progress: 5,
+  })
   await ensureWritableTargetDirectory(targetDir, params.force)
+  await emitProgress(params.onProgress, {
+    stage: "prepare-target",
+    status: "completed",
+    message: "Target ready",
+    progress: 12,
+  })
 
+  await emitProgress(params.onProgress, {
+    stage: "detect-package-manager",
+    status: "running",
+    message: "Detecting package manager",
+    progress: 16,
+  })
   const packageManager = await detectPackageManager(params.packageManager, params.workspacePath)
+  await emitProgress(params.onProgress, {
+    stage: "detect-package-manager",
+    status: "completed",
+    message: `Using ${packageManager}`,
+    progress: 22,
+  })
+
+  await emitProgress(params.onProgress, {
+    stage: "resolve-version",
+    status: "running",
+    message: "Resolving @ekairos/domain version",
+    progress: 26,
+  })
   const domainVersion = await readDomainPackageVersion()
+  await emitProgress(params.onProgress, {
+    stage: "resolve-version",
+    status: "completed",
+    message: `Version ${domainVersion}`,
+    progress: 30,
+  })
 
   const explicitAppId = trimOrEmpty(params.appId)
   const explicitAdminToken = trimOrEmpty(params.adminToken)
@@ -726,17 +816,36 @@ export async function createDomainApp(
     Boolean(trimOrEmpty(params.instantToken)) &&
     (!explicitAppId || !explicitAdminToken)
 
-  const provisioned = shouldProvision
-    ? await provisionInstantApp({
-        directory: targetDir,
-        instantToken: trimOrEmpty(params.instantToken),
-        orgId: params.orgId,
-      })
-    : null
+  let provisioned: Awaited<ReturnType<typeof provisionInstantApp>> | null = null
+  if (shouldProvision) {
+    await emitProgress(params.onProgress, {
+      stage: "provision-instant",
+      status: "running",
+      message: "Provisioning Instant app",
+      progress: 38,
+    })
+    provisioned = await provisionInstantApp({
+      directory: targetDir,
+      instantToken: trimOrEmpty(params.instantToken),
+      orgId: params.orgId,
+    })
+    await emitProgress(params.onProgress, {
+      stage: "provision-instant",
+      status: "completed",
+      message: `Provisioned ${provisioned.appId}`,
+      progress: 50,
+    })
+  }
 
   const appId = explicitAppId || provisioned?.appId || null
   const adminToken = explicitAdminToken || provisioned?.adminToken || null
 
+  await emitProgress(params.onProgress, {
+    stage: "write-files",
+    status: "running",
+    message: "Writing scaffold files",
+    progress: 58,
+  })
   const files = buildNextTemplateFiles({
     targetDir,
     domainVersion,
@@ -744,8 +853,20 @@ export async function createDomainApp(
     workspacePath: params.workspacePath,
   })
   await writeScaffoldFiles(targetDir, files)
+  await emitProgress(params.onProgress, {
+    stage: "write-files",
+    status: "completed",
+    message: "Scaffold files written",
+    progress: 72,
+  })
 
   if (appId && adminToken) {
+    await emitProgress(params.onProgress, {
+      stage: "write-env",
+      status: "running",
+      message: "Writing .env.local",
+      progress: 78,
+    })
     await writeFile(
       join(targetDir, ".env.local"),
       [
@@ -755,10 +876,28 @@ export async function createDomainApp(
       ].join("\n"),
       "utf8",
     )
+    await emitProgress(params.onProgress, {
+      stage: "write-env",
+      status: "completed",
+      message: ".env.local ready",
+      progress: 84,
+    })
   }
 
   if (params.install) {
-    await runInstall(targetDir, packageManager)
+    await emitProgress(params.onProgress, {
+      stage: "install",
+      status: "running",
+      message: `Installing dependencies with ${packageManager}`,
+      progress: 88,
+    })
+    await runInstall(targetDir, packageManager, params.onProgress)
+    await emitProgress(params.onProgress, {
+      stage: "install",
+      status: "completed",
+      message: "Dependencies installed",
+      progress: 96,
+    })
   }
 
   const nextSteps = [
@@ -771,7 +910,7 @@ export async function createDomainApp(
     "npx @ekairos/domain query \"{ app_tasks: { comments: {} } }\" --baseUrl=http://localhost:3000 --admin --pretty",
   ]
 
-  return {
+  const result: CreateDomainAppResult = {
     ok: true,
     directory: targetDir,
     framework: params.framework,
@@ -782,4 +921,13 @@ export async function createDomainApp(
     adminToken,
     nextSteps,
   }
+
+  await emitProgress(params.onProgress, {
+    stage: "complete",
+    status: "completed",
+    message: "App scaffolded successfully",
+    progress: 100,
+  })
+
+  return result
 }

@@ -14,6 +14,7 @@ import {
   ClientRuntime,
 } from "./index.js"
 import { createDomainApp } from "./create-app.js"
+import { runCreateAppInk } from "./ui.js"
 
 type CliContext = {
   stdout: Pick<typeof output, "write">
@@ -56,11 +57,13 @@ function printHelp(ctx: CliContext) {
       "",
       "Output:",
       "  Stable JSON by default. Add --pretty for indented JSON.",
+      "  In interactive terminals, create-app shows a live React/Ink UI unless you pass --json.",
       "",
       "Scaffold flags:",
       "  --workspace <path>  Use the local workspace package instead of a published version",
       "  --instantToken      Provision an Instant app and write .env.local",
       "  --appId/--adminToken  Reuse an existing Instant app",
+      "  --json              Force plain JSON output and disable the interactive UI",
       "",
     ].join("\n"),
   )
@@ -121,6 +124,19 @@ function flagValue(flags: Map<string, string | boolean>, names: string[]) {
 function hasFlag(flags: Map<string, string | boolean>, names: string[]) {
   const value = flagValue(flags, names)
   return value === true || value === "true"
+}
+
+function shouldUseInteractiveCli(
+  flags: Map<string, string | boolean>,
+  ctx: CliContext,
+) {
+  return (
+    ctx.stdout === output &&
+    ctx.stderr === output &&
+    Boolean(input.isTTY) &&
+    Boolean(output.isTTY) &&
+    !hasFlag(flags, ["json", "plain", "no-ui"])
+  )
 }
 
 function asTrimmedString(value: unknown) {
@@ -376,7 +392,7 @@ async function commandCreateApp(args: string[], ctx: CliContext) {
   const directory = String(positionals[0] ?? ".").trim() || "."
   const install = flagValue(flags, ["install"]) !== false
 
-  const result = await createDomainApp({
+  const params = {
     directory,
     framework: "next",
     install,
@@ -391,7 +407,16 @@ async function commandCreateApp(args: string[], ctx: CliContext) {
     orgId: asTrimmedString(flagValue(flags, ["orgId", "org-id"])),
     appId: asTrimmedString(flagValue(flags, ["appId", "app-id"])),
     adminToken: asTrimmedString(flagValue(flags, ["adminToken", "admin-token"])),
-  })
+  } as const
+
+  const interactive = shouldUseInteractiveCli(flags, ctx)
+  const result = interactive
+    ? await runCreateAppInk(params)
+    : await createDomainApp(params)
+
+  if (interactive) {
+    return
+  }
 
   writeJson(
     ctx.stdout,
