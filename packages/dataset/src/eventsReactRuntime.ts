@@ -1,7 +1,29 @@
 import { eventsDomain } from "@ekairos/events"
 import { getContextRuntime } from "@ekairos/events/runtime"
 
-export function createEventsReactRuntime<Env extends Record<string, unknown>>(env: Env) {
+export type EventsReactRuntime<Env extends Record<string, unknown>> = {
+  env: Env
+  db(): Promise<any>
+  resolve(): Promise<{
+    db: any
+    meta: () => {
+      domain: typeof eventsDomain
+      schema: ReturnType<typeof eventsDomain.toInstantSchema>
+      context?: unknown
+      contextString?: string
+    }
+  }>
+  meta: () => {
+    domain: typeof eventsDomain
+    schema: ReturnType<typeof eventsDomain.toInstantSchema>
+    context?: unknown
+    contextString?: string
+  }
+}
+
+export function createEventsReactRuntime<Env extends Record<string, unknown>>(
+  env: Env,
+): EventsReactRuntime<Env> {
   const meta = () => ({
     domain: eventsDomain,
     schema: eventsDomain.toInstantSchema(),
