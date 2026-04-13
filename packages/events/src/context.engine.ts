@@ -133,7 +133,11 @@ export interface ContextStreamOptions {
 export type ContextModelInit = string | (() => Promise<any>)
 
 export type ContextReactParams<Env extends ContextEnvironment = ContextEnvironment> = {
-  runtime: ContextRuntime<Env>
+  runtime?: ContextRuntime<Env>
+  /**
+   * Backward-compatible runtime selector. New callers should pass `runtime`.
+   */
+  env?: Env
   /**
    * Context selector (exclusive: `{ id }` OR `{ key }`).
    * - `{ id }` resolves a concrete context id.
@@ -154,6 +158,34 @@ export type ContextReactParams<Env extends ContextEnvironment = ContextEnvironme
     execution: ContextExecution
   }
   __benchmark?: ContextBenchmarkRecorder
+}
+
+async function legacyRuntimeFromEnv<Env extends ContextEnvironment>(
+  env: Env,
+): Promise<ContextRuntime<Env>> {
+  const { getContextRuntime } = await import("./runtime.step.js")
+  const legacy = (await getContextRuntime(env)) as any
+  return {
+    env,
+    db: async () => legacy.db,
+    resolve: async () => ({
+      db: legacy.db,
+      meta: () => ({
+        domain: legacy.domain,
+      }),
+    }),
+    meta: () => ({
+      domain: legacy.domain,
+    }),
+  } as ContextRuntime<Env>
+}
+
+async function resolveReactRuntime<Env extends ContextEnvironment>(
+  params: ContextReactParams<Env>,
+): Promise<ContextRuntime<Env>> {
+  if (params.runtime) return params.runtime
+  if (params.env) return await legacyRuntimeFromEnv(params.env)
+  throw new Error("ContextEngine.react requires either runtime or env.")
 }
 
 export type ContextReactResult<Context = any> = {
@@ -762,11 +794,12 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
     triggerEvent: ContextItem,
     params: ContextReactParams<Env>,
   ) {
-    const env = params.runtime.env
+    const runtimeHandle = await resolveReactRuntime(params)
+    const env = runtimeHandle.env
     const ops = await measureBenchmark(
       params.__benchmark,
       "react.resolveOpsMs",
-      async () => await getContextEngineOps<Context>(params.runtime, params.__benchmark),
+      async () => await getContextEngineOps<Context>(runtimeHandle, params.__benchmark),
     )
 
     const silent = params.options?.silent ?? false
@@ -817,7 +850,8 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
     triggerEvent: ContextItem,
     params: ContextReactParams<Env>,
   ): Promise<ContextReactResult<Context>> {
-    const env = params.runtime.env
+    const runtimeHandle = await resolveReactRuntime(params)
+    const env = runtimeHandle.env
     if (params.options?.writable) {
       throw new Error("ContextEngine.react: durable runs manage their own workflow stream")
     }
@@ -859,7 +893,7 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
       const startedRun = await start(workflow, [
         {
           contextKey,
-          runtime: params.runtime,
+          runtime: runtimeHandle,
           context: params.context ?? null,
           triggerEvent,
           options: {
@@ -886,7 +920,7 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
         returnValue: startedRun.returnValue as Promise<ContextReactResult<Context>>,
       }
 
-      const runtime = await createRuntimeOps<Context>(params.runtime)
+      const runtime = await createRuntimeOps<Context>(runtimeHandle)
       await runtime.db.transact([
         runtime.db.tx.event_executions[shell.execution.id].update({
           workflowRunId: startedRun.runId,
@@ -894,7 +928,7 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
         }),
       ])
     } catch (error) {
-      const ops = await getContextEngineOps<Context>(params.runtime, params.__benchmark)
+      const ops = await getContextEngineOps<Context>(runtimeHandle, params.__benchmark)
       await ops.completeExecution(shell.contextSelector, shell.execution.id, "failed").catch(() => null)
       throw error
     }
@@ -913,11 +947,12 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
     triggerEvent: ContextItem,
     params: ContextReactParams<Env>,
   ) {
-    const env = params.runtime.env
+    const runtimeHandle = await resolveReactRuntime(params)
+    const env = runtimeHandle.env
     const ops = await measureBenchmark(
       params.__benchmark,
       "react.resolveOpsMs",
-      async () => await getContextEngineOps<Context>(params.runtime, params.__benchmark),
+      async () => await getContextEngineOps<Context>(runtimeHandle, params.__benchmark),
     )
 
     const maxIterations = params.options?.maxIterations ?? 20
@@ -1013,7 +1048,7 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
         )
         currentStepId = stepCreate.stepId
         currentStepStream = await createPersistedContextStepStream({
-          runtime: params.runtime,
+          runtime: runtimeHandle,
           executionId,
           stepId: stepCreate.stepId,
         })
@@ -1127,7 +1162,7 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
           `${stagePrefix}.reactorMs`,
           async () =>
             await reactor({
-              runtime: params.runtime,
+              runtime: runtimeHandle,
               env,
               context: updatedContext,
               contextIdentifier: activeContextSelector,
@@ -1251,7 +1286,7 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
         }
         if (currentStepStream) {
           await closePersistedContextStepStream({
-            runtime: params.runtime,
+            runtime: runtimeHandle,
             session: currentStepStream,
           })
           currentStepStream = null
@@ -1474,7 +1509,7 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
               }
 
               const output = await toolDef.execute(actionInput, {
-                runtime: params.runtime,
+                runtime: runtimeHandle,
                 env,
                 context: updatedContext,
                 contextIdentifier: activeContextSelector,
@@ -1735,7 +1770,7 @@ export abstract class ContextEngine<Context, Env extends ContextEnvironment = Co
       if (currentStepStream) {
         try {
           await abortPersistedContextStepStream({
-            runtime: params.runtime,
+            runtime: runtimeHandle,
             session: currentStepStream,
             reason: error instanceof Error ? error.message : String(error),
           })
