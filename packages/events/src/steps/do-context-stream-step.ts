@@ -1,7 +1,10 @@
 import type { ModelMessage, UIMessage, UIMessageChunk } from "ai"
 import type { ContextItem } from "../context.store.js"
 import { OUTPUT_ITEM_TYPE } from "../context.events.js"
-import type { SerializableActionSpec } from "../tools-to-model-tools.js"
+import {
+  actionSpecToAiSdkTool,
+  type SerializableActionSpec,
+} from "../tools-to-model-tools.js"
 import type { ContextModelInit } from "../context.engine.js"
 
 /**
@@ -55,10 +58,7 @@ export async function doContextStreamStep(params: {
   // `jsonSchema(...)` so the AI SDK does not attempt Zod conversion at runtime.
   const toolsForStreamText: Record<string, any> = {}
   for (const [name, t] of Object.entries(params.tools)) {
-    toolsForStreamText[name] = {
-      description: (t as any)?.description,
-      inputSchema: jsonSchema((t as any).inputSchema),
-    }
+    toolsForStreamText[name] = actionSpecToAiSdkTool(name, t, jsonSchema)
   }
 
   const result = streamText({

@@ -10,7 +10,10 @@ import {
   encodeContextStepStreamChunk,
 } from "../context.step-stream.js"
 import { mapAiSdkChunkToContextEvent } from "./ai-sdk.chunk-map.js"
-import type { SerializableActionSpec } from "../tools-to-model-tools.js"
+import {
+  actionSpecToAiSdkTool,
+  type SerializableActionSpec,
+} from "../tools-to-model-tools.js"
 import { writeContextTraceEvents } from "../steps/trace.steps.js"
 
 type WorkflowMeta = {
@@ -171,10 +174,7 @@ export async function executeAiSdkReaction(params: {
 
   const toolsForStreamText: Record<string, any> = {}
   for (const [name, t] of Object.entries(params.tools)) {
-    toolsForStreamText[name] = {
-      description: (t as any)?.description,
-      inputSchema: jsonSchema((t as any).inputSchema),
-    }
+    toolsForStreamText[name] = actionSpecToAiSdkTool(name, t, jsonSchema)
   }
 
   const startedAtMs = Date.now()
