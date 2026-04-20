@@ -1,13 +1,24 @@
 {
-  "name": "ekairos-cli",
+  "name": "@ekairos/cli",
   "version": "1.22.0",
   "description": "CLI for Ekairos components",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "bin": {
     "ekairos": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "SKILL.md",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -26,6 +37,7 @@
   ],
   "dependencies": {
     "@ekairos/dataset": "workspace:*",
+    "@ekairos/domain": "workspace:*",
     "@instantdb/admin": "0.22.126",
     "chalk": "^5.3.0",
     "execa": "^8.0.0",

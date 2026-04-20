@@ -1,30 +1,54 @@
 ---
 name: ekairos-domain-cli
-description: Operate Ekairos apps through the @ekairos/domain CLI. Use when scaffolding a fresh app, provisioning a starter Next app, inspecting a running domain endpoint, executing domain actions, or querying InstaQL with JSON5, stdin, or files.
+description: Operate Ekairos apps through the installed ekairos CLI. Use when scaffolding a fresh app, provisioning a starter Next app, inspecting a running domain endpoint, executing domain actions, or querying InstaQL with JSON5, stdin, or files.
 ---
 
 # ekairos-domain-cli
 
-Use this skill to get from app path to useful terminal commands quickly.
+Use this skill for terminal operation through the installed `ekairos` binary.
+
+## Setup
+
+Install the CLI globally:
+
+```bash
+npm install -g @ekairos/cli
+```
+
+All examples assume `ekairos` is available on PATH.
 
 ## Start From Zero
 
 Prefer the scaffold first:
 
 ```bash
-npx @ekairos/domain create-app my-app --next
+ekairos create-app my-app --next --install --smoke
+```
+
+For a full local demo cycle:
+
+```bash
+ekairos create-app --demo
+```
+
+`--demo` uses the supply-chain template, installs dependencies, provisions Instant from `INSTANT_PERSONAL_ACCESS_TOKEN`, runs smoke, and keeps a local review server alive.
+
+For non-interactive agent or CI runs:
+
+```bash
+ekairos create-app my-app --next --install --smoke --json
 ```
 
 When you already have an Instant platform token, let the scaffold provision the app and write `.env.local`:
 
 ```bash
-npx @ekairos/domain create-app my-app --next --instantToken=$INSTANT_PERSONAL_ACCESS_TOKEN
+ekairos create-app my-app --next --instantToken=$INSTANT_PERSONAL_ACCESS_TOKEN
 ```
 
 For local monorepo iteration, point the scaffold to the workspace package:
 
 ```bash
-npx @ekairos/domain create-app my-app --next --workspace /path/to/ekairos
+ekairos create-app my-app --next --workspace /path/to/ekairos
 ```
 
 ## Operate A Running App
@@ -32,9 +56,9 @@ npx @ekairos/domain create-app my-app --next --workspace /path/to/ekairos
 No login is required for local apps that accept admin queries through the runtime route:
 
 ```bash
-npx @ekairos/domain inspect --baseUrl=http://localhost:3000 --admin --pretty
-npx @ekairos/domain seedDemo --baseUrl=http://localhost:3000 --admin --pretty
-npx @ekairos/domain query "{ app_tasks: { comments: {} } }" --baseUrl=http://localhost:3000 --admin --pretty
+ekairos domain inspect --baseUrl=http://localhost:3000 --admin --pretty
+ekairos domain "supplyChain.order.launch" "{ reference: 'PO-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }" --baseUrl=http://localhost:3000 --admin --pretty
+ekairos domain query "{ procurement_order: { supplier: {}, stockItems: {}, shipments: { inspections: {} } } }" --baseUrl=http://localhost:3000 --admin --pretty
 ```
 
 New apps expose `/api/ekairos/domain`.
@@ -45,14 +69,14 @@ The CLI tries that route first and falls back to legacy `/.well-known/ekairos/v1
 Prefer JSON5 over strict JSON. This keeps commands readable:
 
 ```bash
-npx @ekairos/domain query "{ app_tasks: { $: { limit: 5 }, comments: {} } }" --baseUrl=http://localhost:3000 --admin
+ekairos domain query "{ procurement_order: { $: { limit: 5 }, supplier: {} } }" --baseUrl=http://localhost:3000 --admin
 ```
 
 When shell quoting gets ugly, use a file or stdin:
 
 ```bash
-npx @ekairos/domain query @query.json5 --baseUrl=http://localhost:3000 --admin
-cat query.json5 | npx @ekairos/domain query - --baseUrl=http://localhost:3000 --admin
+ekairos domain query @query.json5 --baseUrl=http://localhost:3000 --admin
+cat query.json5 | ekairos domain query - --baseUrl=http://localhost:3000 --admin
 ```
 
 ## Use User Contexts
@@ -67,7 +91,7 @@ Exactly one auth context should be active:
 If the app uses a refresh token, store it once:
 
 ```bash
-npx @ekairos/domain login http://localhost:3000 --refreshToken=<token> --appId=<app-id>
+ekairos domain login http://localhost:3000 --refreshToken=<token> --appId=<app-id>
 ```
 
 Then query again with no extra auth flag to use the client runtime path.
@@ -77,9 +101,10 @@ Then query again with no extra auth flag to use the client runtime path.
 Add `--meta` when you need to know whether the result came from the local client runtime or the server route:
 
 ```bash
-npx @ekairos/domain query "{ app_tasks: {} }" --meta
+ekairos domain query "{ procurement_order: {} }" --meta
 ```
 
-## Read Next
+## Related Skills
 
-- Read `references/command-cookbook.md` for the most common command recipes.
+- Domain modeling: `../../packages/domain/SKILL.md`
+- CLI package operation: `../../packages/cli/SKILL.md`

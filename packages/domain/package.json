@@ -5,14 +5,12 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "ekairos-domain": "./dist/cli/bin.js"
-  },
   "sideEffects": [
     "./dist/runtime-handle.js"
   ],
   "files": [
-    "dist"
+    "dist",
+    "SKILL.md"
   ],
   "publishConfig": {
     "access": "public"

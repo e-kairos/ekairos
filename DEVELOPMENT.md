@@ -44,7 +44,7 @@ Si el CLI reescribe el archivo con otro puerto, vuelve a editarlo antes de conti
 
 ### 4. Usar el CLI contra el Registry Local
 
-Puedes usar el binario publicado (`npx ekairos@latest`) o el build local (`node packages/cli/dist/index.js`). Para automatizar tareas (bandera `--action`) se recomienda el build local.
+Instala el CLI publicado una vez (`npm install -g @ekairos/cli`) y usa siempre el binario `ekairos`. Para automatizar tareas locales antes de publicar, usa el build local (`node packages/cli/dist/index.js`).
 
 #### 4.1. Iniciar sesión async
 

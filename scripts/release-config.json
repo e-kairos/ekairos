@@ -9,7 +9,7 @@
     { "name": "@ekairos/toolbar", "dir": "packages/toolbar", "publicAccess": true },
     { "name": "@ekairos/openai-reactor", "dir": "packages/reactors/openai-reactor", "publicAccess": true },
     { "name": "@ekairos/testing", "dir": "packages/ekairos-test", "publicAccess": true },
-    { "name": "ekairos-cli", "dir": "packages/cli", "publicAccess": false },
+    { "name": "@ekairos/cli", "dir": "packages/cli", "publicAccess": true },
     { "name": "ekairos", "dir": "packages/ekairos", "publicAccess": false }
   ],
   "preparePackages": [
@@ -35,6 +35,6 @@
     "@ekairos/story-react": "packages/story-react",
     "@ekairos/openai-reactor": "packages/reactors/openai-reactor",
     "ekairos": "packages/ekairos",
-    "ekairos-cli": "packages/cli"
+    "@ekairos/cli": "packages/cli"
   }
 }

@@ -145,7 +145,9 @@ export default function App() {
 
       {(state.step === 'prompt-action' || state.step === 'init-shadcn') && (
         <Box flexDirection="column">
-          <Text marginBottom={1}>{state.message}</Text>
+          <Box marginBottom={1}>
+            <Text>{state.message}</Text>
+          </Box>
           <Text>What would you like to do?</Text>
           <SelectInput items={options} onSelect={handleSelect} />
         </Box>

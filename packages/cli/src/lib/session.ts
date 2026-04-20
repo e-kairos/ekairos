@@ -11,7 +11,7 @@ export interface SessionState {
     error?: string;
 }
 
-const TMP_DIR = path.join(os.tmpdir(), 'ekairos-cli-sessions');
+const TMP_DIR = path.join(os.tmpdir(), 'ekairos-package-cli-sessions');
 
 export async function createSession(): Promise<SessionState> {
     const sessionId = crypto.randomUUID();

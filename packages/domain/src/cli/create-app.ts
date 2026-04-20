@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
+import { createServer } from "node:net"
 import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
 import { PlatformApi } from "@instantdb/platform"
@@ -13,6 +14,7 @@ export type CreateDomainAppProgressStage =
   | "write-files"
   | "write-env"
   | "install"
+  | "smoke"
   | "complete"
 
 export type CreateDomainAppProgressEvent = {
@@ -26,6 +28,7 @@ export type CreateDomainAppParams = {
   directory: string
   framework: "next"
   install: boolean
+  demo?: boolean
   force?: boolean
   packageManager?: string
   workspacePath?: string
@@ -33,7 +36,29 @@ export type CreateDomainAppParams = {
   orgId?: string
   appId?: string
   adminToken?: string
+  smoke?: boolean
+  keepServer?: boolean
+  onKeepServer?: (server: { unref: () => void }) => void
   onProgress?: (event: CreateDomainAppProgressEvent) => void | Promise<void>
+}
+
+export type CreateDomainAppSmokeResult = {
+  ok: true
+  baseUrl: string
+  keepServer: boolean
+  pid: number | null
+  typecheck: true
+  domainEndpoint: true
+  inspect: {
+    entities: number
+    actions: number
+  }
+  launchedOrder: boolean
+  query: {
+    inspections: number
+    orders: number
+    shipments: number
+  }
 }
 
 export type CreateDomainAppResult = {
@@ -45,6 +70,10 @@ export type CreateDomainAppResult = {
   provisioned: boolean
   appId: string | null
   adminToken: string | null
+  adminTokenWritten: boolean
+  envFile: string | null
+  smoke: CreateDomainAppSmokeResult | null
+  demo: boolean
   nextSteps: string[]
 }
 
@@ -52,6 +81,7 @@ const TEMPLATE_NEXT_VERSION = "15.5.7"
 const TEMPLATE_REACT_VERSION = "19.2.1"
 const TEMPLATE_TYPESCRIPT_VERSION = "^5.9.2"
 const TEMPLATE_INSTANT_VERSION = "0.22.126"
+const TEMPLATE_INSTANT_REACT_VERSION = "0.22.126"
 const TEMPLATE_WORKFLOW_VERSION = "^5.0.0-beta.1"
 
 function trimOrEmpty(value: unknown) {
@@ -116,53 +146,156 @@ async function readDomainPackageVersion() {
 }
 
 function createScaffoldSchema() {
-  const scaffoldDomain = domain("ekairos.app").schema({
-    entities: {
-      app_tasks: i.entity({
-        title: i.string().indexed(),
-        status: i.string().indexed(),
-        createdAt: i.number().indexed(),
-      }),
-      app_task_comments: i.entity({
-        body: i.string(),
-        createdAt: i.number().indexed(),
-      }),
-    },
-    links: {
-      taskComments: {
-        forward: { on: "app_tasks", has: "many", label: "comments" },
-        reverse: { on: "app_task_comments", has: "one", label: "task" },
-      },
-    },
+  return createSupplyChainScaffoldSchema()
+}
+
+function createEmptyScaffoldSchema() {
+  const scaffoldDomain = domain("app").schema({
+    entities: {},
+    links: {},
     rooms: {},
   })
 
   return scaffoldDomain.toInstantSchema()
 }
 
+function createSupplyChainScaffoldSchema() {
+  const supplierNetworkDomain = domain("supplierNetwork").schema({
+    entities: {
+      supplierNetwork_supplier: i.entity({
+        name: i.string().indexed(),
+        region: i.string().indexed(),
+        risk: i.string().indexed(),
+        score: i.number().indexed(),
+        createdAt: i.number().indexed(),
+      }),
+    },
+    links: {},
+    rooms: {},
+  })
+
+  const procurementDomain = domain("procurement")
+    .includes(supplierNetworkDomain)
+    .schema({
+      entities: {
+        procurement_order: i.entity({
+          reference: i.string().indexed(),
+          status: i.string().indexed(),
+          spend: i.number().indexed(),
+          createdAt: i.number().indexed(),
+        }),
+      },
+      links: {
+        procurement_orderSupplier: {
+          forward: { on: "procurement_order", has: "one", label: "supplier" },
+          reverse: { on: "supplierNetwork_supplier", has: "many", label: "orders" },
+        },
+      },
+      rooms: {},
+    })
+
+  const inventoryDomain = domain("inventory")
+    .includes(procurementDomain)
+    .schema({
+      entities: {
+        inventory_stockItem: i.entity({
+          sku: i.string().indexed(),
+          warehouse: i.string().indexed(),
+          available: i.number().indexed(),
+          safetyStock: i.number().indexed(),
+          createdAt: i.number().indexed(),
+        }),
+      },
+      links: {
+        inventory_stockItemOrder: {
+          forward: { on: "inventory_stockItem", has: "one", label: "order" },
+          reverse: { on: "procurement_order", has: "many", label: "stockItems" },
+        },
+      },
+      rooms: {},
+    })
+
+  const transportationDomain = domain("transportation")
+    .includes(procurementDomain)
+    .schema({
+      entities: {
+        transportation_shipment: i.entity({
+          carrier: i.string().indexed(),
+          lane: i.string().indexed(),
+          status: i.string().indexed(),
+          etaHours: i.number().indexed(),
+          createdAt: i.number().indexed(),
+        }),
+      },
+      links: {
+        transportation_shipmentOrder: {
+          forward: { on: "transportation_shipment", has: "one", label: "order" },
+          reverse: { on: "procurement_order", has: "many", label: "shipments" },
+        },
+      },
+      rooms: {},
+    })
+
+  const qualityControlDomain = domain("qualityControl")
+    .includes(transportationDomain)
+    .schema({
+      entities: {
+        qualityControl_inspection: i.entity({
+          result: i.string().indexed(),
+          severity: i.string().indexed(),
+          note: i.string(),
+          createdAt: i.number().indexed(),
+        }),
+      },
+      links: {
+        qualityControl_inspectionShipment: {
+          forward: { on: "qualityControl_inspection", has: "one", label: "shipment" },
+          reverse: { on: "transportation_shipment", has: "many", label: "inspections" },
+        },
+      },
+      rooms: {},
+    })
+
+  const scaffoldDomain = domain("supplyChain")
+    .includes(inventoryDomain)
+    .includes(qualityControlDomain)
+    .schema({ entities: {}, links: {}, rooms: {} })
+
+  return scaffoldDomain.toInstantSchema()
+}
+
 function createScaffoldPerms() {
+  return createSupplyChainScaffoldPerms()
+}
+
+function createEmptyScaffoldPerms() {
   return {
     attrs: {
       allow: { create: "true" },
     },
-    app_tasks: {
-      bind: ["isLoggedIn", "auth.id != null"],
-      allow: {
-        view: "true",
-        create: "isLoggedIn",
-        update: "isLoggedIn",
-        delete: "false",
-      },
+  } as any
+}
+
+function createSupplyChainScaffoldPerms() {
+  const entityRules = {
+    bind: ["isLoggedIn", "auth.id != null"],
+    allow: {
+      view: "true",
+      create: "isLoggedIn",
+      update: "isLoggedIn",
+      delete: "false",
     },
-    app_task_comments: {
-      bind: ["isLoggedIn", "auth.id != null"],
-      allow: {
-        view: "true",
-        create: "isLoggedIn",
-        update: "isLoggedIn",
-        delete: "false",
-      },
+  }
+
+  return {
+    attrs: {
+      allow: { create: "true" },
     },
+    supplierNetwork_supplier: entityRules,
+    procurement_order: entityRules,
+    inventory_stockItem: entityRules,
+    transportation_shipment: entityRules,
+    qualityControl_inspection: entityRules,
   } as any
 }
 
@@ -178,6 +311,386 @@ function runScriptCommandFor(packageManager: string, script: string) {
   if (packageManager === "yarn") return `yarn ${script}`
   if (packageManager === "bun") return `bun run ${script}`
   return `npm run ${script}`
+}
+
+function packageBinCommandFor(packageManager: string, command: string) {
+  void command
+  return "ekairos domain"
+}
+
+function typecheckCommandFor(packageManager: string) {
+  if (packageManager === "pnpm") return { command: "pnpm", args: ["typecheck"] }
+  if (packageManager === "yarn") return { command: "yarn", args: ["typecheck"] }
+  if (packageManager === "bun") return { command: "bun", args: ["run", "typecheck"] }
+  return { command: "npm", args: ["run", "typecheck"] }
+}
+
+function nextDevCommandFor(targetDir: string, port: number) {
+  return {
+    command: process.execPath,
+    args: [
+      join(targetDir, "node_modules", "next", "dist", "bin", "next"),
+      "dev",
+      "--hostname",
+      "127.0.0.1",
+      "--port",
+      String(port),
+    ],
+  }
+}
+
+async function runCommand(params: {
+  targetDir: string
+  command: string
+  args: string[]
+  timeoutMs?: number
+}) {
+  const timeoutMs = params.timeoutMs ?? 2 * 60 * 1000
+  await new Promise<void>((resolveRun, rejectRun) => {
+    const child = spawn(params.command, params.args, {
+      cwd: params.targetDir,
+      env: process.env,
+      shell: process.platform === "win32",
+      stdio: "pipe",
+    })
+
+    let output = ""
+    const timer = setTimeout(() => {
+      stopProcess(child.pid)
+      rejectRun(new Error(`${params.command} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    child.stdout.on("data", (chunk) => {
+      output += chunk.toString()
+    })
+    child.stderr.on("data", (chunk) => {
+      output += chunk.toString()
+    })
+    child.on("error", (error) => {
+      clearTimeout(timer)
+      rejectRun(error)
+    })
+    child.on("close", (code) => {
+      clearTimeout(timer)
+      if (code === 0) {
+        resolveRun()
+        return
+      }
+      rejectRun(
+        new Error(
+          output.trim() || `${params.command} failed with exit code ${code ?? "unknown"}`,
+        ),
+      )
+    })
+  })
+}
+
+async function reservePort() {
+  return await new Promise<number>((resolvePort, rejectPort) => {
+    const server = createServer()
+    server.once("error", rejectPort)
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address()
+      if (!address || typeof address === "string") {
+        rejectPort(new Error("Failed to reserve smoke port"))
+        return
+      }
+      const port = address.port
+      server.close((error) => {
+        if (error) rejectPort(error)
+        else resolvePort(port)
+      })
+    })
+  })
+}
+
+function stopProcess(pid: number | undefined) {
+  if (!pid) return
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+    })
+    return
+  }
+  try {
+    process.kill(-pid, "SIGTERM")
+  } catch {
+    try {
+      process.kill(pid, "SIGTERM")
+    } catch {
+      // Process already exited.
+    }
+  }
+}
+
+function quotePowerShellString(value: string) {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+function startDetachedWindowsProcess(params: {
+  args: string[]
+  command: string
+  targetDir: string
+}) {
+  const argumentList = params.args.map(quotePowerShellString).join(", ")
+  const script = [
+    `$p = Start-Process -FilePath ${quotePowerShellString(params.command)} ` +
+      `-ArgumentList @(${argumentList}) ` +
+      `-WorkingDirectory ${quotePowerShellString(params.targetDir)} ` +
+      "-WindowStyle Hidden -PassThru",
+    "Write-Output $p.Id",
+  ].join("; ")
+
+  const result = spawnSync(
+    "powershell.exe",
+    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+    {
+      encoding: "utf8",
+      stdio: "pipe",
+    },
+  )
+
+  if ((result.status ?? 1) !== 0) {
+    throw new Error(
+      result.stderr?.trim() ||
+        result.stdout?.trim() ||
+        "Failed to start detached Next dev server",
+    )
+  }
+
+  const pid = Number(String(result.stdout ?? "").trim().split(/\s+/).pop())
+  return Number.isFinite(pid) && pid > 0 ? pid : null
+}
+
+async function fetchJsonWithTimeout(url: string, init?: RequestInit, timeoutMs = 10_000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    })
+    const data = await response.json().catch(() => null)
+    return { response, data: data as any }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function waitForDomainEndpoint(params: {
+  baseUrl: string
+  processExited: () => boolean
+  readLogs: () => string
+}) {
+  const endpoint = `${params.baseUrl}/api/ekairos/domain`
+  const deadline = Date.now() + 3 * 60 * 1000
+  let lastError = ""
+
+  while (Date.now() < deadline) {
+    if (params.processExited()) {
+      throw new Error(`Next dev server exited before smoke endpoint was ready.\n${params.readLogs()}`)
+    }
+
+    try {
+      const { response, data } = await fetchJsonWithTimeout(endpoint)
+      if (response.ok && data?.ok === true) return data
+      lastError = `status:${response.status}`
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error)
+    }
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 1000))
+  }
+
+  throw new Error(`Timed out waiting for ${endpoint}: ${lastError}\n${params.readLogs()}`)
+}
+
+function countCollection(value: unknown) {
+  if (Array.isArray(value)) return value.length
+  if (value && typeof value === "object") return Object.keys(value as Record<string, unknown>).length
+  return 0
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+async function postSmokeJson(baseUrl: string, body: Record<string, unknown>) {
+  const { response, data } = await fetchJsonWithTimeout(
+    `${baseUrl}/api/ekairos/domain`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    30_000,
+  )
+  if (!response.ok || data?.ok !== true) {
+    throw new Error(
+      data?.error || `Smoke request failed with status ${response.status}`,
+    )
+  }
+  return data
+}
+
+async function runSmoke(params: {
+  demo?: boolean
+  targetDir: string
+  packageManager: string
+  keepServer: boolean
+  onKeepServer?: CreateDomainAppParams["onKeepServer"]
+  onProgress?: CreateDomainAppParams["onProgress"]
+}): Promise<CreateDomainAppSmokeResult> {
+  await emitProgress(params.onProgress, {
+    stage: "smoke",
+    status: "running",
+    message: "Running typecheck",
+    progress: 97,
+  })
+  const typecheck = typecheckCommandFor(params.packageManager)
+  await runCommand({
+    targetDir: params.targetDir,
+    command: typecheck.command,
+    args: typecheck.args,
+  })
+
+  const port = await reservePort()
+  const baseUrl = `http://127.0.0.1:${port}`
+  const dev = nextDevCommandFor(params.targetDir, port)
+  let logs = ""
+  let smokePassed = false
+  let detachedPid: number | null = null
+  const child =
+    params.keepServer && process.platform === "win32"
+      ? null
+      : spawn(dev.command, dev.args, {
+          cwd: params.targetDir,
+          env: process.env,
+          detached: params.keepServer,
+          shell: false,
+          stdio: params.keepServer ? "ignore" : "pipe",
+        })
+
+  if (params.keepServer && process.platform === "win32") {
+    detachedPid = startDetachedWindowsProcess({
+      targetDir: params.targetDir,
+      command: dev.command,
+      args: dev.args,
+    })
+  }
+
+  if (child && !params.keepServer) {
+    child.stdout?.on("data", (chunk) => {
+      logs += chunk.toString()
+    })
+    child.stderr?.on("data", (chunk) => {
+      logs += chunk.toString()
+    })
+  }
+
+  try {
+    await emitProgress(params.onProgress, {
+      stage: "smoke",
+      status: "running",
+      message: `Waiting for ${baseUrl}`,
+      progress: 98,
+    })
+    const manifest = await waitForDomainEndpoint({
+      baseUrl,
+      processExited: () => (child ? child.exitCode !== null : false),
+      readLogs: () => logs,
+    })
+
+    let launchedOrder = false
+    let orders: unknown[] = []
+    let shipments = 0
+    let inspections = 0
+
+    if (params.demo) {
+      const launch = await postSmokeJson(baseUrl, {
+        op: "action",
+        action: "supplyChain.order.launch",
+        input: {
+          reference: "PO-SMOKE-7842",
+          sku: "DRV-2048",
+          supplierName: "Marula Components",
+        },
+        admin: true,
+      })
+      if (String(launch.action ?? "") !== "supplyChain.order.launch") {
+        throw new Error("Smoke launch order action returned an unexpected action")
+      }
+      launchedOrder = true
+
+      const query = await postSmokeJson(baseUrl, {
+        op: "query",
+        query: {
+          procurement_order: {
+            supplier: {},
+            stockItems: {},
+            shipments: {
+              inspections: {},
+            },
+          },
+        },
+        admin: true,
+      })
+      orders = asArray(query?.data?.procurement_order)
+      shipments = orders.reduce<number>((total, order) => {
+        return total + asArray((order as any)?.shipments).length
+      }, 0)
+      inspections = orders.reduce<number>((total, order) => {
+        const orderShipments = asArray((order as any)?.shipments)
+        return total + orderShipments.reduce<number>((shipmentTotal, shipment) => {
+          return shipmentTotal + asArray((shipment as any)?.inspections).length
+        }, 0)
+      }, 0)
+    }
+
+    smokePassed = true
+
+    const result: CreateDomainAppSmokeResult = {
+      ok: true,
+      baseUrl,
+      keepServer: params.keepServer,
+      pid: detachedPid ?? child?.pid ?? null,
+      typecheck: true,
+      domainEndpoint: true,
+      inspect: {
+        entities: countCollection(manifest?.domain?.entities),
+        actions: countCollection(manifest?.actions),
+      },
+      launchedOrder,
+      query: {
+        inspections,
+        orders: orders.length,
+        shipments,
+      },
+    }
+
+    await emitProgress(params.onProgress, {
+      stage: "smoke",
+      status: "completed",
+      message: params.keepServer
+        ? `Smoke passed and server is running at ${baseUrl}`
+        : "Smoke passed",
+      progress: 99,
+    })
+
+    if (params.keepServer) {
+      params.onKeepServer?.({
+        unref() {
+          child?.unref()
+        },
+      })
+    }
+
+    return result
+  } finally {
+    if (!params.keepServer || !smokePassed) {
+      stopProcess(detachedPid ?? child?.pid)
+    }
+  }
 }
 
 async function provisionInstantApp(params: {
@@ -308,6 +821,7 @@ function resolveDomainDependencyVersion(
 }
 
 function buildNextTemplateFiles(params: {
+  demo?: boolean
   targetDir: string
   domainVersion: string
   packageManager: string
@@ -334,6 +848,7 @@ function buildNextTemplateFiles(params: {
       "@ekairos/domain": domainDependency,
       "@instantdb/admin": TEMPLATE_INSTANT_VERSION,
       "@instantdb/core": TEMPLATE_INSTANT_VERSION,
+      "@instantdb/react": TEMPLATE_INSTANT_REACT_VERSION,
       next: TEMPLATE_NEXT_VERSION,
       react: TEMPLATE_REACT_VERSION,
       "react-dom": TEMPLATE_REACT_VERSION,
@@ -353,6 +868,244 @@ function buildNextTemplateFiles(params: {
           : undefined,
   }
 
+  if (!params.demo) {
+    return {
+      ".gitignore": [".next", "node_modules", ".env.local", ".workflow-data"].join("\n"),
+      ".env.example": [
+        "NEXT_PUBLIC_INSTANT_APP_ID=",
+        "INSTANT_ADMIN_TOKEN=",
+        "",
+        "# Optional: use this only while provisioning new apps with the CLI.",
+        "INSTANT_PERSONAL_ACCESS_TOKEN=",
+      ].join("\n"),
+      "DOMAIN.md": [
+        "# Ekairos App Domain",
+        "",
+        "This app starts empty on purpose.",
+        "",
+        "Add your first domain in `src/domain.ts`, then expose it through `src/runtime.ts` and `/api/ekairos/domain`.",
+        "",
+        "Suggested first step:",
+        "- create one domain with camelCase name",
+        "- name entities as `<domainName>_<entityName>`",
+        "- add one `defineDomainAction` for the first business write",
+      ].join("\n"),
+      "instant.schema.ts": [
+        'import appDomain from "./src/domain";',
+        "",
+        "const schema = appDomain.toInstantSchema();",
+        "",
+        "export default schema;",
+      ].join("\n"),
+      "next-env.d.ts": [
+        '/// <reference types="next" />',
+        '/// <reference types="next/image-types/global" />',
+        "",
+        "// This file is managed by Next.js.",
+      ].join("\n"),
+      "next.config.ts": [
+        'import type { NextConfig } from "next";',
+        'import { withWorkflow } from "workflow/next";',
+        "",
+        "const nextConfig: NextConfig = {",
+        "  transpilePackages: [\"@ekairos/domain\"],",
+        "};",
+        "",
+        "export default withWorkflow(nextConfig) as NextConfig;",
+      ].join("\n"),
+      "src/app/api/ekairos/domain/route.ts": [
+        'import { createRuntimeRouteHandler } from "@ekairos/domain/next";',
+        'import { createRuntime } from "@/runtime";',
+        "",
+        "export const { GET, POST } = createRuntimeRouteHandler({",
+        "  createRuntime,",
+        "});",
+      ].join("\n"),
+      "package.json": `${JSON.stringify(packageJson, null, 2)}\n`,
+      "tsconfig.json": [
+        "{",
+        '  "compilerOptions": {',
+        '    "target": "ES2022",',
+        '    "lib": ["dom", "dom.iterable", "es2022"],',
+        '    "allowJs": false,',
+        '    "skipLibCheck": true,',
+        '    "strict": true,',
+        '    "noEmit": true,',
+        '    "esModuleInterop": true,',
+        '    "module": "esnext",',
+        '    "moduleResolution": "bundler",',
+        '    "resolveJsonModule": true,',
+        '    "isolatedModules": true,',
+        '    "jsx": "preserve",',
+        '    "incremental": true,',
+        '    "baseUrl": ".",',
+        '    "paths": {',
+        '      "@/*": ["./src/*"]',
+        "    }",
+        "  },",
+        '  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],',
+        '  "exclude": ["node_modules"]',
+        "}",
+      ].join("\n"),
+      "src/app/globals.css": [
+        ":root {",
+        "  color-scheme: light;",
+        "  --background: #f7f8f6;",
+        "  --foreground: #181b18;",
+        "  --muted: #626a63;",
+        "  --border: #d9ded7;",
+        "  --surface: #ffffff;",
+        "  --accent: #2f6f5d;",
+        "}",
+        "",
+        "* { box-sizing: border-box; }",
+        "html, body { margin: 0; min-height: 100%; }",
+        "body { min-height: 100dvh; background: var(--background); color: var(--foreground); font-family: \"Segoe UI\", sans-serif; }",
+        "button, input { font: inherit; }",
+        "main { width: min(980px, calc(100% - 40px)); margin: 0 auto; padding: 48px 0; }",
+        ".shell { display: grid; gap: 24px; }",
+        ".eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }",
+        "h1 { max-width: 720px; margin: 0; font-size: clamp(2.4rem, 6vw, 4.8rem); letter-spacing: -0.05em; line-height: 0.96; }",
+        "p { max-width: 64ch; margin: 0; color: var(--muted); line-height: 1.65; }",
+        ".workspace { display: grid; gap: 14px; border: 1px solid var(--border); background: var(--surface); padding: 22px; }",
+        ".status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); }",
+        ".status-grid div { display: grid; gap: 6px; padding: 14px; border-right: 1px solid var(--border); }",
+        ".status-grid div:last-child { border-right: 0; }",
+        ".status-grid span { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }",
+        ".status-grid strong { font-size: 1.4rem; }",
+        ".next-steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }",
+        ".next-steps li { border-top: 1px solid var(--border); padding-top: 10px; color: var(--muted); }",
+        "code { font-family: \"Cascadia Code\", monospace; }",
+        "@media (max-width: 720px) { main { width: min(100% - 28px, 980px); } .status-grid { grid-template-columns: 1fr; } .status-grid div { border-right: 0; border-bottom: 1px solid var(--border); } }",
+      ].join("\n"),
+      "src/app/layout.tsx": [
+        'import "./globals.css";',
+        'import type { ReactNode } from "react";',
+        "",
+        "export const metadata = {",
+        '  title: "Ekairos App",',
+        '  description: "Scaffolded Ekairos app",',
+        "};",
+        "",
+        "export default function RootLayout({ children }: { children: ReactNode }) {",
+        "  return (",
+        '    <html lang="en">',
+        "      <body>{children}</body>",
+        "    </html>",
+        "  );",
+        "}",
+      ].join("\n"),
+      "src/app/page.tsx": [
+        'import DomainWorkbench from "./domain-workbench";',
+        "",
+        'export const dynamic = "force-dynamic";',
+        "",
+        "export default function HomePage() {",
+        "  return (",
+        "    <main>",
+        '      <section className="shell">',
+        '        <div className="eyebrow">Ekairos App</div>',
+        "        <h1>Empty app. Runtime ready.</h1>",
+        "        <p>",
+        "          Start here when you want a clean app with the Ekairos runtime,",
+        "          domain endpoint, Instant configuration, and a place to add your first domain.",
+        "        </p>",
+        "        <DomainWorkbench />",
+        "      </section>",
+        "    </main>",
+        "  );",
+        "}",
+      ].join("\n"),
+      "src/app/domain-workbench.tsx": [
+        "export default function DomainWorkbench() {",
+        "  return (",
+        '    <section className="workspace">',
+        '      <div className="status-grid">',
+        "        <div><span>Runtime</span><strong>Ready</strong></div>",
+        "        <div><span>Endpoint</span><strong>/api</strong></div>",
+        "        <div><span>Domains</span><strong>0</strong></div>",
+        "      </div>",
+        "      <p>Add your first domain in <code>src/domain.ts</code>. Keep writes behind typed domain actions.</p>",
+        '      <ul className="next-steps">',
+        "        <li>Name the domain in camelCase.</li>",
+        "        <li>Name entities as <code>{\"<domainName>_<entityName>\"}</code>.</li>",
+        "        <li>Expose the first write as a <code>defineDomainAction</code>.</li>",
+        "      </ul>",
+        "    </section>",
+        "  );",
+        "}",
+      ].join("\n"),
+      "src/domain.ts": [
+        'import { domain } from "@ekairos/domain";',
+        "",
+        "const baseDomain = domain(\"app\").schema({",
+        "  entities: {},",
+        "  links: {},",
+        "  rooms: {},",
+        "});",
+        "",
+        "export const appDomain = baseDomain.actions({});",
+        "",
+        "export default appDomain;",
+      ].join("\n"),
+      "src/runtime.ts": [
+        'import { init } from "@instantdb/admin";',
+        'import { EkairosRuntime } from "@ekairos/domain/runtime-handle";',
+        'import { configureRuntime } from "@ekairos/domain/runtime";',
+        'import appDomain from "./domain";',
+        "",
+        "export type AppRuntimeEnv = {",
+        "  actorEmail?: string | null;",
+        "  actorId?: string;",
+        "  adminToken?: string;",
+        "  appId?: string;",
+        "};",
+        "",
+        "function resolveRuntimeEnv(env: AppRuntimeEnv = {}): Required<Pick<AppRuntimeEnv, \"appId\" | \"adminToken\">> & AppRuntimeEnv {",
+        '  const appId = String(env.appId ?? process.env.NEXT_PUBLIC_INSTANT_APP_ID ?? "").trim();',
+        '  const adminToken = String(env.adminToken ?? process.env.INSTANT_ADMIN_TOKEN ?? "").trim();',
+        "  if (!appId || !adminToken) {",
+        '    throw new Error("Missing NEXT_PUBLIC_INSTANT_APP_ID or INSTANT_ADMIN_TOKEN. Copy .env.example to .env.local and fill both values.");',
+        "  }",
+        "  return { ...env, appId, adminToken };",
+        "}",
+        "",
+        "export class AppRuntime extends EkairosRuntime<AppRuntimeEnv, typeof appDomain, any> {",
+        "  protected getDomain() { return appDomain; }",
+        "  protected async resolveDb(env: AppRuntimeEnv) {",
+        "    const resolved = resolveRuntimeEnv(env);",
+        "    return init({",
+        "      appId: resolved.appId,",
+        "      adminToken: resolved.adminToken,",
+        "      schema: appDomain.toInstantSchema(),",
+        "      useDateObjects: true,",
+        "    } as any) as any;",
+        "  }",
+        "}",
+        "",
+        "export function createRuntime(env: AppRuntimeEnv = {}) {",
+        "  return new AppRuntime(resolveRuntimeEnv(env));",
+        "}",
+        "",
+        "export const runtimeConfig = configureRuntime<AppRuntimeEnv>({",
+        "  runtime: async (env) => {",
+        "    const runtime = createRuntime(env);",
+        "    return { db: await runtime.db() };",
+        "  },",
+        "  domain: { domain: appDomain },",
+        "});",
+      ].join("\n"),
+      "src/workflows/demo.workflow.ts": [
+        "export type DemoWorkflowInput = Record<string, never>;",
+        "",
+        "export async function runDemoWorkflow(_input: DemoWorkflowInput) {",
+        '  "use workflow";',
+        "  return { ok: true };",
+        "}",
+      ].join("\n"),
+    }
+  }
+
   return {
     ".gitignore": [".next", "node_modules", ".env.local", ".workflow-data"].join("\n"),
     ".env.example": [
@@ -363,18 +1116,18 @@ function buildNextTemplateFiles(params: {
       "INSTANT_PERSONAL_ACCESS_TOKEN=",
     ].join("\n"),
     "DOMAIN.md": [
-      "# Ekairos App Domain",
+      "# Ekairos Supply Chain Domain",
       "",
-      "This scaffold ships a small task domain and a live domain showcase UI:",
-      "- inspect the domain through the well-known endpoint",
-      "- fetch the manifest and data directly from the app UI",
-      "- create tasks and seed demo data through domain actions",
-      "- query nested data through InstaQL",
+      "This scaffold ships a supply-chain control tower backed by separate domains:",
+      "- `supplierNetwork` owns supplier risk and score",
+      "- `procurement` owns purchase orders",
+      "- `inventory` owns stock position",
+      "- `transportation` owns shipments and ETA",
+      "- `qualityControl` owns arrival inspection",
       "",
       "Actions:",
-      "- `createTask` -> create one task",
-      "- `addTaskComment` -> attach one comment to a task",
-      "- `seedDemo` -> create demo data fast",
+      "- `launchOrder` -> creates and links supplier, order, stock, shipment, and inspection",
+      "- `expediteShipment` -> updates shipment status and ETA",
     ].join("\n"),
     "instant.schema.ts": [
       'import appDomain from "./src/domain";',
@@ -436,15 +1189,16 @@ function buildNextTemplateFiles(params: {
     "src/app/globals.css": [
       ":root {",
       "  color-scheme: light;",
-      "  --bg: #efe7da;",
-      "  --panel: #fffdf7;",
-      "  --panel-strong: #fff8ec;",
-      "  --ink: #1d1b19;",
-      "  --muted: #60584d;",
-      "  --accent: #0f766e;",
-      "  --accent-soft: #d9f3ef;",
-      "  --border: #d7cebf;",
-      "  --danger: #b42318;",
+      "  --bg: #f7f8f6;",
+      "  --surface: #ffffff;",
+      "  --surface-2: #f0f2ef;",
+      "  --ink: #171a18;",
+      "  --muted: #646b66;",
+      "  --accent: #26715f;",
+      "  --accent-soft: #dfece7;",
+      "  --border: #d9ded9;",
+      "  --line: #b9c1ba;",
+      "  --danger: #9f2f28;",
       "}",
       "",
       "* {",
@@ -455,15 +1209,13 @@ function buildNextTemplateFiles(params: {
       "body {",
       "  margin: 0;",
       "  min-height: 100%;",
-      "  background:",
-      "    radial-gradient(circle at top, #fff8ee 0%, rgba(255, 248, 238, 0.7) 28%, transparent 65%),",
-      "    linear-gradient(180deg, #f7f0e4 0%, var(--bg) 100%);",
+      "  background: var(--bg);",
       "  color: var(--ink);",
-      '  font-family: "Segoe UI", sans-serif;',
+      "  font-family: \"Geist\", \"Aptos\", \"Segoe UI\", sans-serif;",
       "}",
       "",
       "body {",
-      "  min-height: 100vh;",
+      "  min-height: 100dvh;",
       "}",
       "",
       "button,",
@@ -472,242 +1224,360 @@ function buildNextTemplateFiles(params: {
       "}",
       "",
       "main {",
-      "  max-width: 1180px;",
+      "  width: min(1240px, calc(100% - 40px));",
       "  margin: 0 auto;",
-      "  padding: 48px 24px 72px;",
+      "  padding: 44px 0 64px;",
       "}",
       "",
       ".hero {",
       "  display: grid;",
-      "  gap: 18px;",
-      "  max-width: 860px;",
+      "  gap: 14px;",
+      "  max-width: 720px;",
+      "  margin-bottom: 28px;",
       "}",
       "",
       ".eyebrow {",
       "  color: var(--accent);",
-      "  font-size: 12px;",
-      "  font-weight: 700;",
-      "  letter-spacing: 0.2em;",
+      "  font-size: 11px;",
+      "  font-weight: 800;",
+      "  letter-spacing: 0.16em;",
       "  text-transform: uppercase;",
       "}",
       "",
       "h1,",
       "h2 {",
       "  margin: 0;",
-      "  line-height: 0.96;",
+      "  letter-spacing: -0.04em;",
       "}",
       "",
       "h1 {",
-      "  font-size: clamp(2.7rem, 6vw, 5.4rem);",
+      "  max-width: 640px;",
+      "  font-size: clamp(2.4rem, 5.4vw, 4.8rem);",
+      "  line-height: 0.96;",
       "}",
       "",
       "h2 {",
-      "  font-size: 1.4rem;",
+      "  font-size: 1.28rem;",
+      "  line-height: 1.05;",
       "}",
       "",
       "p {",
       "  margin: 0;",
       "  color: var(--muted);",
-      "  line-height: 1.65;",
+      "  line-height: 1.6;",
       "}",
       "",
       ".shell {",
       "  display: grid;",
-      "  gap: 20px;",
-      "  margin-top: 32px;",
+      "  gap: 14px;",
       "}",
       "",
-      ".stat-grid {",
+      ".metrics-strip {",
       "  display: grid;",
-      "  gap: 16px;",
-      "  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));",
+      "  grid-template-columns: repeat(4, minmax(0, 1fr));",
+      "  border: 1px solid var(--border);",
+      "  background: var(--surface);",
       "}",
       "",
-      ".grid {",
+      ".metrics-strip div {",
       "  display: grid;",
-      "  gap: 20px;",
+      "  gap: 6px;",
+      "  padding: 16px;",
+      "  border-right: 1px solid var(--border);",
       "}",
       "",
-      ".showcase-grid {",
+      ".metrics-strip div:last-child {",
+      "  border-right: 0;",
+      "}",
+      "",
+      ".metrics-strip span,",
+      ".manifest-label {",
+      "  color: var(--muted);",
+      "  font-size: 11px;",
+      "  font-weight: 800;",
+      "  letter-spacing: 0.12em;",
+      "  text-transform: uppercase;",
+      "}",
+      "",
+      ".metrics-strip strong {",
+      "  font-size: 1.85rem;",
+      "  letter-spacing: -0.04em;",
+      "  line-height: 1;",
+      "}",
+      "",
+      ".workbench {",
+      "  display: grid;",
+      "  grid-template-columns: 0.8fr 1fr;",
+      "  gap: 14px;",
       "  align-items: start;",
       "}",
       "",
-      ".panel-tall,",
-      ".panel-wide,",
-      ".stat-card {",
-      "  min-height: 100%;",
-      "}",
-      "",
-      ".card {",
-      "  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-strong) 100%);",
+      ".context-rail,",
+      ".command-panel,",
+      ".graph-panel {",
       "  border: 1px solid var(--border);",
-      "  border-radius: 24px;",
-      "  padding: 22px;",
-      "  box-shadow: 0 18px 45px rgba(23, 23, 23, 0.06);",
+      "  background: var(--surface);",
       "}",
       "",
-      ".stat-card strong {",
-      "  display: block;",
-      "  margin-top: 8px;",
-      "  font-size: 2rem;",
+      ".context-rail,",
+      ".command-panel {",
+      "  padding: 18px;",
+      "}",
+      "",
+      ".graph-panel {",
+      "  grid-column: 1 / -1;",
+      "  padding: 18px;",
       "}",
       "",
       ".panel-head {",
       "  display: flex;",
-      "  align-items: flex-start;",
       "  justify-content: space-between;",
       "  gap: 16px;",
-      "  margin-bottom: 12px;",
+      "  align-items: start;",
+      "  margin-bottom: 16px;",
       "}",
       "",
-      ".manifest-list,",
-      ".action-list,",
-      ".task-list,",
-      ".comment-list {",
+      ".context-list,",
+      ".project-list,",
+      ".task-lines,",
+      ".lane-grid,",
+      ".calls-feed,",
+      ".button-row {",
       "  display: grid;",
-      "  gap: 12px;",
+      "  gap: 10px;",
       "}",
       "",
-      ".manifest-list {",
-      "  margin: 18px 0;",
+      ".context-row {",
+      "  display: grid;",
+      "  grid-template-columns: 0.7fr 1fr;",
+      "  gap: 14px;",
+      "  padding: 12px 0;",
+      "  border-top: 1px solid var(--border);",
+      "  opacity: 0;",
+      "  transform: translateY(8px);",
+      "  animation: lift-in 420ms cubic-bezier(0.16, 1, 0.3, 1) forwards;",
+      "  animation-delay: calc(var(--index) * 70ms);",
       "}",
       "",
-      ".manifest-list > div {",
-      "  display: flex;",
-      "  justify-content: space-between;",
-      "  gap: 16px;",
-      "  border-bottom: 1px dashed var(--border);",
-      "  padding-bottom: 10px;",
+      ".context-row span {",
+      "  font-weight: 800;",
       "}",
       "",
-      ".manifest-label {",
+      ".context-row strong {",
       "  color: var(--muted);",
-      "  font-weight: 600;",
+      "  font-size: 0.92rem;",
+      "  font-weight: 500;",
       "}",
       "",
       ".field {",
       "  display: grid;",
-      "  gap: 8px;",
-      "  margin: 18px 0;",
+      "  gap: 7px;",
+      "  margin: 14px 0;",
       "}",
       "",
       ".field span {",
-      "  font-size: 0.92rem;",
-      "  font-weight: 600;",
+      "  color: var(--muted);",
+      "  font-size: 0.85rem;",
+      "  font-weight: 700;",
       "}",
       "",
       ".input {",
       "  width: 100%;",
       "  border: 1px solid var(--border);",
-      "  border-radius: 16px;",
-      "  padding: 14px 16px;",
-      "  background: #fff;",
+      "  border-radius: 6px;",
+      "  padding: 12px 13px;",
+      "  background: var(--surface-2);",
       "  color: var(--ink);",
+      "  outline: none;",
+      "}",
+      "",
+      ".input:focus {",
+      "  border-color: var(--accent);",
+      "  background: var(--surface);",
       "}",
       "",
       ".button-row {",
-      "  display: flex;",
-      "  flex-wrap: wrap;",
-      "  gap: 12px;",
-      "  margin-bottom: 18px;",
+      "  grid-template-columns: repeat(2, minmax(0, 1fr));",
+      "  margin-top: 16px;",
       "}",
       "",
       ".button {",
       "  appearance: none;",
-      "  border: 0;",
-      "  border-radius: 999px;",
-      "  padding: 12px 18px;",
+      "  border: 1px solid var(--ink);",
+      "  border-radius: 6px;",
+      "  padding: 12px 14px;",
       "  background: var(--ink);",
-      "  color: #fffdf7;",
-      "  display: inline-flex;",
-      "  align-items: center;",
-      "  justify-content: center;",
-      "  gap: 10px;",
+      "  color: #ffffff;",
       "  cursor: pointer;",
-      "  transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;",
+      "  font-weight: 800;",
+      "  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms ease;",
       "}",
       "",
       ".button:hover:not(:disabled) {",
       "  transform: translateY(-1px);",
       "}",
       "",
+      ".button:active:not(:disabled) {",
+      "  transform: translateY(1px) scale(0.99);",
+      "}",
+      "",
       ".button:disabled {",
       "  cursor: wait;",
-      "  opacity: 0.72;",
+      "  opacity: 0.62;",
       "}",
       "",
       ".button.ghost {",
-      "  background: transparent;",
+      "  border-color: var(--border);",
+      "  background: var(--surface);",
       "  color: var(--ink);",
-      "  border: 1px solid var(--border);",
-      "}",
-      "",
-      ".spinner {",
-      "  width: 14px;",
-      "  height: 14px;",
-      "  border-radius: 999px;",
-      "  border: 2px solid rgba(255, 253, 247, 0.35);",
-      "  border-top-color: currentColor;",
-      "  animation: spin 0.8s linear infinite;",
-      "}",
-      "",
-      ".button.ghost .spinner {",
-      "  border-color: rgba(29, 27, 25, 0.18);",
-      "  border-top-color: currentColor;",
       "}",
       "",
       ".status-pill {",
       "  display: inline-flex;",
       "  align-items: center;",
       "  justify-content: center;",
-      "  padding: 6px 10px;",
-      "  border-radius: 999px;",
+      "  min-width: 86px;",
+      "  padding: 7px 10px;",
+      "  border-radius: 6px;",
       "  background: var(--accent-soft);",
       "  color: var(--accent);",
-      "  font-size: 12px;",
-      "  font-weight: 700;",
-      "  letter-spacing: 0.04em;",
+      "  font-size: 11px;",
+      "  font-weight: 800;",
+      "  letter-spacing: 0.08em;",
       "  text-transform: uppercase;",
       "}",
       "",
-      ".task-card {",
+      ".project-row {",
       "  display: grid;",
-      "  gap: 10px;",
-      "  padding: 16px;",
-      "  border-radius: 18px;",
-      "  border: 1px solid var(--border);",
-      "  background: rgba(255, 255, 255, 0.72);",
+      "  grid-template-columns: 1fr auto;",
+      "  gap: 14px;",
+      "  padding: 16px 0;",
+      "  border-top: 1px solid var(--border);",
       "}",
       "",
-      ".task-head {",
-      "  display: flex;",
-      "  align-items: center;",
-      "  justify-content: space-between;",
-      "  gap: 12px;",
+      ".project-row:first-child {",
+      "  border-top: 0;",
       "}",
       "",
-      ".comment-item {",
-      "  display: flex;",
-      "  align-items: flex-start;",
-      "  gap: 10px;",
+      ".project-row strong {",
+      "  display: block;",
+      "  font-size: 1.05rem;",
+      "}",
+      "",
+      ".project-row span {",
       "  color: var(--muted);",
       "}",
       "",
-      ".comment-dot {",
-      "  width: 8px;",
-      "  height: 8px;",
-      "  margin-top: 8px;",
-      "  border-radius: 999px;",
-      "  background: var(--accent);",
-      "  flex: 0 0 auto;",
+      ".project-meta {",
+      "  display: flex;",
+      "  flex-wrap: wrap;",
+      "  gap: 8px;",
+      "  justify-content: flex-end;",
       "}",
       "",
-      ".action-item {",
+      ".project-meta span {",
+      "  border: 1px solid var(--border);",
+      "  border-radius: 6px;",
+      "  padding: 5px 8px;",
+      "  color: var(--ink);",
+      "  font-size: 0.82rem;",
+      "  font-weight: 700;",
+      "}",
+      "",
+      ".task-lines {",
+      "  grid-column: 1 / -1;",
+      "  padding-top: 2px;",
+      "}",
+      "",
+      ".task-lines p {",
       "  display: grid;",
-      "  gap: 4px;",
-      "  padding: 12px 14px;",
-      "  border-radius: 16px;",
-      "  background: rgba(15, 118, 110, 0.06);",
+      "  grid-template-columns: minmax(180px, 0.8fr) minmax(180px, 1fr);",
+      "  gap: 12px;",
+      "  padding-left: 14px;",
+      "  border-left: 2px solid var(--line);",
+      "}",
+      "",
+      ".task-lines b {",
+      "  color: var(--ink);",
+      "}",
+      "",
+      ".task-lines em {",
+      "  grid-column: 1 / -1;",
+      "  color: var(--muted);",
+      "  font-style: normal;",
+      "}",
+      "",
+      ".raid-summary {",
+      "  display: grid;",
+      "  grid-template-columns: repeat(3, minmax(0, 1fr));",
+      "  border: 1px solid var(--border);",
+      "  margin-bottom: 14px;",
+      "}",
+      "",
+      ".raid-summary div {",
+      "  display: grid;",
+      "  gap: 6px;",
+      "  padding: 13px;",
+      "  border-right: 1px solid var(--border);",
+      "}",
+      "",
+      ".raid-summary div:last-child {",
+      "  border-right: 0;",
+      "}",
+      "",
+      ".raid-summary span {",
+      "  color: var(--muted);",
+      "  font-size: 11px;",
+      "  font-weight: 800;",
+      "  letter-spacing: 0.12em;",
+      "  text-transform: uppercase;",
+      "}",
+      "",
+      ".raid-summary strong {",
+      "  font-size: 1rem;",
+      "}",
+      "",
+      ".lane-grid {",
+      "  grid-template-columns: repeat(3, minmax(0, 1fr));",
+      "}",
+      "",
+      ".lane {",
+      "  min-height: 180px;",
+      "  border: 1px solid var(--border);",
+      "  padding: 12px;",
+      "  background: var(--surface-2);",
+      "}",
+      "",
+      ".objective {",
+      "  display: grid;",
+      "  gap: 5px;",
+      "  margin-top: 10px;",
+      "  padding: 10px;",
+      "  border: 1px solid var(--border);",
+      "  background: var(--surface);",
+      "}",
+      "",
+      ".objective span,",
+      ".objective em {",
+      "  color: var(--muted);",
+      "  font-size: 0.88rem;",
+      "  font-style: normal;",
+      "}",
+      "",
+      ".calls-feed {",
+      "  margin-top: 14px;",
+      "  padding-top: 14px;",
+      "  border-top: 1px solid var(--border);",
+      "}",
+      "",
+      ".calls-feed p {",
+      "  display: flex;",
+      "  justify-content: space-between;",
+      "  gap: 16px;",
+      "}",
+      "",
+      ".calls-feed b {",
+      "  color: var(--ink);",
       "}",
       "",
       ".muted {",
@@ -716,59 +1586,100 @@ function buildNextTemplateFiles(params: {
       "",
       ".empty-state,",
       ".error-banner {",
-      "  border-radius: 18px;",
-      "  padding: 16px;",
+      "  border: 1px solid var(--border);",
+      "  border-radius: 6px;",
+      "  padding: 14px;",
       "}",
       "",
       ".empty-state {",
-      "  background: rgba(15, 118, 110, 0.06);",
+      "  background: var(--surface-2);",
       "  color: var(--muted);",
       "}",
       "",
       ".error-banner {",
-      "  background: rgba(180, 35, 24, 0.08);",
+      "  background: #fff4f2;",
       "  color: var(--danger);",
-      "  border: 1px solid rgba(180, 35, 24, 0.16);",
+      "  border-color: #efc4bd;",
+      "}",
+      "",
+      ".skeleton-stack {",
+      "  display: grid;",
+      "  gap: 10px;",
+      "}",
+      "",
+      ".skeleton-stack span {",
+      "  display: block;",
+      "  height: 54px;",
+      "  border-radius: 6px;",
+      "  background: linear-gradient(90deg, var(--surface-2), #ffffff, var(--surface-2));",
+      "  background-size: 220% 100%;",
+      "  animation: shimmer 1.2s ease-in-out infinite;",
       "}",
       "",
       "pre {",
       "  overflow: auto;",
-      "  border-radius: 16px;",
-      "  padding: 14px;",
-      "  background: #171717;",
-      "  color: #f6f6f6;",
-      "  font-size: 13px;",
-      "  line-height: 1.5;",
+      "  margin-top: 14px;",
+      "  border-radius: 6px;",
+      "  padding: 12px;",
+      "  background: #1d211f;",
+      "  color: #eef5f1;",
+      "  font-size: 12px;",
+      "  line-height: 1.45;",
       "}",
       "",
       "code {",
-      '  font-family: "Cascadia Code", monospace;',
+      "  font-family: \"Geist Mono\", \"Cascadia Code\", monospace;",
       "}",
       "",
-      "@keyframes spin {",
-      "  to { transform: rotate(360deg); }",
-      "}",
-      "",
-      "@media (min-width: 940px) {",
-      "  .showcase-grid {",
-      "    grid-template-columns: 1.05fr 0.95fr;",
-      "  }",
-      "",
-      "  .panel-wide {",
-      "    grid-column: 1 / -1;",
+      "@keyframes lift-in {",
+      "  to {",
+      "    opacity: 1;",
+      "    transform: translateY(0);",
       "  }",
       "}",
       "",
-      "@media (max-width: 720px) {",
+      "@keyframes shimmer {",
+      "  to {",
+      "    background-position: -220% 0;",
+      "  }",
+      "}",
+      "",
+      "@media (max-width: 820px) {",
       "  main {",
-      "    padding: 32px 16px 56px;",
+      "    width: min(100% - 28px, 1240px);",
+      "    padding: 32px 0 52px;",
       "  }",
       "",
-      "  .task-head,",
-      "  .manifest-list > div,",
-      "  .panel-head {",
+      "  .metrics-strip,",
+      "  .workbench,",
+      "  .button-row,",
+      "  .raid-summary,",
+      "  .lane-grid,",
+      "  .project-row,",
+      "  .task-lines p {",
       "    grid-template-columns: 1fr;",
-      "    display: grid;",
+      "  }",
+      "",
+      "  .metrics-strip div {",
+      "    border-right: 0;",
+      "    border-bottom: 1px solid var(--border);",
+      "  }",
+      "",
+      "  .metrics-strip div:last-child {",
+      "    border-bottom: 0;",
+      "  }",
+      "",
+      "  .project-meta {",
+      "    justify-content: flex-start;",
+      "  }",
+      "",
+      "  .raid-summary div {",
+      "    border-right: 0;",
+      "    border-bottom: 1px solid var(--border);",
+      "  }",
+      "",
+      "  .raid-summary div:last-child {",
+      "    border-bottom: 0;",
       "  }",
       "}",
     ].join("\n"),
@@ -790,19 +1701,18 @@ function buildNextTemplateFiles(params: {
       "}",
     ].join("\n"),
     "src/app/page.tsx": [
-      'import DomainShowcase from "./domain-showcase";',
+      "import DomainShowcase from \"./domain-showcase\";",
       "",
-      'export const dynamic = "force-dynamic";',
+      "export const dynamic = \"force-dynamic\";",
       "",
       "export default function HomePage() {",
       "  return (",
       "    <main>",
-      '      <section className="hero">',
-      '        <div className="eyebrow">Ekairos Domain Scaffold</div>',
-      "        <h1>See your domain. Query it. Trigger an action.</h1>",
+      "      <section className=\"hero\">",
+      "        <div className=\"eyebrow\">Ekairos Domain Scaffold</div>",
+      "        <h1>Supply chain control tower.</h1>",
       "        <p>",
-      "          This template turns the app itself into a live domain showroom: it reads the manifest,",
-      "          queries nested data, and lets you execute actions from the UI with direct API calls.",
+      "          Open an order, track stock, shipment, supplier risk, and quality status in one live view.",
       "        </p>",
       "      </section>",
       "",
@@ -812,352 +1722,471 @@ function buildNextTemplateFiles(params: {
       "}",
     ].join("\n"),
     "src/app/domain-showcase.tsx": [
-      '"use client";',
+      "\"use client\";",
       "",
-      'import { useEffect, useMemo, useState } from "react";',
+      "import { useMemo, useState } from \"react\";",
+      "import { init } from \"@instantdb/react\";",
       "",
-      "type ManifestAction = {",
-      "  name: string;",
-      "  key?: string | null;",
-      "  description?: string | null;",
-      "};",
-      "",
-      "type DomainManifest = {",
-      "  ok?: boolean;",
-      "  instant?: { appId?: string | null };",
-      "  auth?: { required?: boolean };",
-      "  contextString?: string | null;",
-      "  domain?: { entities?: string[]; links?: string[]; rooms?: string[] };",
-      "  actions?: ManifestAction[];",
-      "};",
-      "",
-      "type TaskComment = {",
+      "type SupplierRow = {",
       "  id?: string;",
-      "  body?: string;",
-      "  createdAt?: number;",
+      "  name?: string;",
+      "  region?: string;",
+      "  risk?: string;",
+      "  score?: number;",
       "};",
       "",
-      "type TaskRow = {",
+      "type StockItemRow = {",
       "  id?: string;",
-      "  title?: string;",
+      "  sku?: string;",
+      "  warehouse?: string;",
+      "  available?: number;",
+      "  safetyStock?: number;",
+      "};",
+      "",
+      "type InspectionRow = {",
+      "  id?: string;",
+      "  result?: string;",
+      "  severity?: string;",
+      "  note?: string;",
+      "};",
+      "",
+      "type ShipmentRow = {",
+      "  id?: string;",
+      "  carrier?: string;",
+      "  lane?: string;",
       "  status?: string;",
-      "  createdAt?: number;",
-      "  comments?: TaskComment[] | TaskComment;",
+      "  etaHours?: number;",
+      "  inspections?: InspectionRow[] | InspectionRow;",
       "};",
       "",
-      "async function requestJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {",
-      "  const response = await fetch(input, {",
-      "    ...init,",
-      "    headers: {",
-      '      "content-type": "application/json",',
-      "      ...(init?.headers ?? {}),",
-      "    },",
-      "    cache: 'no-store',",
-      "  });",
-      "  const text = await response.text();",
-      "  if (!response.ok) {",
-      "    throw new Error(text || `request_failed:${response.status}`);",
-      "  }",
-      "  return (text ? JSON.parse(text) : null) as T;",
-      "}",
+      "type OrderRow = {",
+      "  id?: string;",
+      "  reference?: string;",
+      "  status?: string;",
+      "  spend?: number;",
+      "  supplier?: SupplierRow | SupplierRow[];",
+      "  stockItems?: StockItemRow[] | StockItemRow;",
+      "  shipments?: ShipmentRow[] | ShipmentRow;",
+      "};",
+      "",
+      "const db = init({",
+      "  appId: process.env.NEXT_PUBLIC_INSTANT_APP_ID || \"\",",
+      "});",
       "",
       "function asArray<T>(value: T | T[] | null | undefined): T[] {",
       "  if (!value) return [];",
       "  return Array.isArray(value) ? value : [value];",
       "}",
       "",
-      "function formatTime(value?: number) {",
-      "  if (!value) return 'now';",
-      "  try {",
-      "    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));",
-      "  } catch {",
-      "    return String(value);",
-      "  }",
+      "function first<T>(value: T | T[] | null | undefined): T | null {",
+      "  return asArray(value)[0] ?? null;",
+      "}",
+      "",
+      "function money(value?: number) {",
+      "  return new Intl.NumberFormat(undefined, {",
+      "    currency: \"USD\",",
+      "    maximumFractionDigits: 0,",
+      "    style: \"currency\",",
+      "  }).format(value ?? 0);",
+      "}",
+      "",
+      "async function runAction(action: string, input: Record<string, unknown>) {",
+      "  const response = await fetch(\"/api/ekairos/domain\", {",
+      "    method: \"POST\",",
+      "    headers: { \"content-type\": \"application/json\" },",
+      "    body: JSON.stringify({ op: \"action\", action, input }),",
+      "  });",
+      "  const text = await response.text();",
+      "  if (!response.ok) throw new Error(text || `request_failed:${response.status}`);",
+      "  return text ? JSON.parse(text) : null;",
       "}",
       "",
       "export default function DomainShowcase() {",
-      "  const [manifest, setManifest] = useState<DomainManifest | null>(null);",
-      "  const [tasks, setTasks] = useState<TaskRow[]>([]);",
-      "  const [draftTitle, setDraftTitle] = useState('Ship a polished domain demo');",
+      "  const [reference, setReference] = useState(\"PO-7842\");",
+      "  const [supplierName, setSupplierName] = useState(\"Marula Components\");",
+      "  const [sku, setSku] = useState(\"DRV-2048\");",
       "  const [loadingAction, setLoadingAction] = useState<string | null>(null);",
-      "  const [loadingData, setLoadingData] = useState(true);",
-      "  const [error, setError] = useState<string | null>(null);",
-      "  const [lastResult, setLastResult] = useState<unknown>(null);",
+      "  const [actionError, setActionError] = useState<string | null>(null);",
       "",
-      "  const counts = useMemo(() => ({",
-      "    entities: manifest?.domain?.entities?.length ?? 0,",
-      "    links: manifest?.domain?.links?.length ?? 0,",
-      "    actions: manifest?.actions?.length ?? 0,",
-      "    tasks: tasks.length,",
-      "  }), [manifest, tasks]);",
+      "  const query = db.useQuery({",
+      "    procurement_order: {",
+      "      $: { order: { createdAt: \"desc\" }, limit: 8 },",
+      "      supplier: {},",
+      "      stockItems: {},",
+      "      shipments: {",
+      "        inspections: {},",
+      "      },",
+      "    },",
+      "  }) as {",
+      "    data?: { procurement_order?: OrderRow[] };",
+      "    error?: unknown;",
+      "    isLoading: boolean;",
+      "  };",
       "",
-      "  async function refresh() {",
-      "    setLoadingData(true);",
-      "    setError(null);",
-      "    try {",
-      "      const manifestData = await requestJson<DomainManifest>('/api/ekairos/domain', { method: 'GET' });",
-      "      setManifest(manifestData);",
+      "  const orders = query.data?.procurement_order ?? [];",
+      "  const activeOrder = orders[0] ?? null;",
+      "  const supplier = first(activeOrder?.supplier);",
+      "  const stockItems = asArray(activeOrder?.stockItems);",
+      "  const shipments = asArray(activeOrder?.shipments);",
+      "  const shipment = shipments[0] ?? null;",
+      "  const inspections = shipments.flatMap((entry) => asArray(entry.inspections));",
+      "  const inspection = inspections[0] ?? null;",
       "",
-      "      const queryData = await requestJson<{ data?: { app_tasks?: TaskRow[] } }>('/api/ekairos/domain', {",
-      "        method: 'POST',",
-      "        body: JSON.stringify({",
-      "          op: 'query',",
-      "          query: {",
-      "            app_tasks: {",
-      "              $: { order: { createdAt: 'desc' }, limit: 20 },",
-      "              comments: {},",
-      "            },",
-      "          },",
-      "        }),",
-      "      });",
+      "  const metrics = useMemo(() => ({",
+      "    orders: orders.length,",
+      "    stock: stockItems.reduce((total, item) => total + (item.available ?? 0), 0),",
+      "    eta: shipment?.etaHours ?? 0,",
+      "    risk: supplier?.risk ?? \"none\",",
+      "  }), [orders.length, shipment?.etaHours, stockItems, supplier?.risk]);",
       "",
-      "      setTasks(Array.isArray(queryData?.data?.app_tasks) ? queryData.data.app_tasks : []);",
-      "    } catch (nextError) {",
-      "      setError(nextError instanceof Error ? nextError.message : String(nextError));",
-      "    } finally {",
-      "      setLoadingData(false);",
-      "    }",
-      "  }",
-      "",
-      "  useEffect(() => {",
-      "    void refresh();",
-      "  }, []);",
-      "",
-      "  async function runAction(action: string, input: Record<string, unknown>) {",
+      "  async function submitAction(action: string, input: Record<string, unknown>) {",
       "    setLoadingAction(action);",
-      "    setError(null);",
+      "    setActionError(null);",
       "    try {",
-      "      const result = await requestJson('/api/ekairos/domain', {",
-      "        method: 'POST',",
-      "        body: JSON.stringify({ op: 'action', action, input }),",
-      "      });",
-      "      setLastResult(result);",
-      "      await refresh();",
-      "    } catch (nextError) {",
-      "      setError(nextError instanceof Error ? nextError.message : String(nextError));",
+      "      await runAction(action, input);",
+      "    } catch (error) {",
+      "      setActionError(error instanceof Error ? error.message : String(error));",
       "    } finally {",
       "      setLoadingAction(null);",
       "    }",
       "  }",
       "",
       "  return (",
-      '    <section className="shell">',
-      '      <div className="stat-grid">',
-      '        <article className="card stat-card"><span className="eyebrow">Entities</span><strong>{counts.entities}</strong></article>',
-      '        <article className="card stat-card"><span className="eyebrow">Links</span><strong>{counts.links}</strong></article>',
-      '        <article className="card stat-card"><span className="eyebrow">Actions</span><strong>{counts.actions}</strong></article>',
-      '        <article className="card stat-card"><span className="eyebrow">Tasks</span><strong>{counts.tasks}</strong></article>',
+      "    <section className=\"shell\">",
+      "      <div className=\"metrics-strip\">",
+      "        <div><span>open orders</span><strong>{metrics.orders}</strong></div>",
+      "        <div><span>available stock</span><strong>{metrics.stock}</strong></div>",
+      "        <div><span>shipment eta</span><strong>{metrics.eta}h</strong></div>",
+      "        <div><span>supplier risk</span><strong>{metrics.risk}</strong></div>",
       "      </div>",
       "",
-      '      <div className="grid showcase-grid">',
-      '        <article className="card panel-tall">',
-      '          <div className="panel-head">',
-      '            <div>',
-      '              <span className="eyebrow">Domain Manifest</span>',
-      '              <h2>Live contract</h2>',
-      "            </div>",
-      "            <button className=\"button ghost\" onClick={() => void refresh()} disabled={loadingData}>",
-      '              {loadingData ? <span className="spinner" aria-hidden="true" /> : null}',
-      "              Refresh",
-      "            </button>",
-      "          </div>",
-      '          <p className="muted">The UI calls the same Ekairos runtime route your CLI uses.</p>',
-      '          <div className="manifest-list">',
-      '            <div><span className="manifest-label">App ID</span><span>{manifest?.instant?.appId ?? "not configured yet"}</span></div>',
-      '            <div><span className="manifest-label">Auth</span><span>{manifest?.auth?.required ? "required" : "open"}</span></div>',
-      '            <div><span className="manifest-label">Entities</span><span>{(manifest?.domain?.entities ?? []).join(", ") || "none"}</span></div>',
-      '            <div><span className="manifest-label">Links</span><span>{(manifest?.domain?.links ?? []).join(", ") || "none"}</span></div>',
-      "          </div>",
-      '          <pre><code>{manifest?.contextString ?? "Context string will appear here after the first fetch."}</code></pre>',
-      "        </article>",
-      "",
-      '        <article className="card panel-tall">',
-      '          <div className="panel-head">',
-      '            <div>',
-      '              <span className="eyebrow">Action Demo</span>',
-      '              <h2>Trigger the domain</h2>',
-      "            </div>",
-      "          </div>",
-      '          <p className="muted">Use the API directly. Click one action and watch the data refresh below.</p>',
-      '          <label className="field">',
-      '            <span>Task title</span>',
-      '            <input',
-      '              className="input"',
-      '              value={draftTitle}',
-      '              onChange={(event) => setDraftTitle(event.target.value)}',
-      '              placeholder="Name your first task"',
-      "            />",
+      "      <div className=\"workbench\">",
+      "        <section className=\"command-panel\">",
+      "          <span className=\"eyebrow\">Release</span>",
+      "          <h2>Open a purchase order</h2>",
+      "          <label className=\"field\">",
+      "            <span>PO reference</span>",
+      "            <input className=\"input\" value={reference} onChange={(event) => setReference(event.target.value)} />",
       "          </label>",
-      '          <div className="button-row">',
+      "          <label className=\"field\">",
+      "            <span>Supplier</span>",
+      "            <input className=\"input\" value={supplierName} onChange={(event) => setSupplierName(event.target.value)} />",
+      "          </label>",
+      "          <label className=\"field\">",
+      "            <span>SKU</span>",
+      "            <input className=\"input\" value={sku} onChange={(event) => setSku(event.target.value)} />",
+      "          </label>",
+      "          <div className=\"button-row\">",
       "            <button",
-      '              className="button"',
+      "              className=\"button\"",
       "              disabled={loadingAction !== null}",
-      "              onClick={() => void runAction('app.task.create', { title: draftTitle, status: 'manual' })}",
+      "              onClick={() => void submitAction(\"supplyChain.order.launch\", { reference, sku, supplierName })}",
       "            >",
-      '              {loadingAction === "app.task.create" ? <span className="spinner" aria-hidden="true" /> : null}',
-      "              Create Task",
+      "              {loadingAction === \"supplyChain.order.launch\" ? \"Opening\" : \"Open order\"}",
       "            </button>",
       "            <button",
-      '              className="button ghost"',
-      "              disabled={loadingAction !== null}",
-      "              onClick={() => void runAction('app.demo.seed', {})}",
+      "              className=\"button ghost\"",
+      "              disabled={loadingAction !== null || !shipment?.id}",
+      "              onClick={() => void submitAction(\"supplyChain.shipment.expedite\", { shipmentId: shipment?.id })}",
       "            >",
-      '              {loadingAction === "app.demo.seed" ? <span className="spinner" aria-hidden="true" /> : null}',
-      "              Seed Demo",
+      "              Expedite shipment",
       "            </button>",
       "          </div>",
-      '          <div className="action-list">',
-      '            {(manifest?.actions ?? []).map((action) => (',
-      '              <div className="action-item" key={action.name}>',
-      '                <strong>{action.key ?? action.name}</strong>',
-      '                <span>{action.description ?? action.name}</span>',
-      "              </div>",
-      "            ))}",
-      "          </div>",
-      '          <pre><code>{lastResult ? JSON.stringify(lastResult, null, 2) : "Action results will appear here."}</code></pre>',
-      "        </article>",
+      "        </section>",
       "",
-      '        <article className="card panel-wide">',
-      '          <div className="panel-head">',
-      '            <div>',
-      '              <span className="eyebrow">Query Result</span>',
-      '              <h2>Nested task data</h2>',
+      "        <section className=\"context-rail\" aria-label=\"Operational path\">",
+      "          <div className=\"panel-head\">",
+      "            <div>",
+      "              <span className=\"eyebrow\">Path</span>",
+      "              <h2>What gets linked</h2>",
       "            </div>",
-      '            <span className="status-pill">{loadingData ? "syncing" : `${tasks.length} rows`}</span>',
       "          </div>",
-      '          <p className="muted">This list comes from a direct `op: "query"` call to the domain API.</p>',
-      '          {tasks.length === 0 ? <div className="empty-state">No tasks yet. Click <strong>Seed Demo</strong> to populate the canvas.</div> : null}',
-      '          <div className="task-list">',
-      '            {tasks.map((task, index) => (',
-      '              <article className="task-card" key={task.id ?? `${task.title ?? "task"}-${index}`}>',
-      '                <div className="task-head">',
-      '                  <strong>{task.title ?? "Untitled task"}</strong>',
-      '                  <span className="status-pill">{task.status ?? "draft"}</span>',
+      "          <div className=\"context-list\">",
+      "            <div className=\"context-row\"><span>Supplier</span><strong>Risk and commercial owner</strong></div>",
+      "            <div className=\"context-row\"><span>Order</span><strong>Spend and release state</strong></div>",
+      "            <div className=\"context-row\"><span>Inventory</span><strong>SKU and stock position</strong></div>",
+      "            <div className=\"context-row\"><span>Transport</span><strong>Carrier lane and ETA</strong></div>",
+      "            <div className=\"context-row\"><span>Quality</span><strong>Arrival inspection</strong></div>",
+      "          </div>",
+      "        </section>",
+      "",
+      "        <section className=\"graph-panel\">",
+      "          <div className=\"panel-head\">",
+      "            <div>",
+      "              <span className=\"eyebrow\">Live order</span>",
+      "              <h2>{activeOrder?.reference ?? \"No order active\"}</h2>",
+      "            </div>",
+      "            <span className=\"status-pill\">{query.isLoading ? \"loading\" : activeOrder?.status ?? \"idle\"}</span>",
+      "          </div>",
+      "",
+      "          {query.isLoading ? (",
+      "            <div className=\"skeleton-stack\" aria-label=\"Loading order\">",
+      "              <span />",
+      "              <span />",
+      "              <span />",
+      "            </div>",
+      "          ) : query.error ? (",
+      "            <div className=\"error-banner\">{String(query.error)}</div>",
+      "          ) : !activeOrder ? (",
+      "            <div className=\"empty-state\">Open an order to create the first control tower view.</div>",
+      "          ) : (",
+      "            <>",
+      "              <div className=\"raid-summary\">",
+      "                <div>",
+      "                  <span>supplier</span>",
+      "                  <strong>{supplier?.name ?? \"unassigned\"}</strong>",
       "                </div>",
-      '                <span className="muted">{formatTime(task.createdAt)}</span>',
-      '                <div className="comment-list">',
-      '                  {asArray(task.comments).map((comment, commentIndex) => (',
-      '                    <div className="comment-item" key={comment.id ?? `${index}-${commentIndex}`}>',
-      '                      <span className="comment-dot" />',
-      '                      <span>{comment.body ?? "Empty comment"}</span>',
-      "                    </div>",
+      "                <div>",
+      "                  <span>region</span>",
+      "                  <strong>{supplier?.region ?? \"unknown\"}</strong>",
+      "                </div>",
+      "                <div>",
+      "                  <span>spend</span>",
+      "                  <strong>{money(activeOrder.spend)}</strong>",
+      "                </div>",
+      "              </div>",
+      "",
+      "              <div className=\"lane-grid\">",
+      "                <div className=\"lane\">",
+      "                  <span className=\"manifest-label\">Inventory</span>",
+      "                  {stockItems.map((item) => (",
+      "                    <article className=\"objective\" key={item.id}>",
+      "                      <strong>{item.sku}</strong>",
+      "                      <span>{item.warehouse}</span>",
+      "                      <em>{item.available} units / {item.safetyStock} safety</em>",
+      "                    </article>",
       "                  ))}",
       "                </div>",
-      "              </article>",
-      "            ))}",
-      "          </div>",
-      "        </article>",
+      "                <div className=\"lane\">",
+      "                  <span className=\"manifest-label\">Transport</span>",
+      "                  {shipments.map((entry) => (",
+      "                    <article className=\"objective\" key={entry.id}>",
+      "                      <strong>{entry.carrier}</strong>",
+      "                      <span>{entry.lane}</span>",
+      "                      <em>{entry.status} / {entry.etaHours}h ETA</em>",
+      "                    </article>",
+      "                  ))}",
+      "                </div>",
+      "                <div className=\"lane\">",
+      "                  <span className=\"manifest-label\">Quality</span>",
+      "                  {inspections.map((entry) => (",
+      "                    <article className=\"objective\" key={entry.id}>",
+      "                      <strong>{entry.result}</strong>",
+      "                      <span>{entry.severity}</span>",
+      "                      <em>{entry.note}</em>",
+      "                    </article>",
+      "                  ))}",
+      "                </div>",
+      "              </div>",
+      "            </>",
+      "          )}",
+      "        </section>",
       "      </div>",
       "",
-      '      {error ? <div className="error-banner">{error}</div> : null}',
+      "      {actionError ? <div className=\"error-banner\">{actionError}</div> : null}",
       "    </section>",
       "  );",
       "}",
     ].join("\n"),
     "src/domain.ts": [
-      'import { defineDomainAction, domain } from "@ekairos/domain";',
-      'import { i } from "@instantdb/core";',
+      "import { defineDomainAction, domain } from \"@ekairos/domain\";",
+      "import { i } from \"@instantdb/core\";",
       "",
-      "const baseDomain = domain(\"ekairos.app\")",
+      "export const supplierNetworkDomain = domain(\"supplierNetwork\").schema({",
+      "  entities: {",
+      "    supplierNetwork_supplier: i.entity({",
+      "      name: i.string().indexed(),",
+      "      region: i.string().indexed(),",
+      "      risk: i.string().indexed(),",
+      "      score: i.number().indexed(),",
+      "      createdAt: i.number().indexed(),",
+      "    }),",
+      "  },",
+      "  links: {},",
+      "  rooms: {},",
+      "});",
+      "",
+      "export const procurementDomain = domain(\"procurement\")",
+      "  .includes(supplierNetworkDomain)",
       "  .schema({",
       "    entities: {",
-      "      app_tasks: i.entity({",
-      "        title: i.string().indexed(),",
+      "      procurement_order: i.entity({",
+      "        reference: i.string().indexed(),",
       "        status: i.string().indexed(),",
-      "        createdAt: i.number().indexed(),",
-      "      }),",
-      "      app_task_comments: i.entity({",
-      "        body: i.string(),",
+      "        spend: i.number().indexed(),",
       "        createdAt: i.number().indexed(),",
       "      }),",
       "    },",
       "    links: {",
-      "      taskComments: {",
-      '        forward: { on: "app_tasks", has: "many", label: "comments" },',
-      '        reverse: { on: "app_task_comments", has: "one", label: "task" },',
+      "      procurement_orderSupplier: {",
+      "        forward: { on: \"procurement_order\", has: \"one\", label: \"supplier\" },",
+      "        reverse: { on: \"supplierNetwork_supplier\", has: \"many\", label: \"orders\" },",
       "      },",
       "    },",
       "    rooms: {},",
       "  });",
       "",
-      "export const createTaskAction = defineDomainAction<",
+      "export const inventoryDomain = domain(\"inventory\")",
+      "  .includes(procurementDomain)",
+      "  .schema({",
+      "    entities: {",
+      "      inventory_stockItem: i.entity({",
+      "        sku: i.string().indexed(),",
+      "        warehouse: i.string().indexed(),",
+      "        available: i.number().indexed(),",
+      "        safetyStock: i.number().indexed(),",
+      "        createdAt: i.number().indexed(),",
+      "      }),",
+      "    },",
+      "    links: {",
+      "      inventory_stockItemOrder: {",
+      "        forward: { on: \"inventory_stockItem\", has: \"one\", label: \"order\" },",
+      "        reverse: { on: \"procurement_order\", has: \"many\", label: \"stockItems\" },",
+      "      },",
+      "    },",
+      "    rooms: {},",
+      "  });",
+      "",
+      "export const transportationDomain = domain(\"transportation\")",
+      "  .includes(procurementDomain)",
+      "  .schema({",
+      "    entities: {",
+      "      transportation_shipment: i.entity({",
+      "        carrier: i.string().indexed(),",
+      "        lane: i.string().indexed(),",
+      "        status: i.string().indexed(),",
+      "        etaHours: i.number().indexed(),",
+      "        createdAt: i.number().indexed(),",
+      "      }),",
+      "    },",
+      "    links: {",
+      "      transportation_shipmentOrder: {",
+      "        forward: { on: \"transportation_shipment\", has: \"one\", label: \"order\" },",
+      "        reverse: { on: \"procurement_order\", has: \"many\", label: \"shipments\" },",
+      "      },",
+      "    },",
+      "    rooms: {},",
+      "  });",
+      "",
+      "export const qualityControlDomain = domain(\"qualityControl\")",
+      "  .includes(transportationDomain)",
+      "  .schema({",
+      "    entities: {",
+      "      qualityControl_inspection: i.entity({",
+      "        result: i.string().indexed(),",
+      "        severity: i.string().indexed(),",
+      "        note: i.string(),",
+      "        createdAt: i.number().indexed(),",
+      "      }),",
+      "    },",
+      "    links: {",
+      "      qualityControl_inspectionShipment: {",
+      "        forward: { on: \"qualityControl_inspection\", has: \"one\", label: \"shipment\" },",
+      "        reverse: { on: \"transportation_shipment\", has: \"many\", label: \"inspections\" },",
+      "      },",
+      "    },",
+      "    rooms: {},",
+      "  });",
+      "",
+      "const baseDomain = domain(\"supplyChain\")",
+      "  .includes(inventoryDomain)",
+      "  .includes(qualityControlDomain)",
+      "  .schema({ entities: {}, links: {}, rooms: {} });",
+      "",
+      "export const launchOrderAction = defineDomainAction<",
       "  Record<string, unknown>,",
-      "  { title?: string; status?: string },",
-      "  { taskId: string },",
+      "  { reference?: string; supplierName?: string; sku?: string },",
+      "  { supplierId: string; orderId: string; stockItemId: string; shipmentId: string; inspectionId: string },",
       "  any",
       ">({",
-      '  name: "app.task.create",',
-      "  async execute({ runtime, input }): Promise<{ taskId: string }> {",
-      '    "use step";',
+      "  name: \"supplyChain.order.launch\",",
+      "  async execute({ runtime, input }): Promise<{",
+      "    supplierId: string;",
+      "    orderId: string;",
+      "    stockItemId: string;",
+      "    shipmentId: string;",
+      "    inspectionId: string;",
+      "  }> {",
+      "    \"use step\";",
       "    const scoped = await runtime.use(appDomain);",
-      "    const taskId = globalThis.crypto.randomUUID();",
+      "    const now = Date.now();",
+      "    const supplierId = globalThis.crypto.randomUUID();",
+      "    const orderId = globalThis.crypto.randomUUID();",
+      "    const stockItemId = globalThis.crypto.randomUUID();",
+      "    const shipmentId = globalThis.crypto.randomUUID();",
+      "    const inspectionId = globalThis.crypto.randomUUID();",
+      "",
       "    await scoped.db.transact([",
-      "      scoped.db.tx.app_tasks[taskId].update({",
-      '        title: String((input as any)?.title ?? "").trim() || "Untitled task",',
-      '        status: String((input as any)?.status ?? "").trim() || "draft",',
-      "        createdAt: Date.now(),",
+      "      scoped.db.tx.supplierNetwork_supplier[supplierId].update({",
+      "        name: String(input?.supplierName ?? \"\").trim() || \"Marula Components\",",
+      "        region: \"Pacific North\",",
+      "        risk: \"watch\",",
+      "        score: 82,",
+      "        createdAt: now,",
       "      }),",
+      "      scoped.db.tx.procurement_order[orderId].update({",
+      "        reference: String(input?.reference ?? \"\").trim() || \"PO-7842\",",
+      "        status: \"released\",",
+      "        spend: 184700,",
+      "        createdAt: now + 1,",
+      "      }),",
+      "      scoped.db.tx.procurement_order[orderId].link({ supplier: supplierId }),",
+      "      scoped.db.tx.inventory_stockItem[stockItemId].update({",
+      "        sku: String(input?.sku ?? \"\").trim() || \"DRV-2048\",",
+      "        warehouse: \"Reno DC\",",
+      "        available: 320,",
+      "        safetyStock: 140,",
+      "        createdAt: now + 2,",
+      "      }),",
+      "      scoped.db.tx.inventory_stockItem[stockItemId].link({ order: orderId }),",
+      "      scoped.db.tx.transportation_shipment[shipmentId].update({",
+      "        carrier: \"Northstar Freight\",",
+      "        lane: \"Reno -> Austin\",",
+      "        status: \"in-transit\",",
+      "        etaHours: 38,",
+      "        createdAt: now + 3,",
+      "      }),",
+      "      scoped.db.tx.transportation_shipment[shipmentId].link({ order: orderId }),",
+      "      scoped.db.tx.qualityControl_inspection[inspectionId].update({",
+      "        result: \"pending\",",
+      "        severity: \"medium\",",
+      "        note: \"Inspect seal integrity on arrival.\",",
+      "        createdAt: now + 4,",
+      "      }),",
+      "      scoped.db.tx.qualityControl_inspection[inspectionId].link({ shipment: shipmentId }),",
       "    ]);",
-      "    return { taskId };",
+      "",
+      "    return { supplierId, orderId, stockItemId, shipmentId, inspectionId };",
       "  },",
       "});",
       "",
-      "export const addTaskCommentAction = defineDomainAction<",
+      "export const expediteShipmentAction = defineDomainAction<",
       "  Record<string, unknown>,",
-      "  { taskId?: string; body?: string },",
-      "  { commentId: string; taskId: string },",
+      "  { shipmentId?: string },",
+      "  { shipmentId: string },",
       "  any",
       ">({",
-      '  name: "app.task.comment.add",',
-      "  async execute({ runtime, input }): Promise<{ commentId: string; taskId: string }> {",
-      '    "use step";',
+      "  name: \"supplyChain.shipment.expedite\",",
+      "  async execute({ runtime, input }): Promise<{ shipmentId: string }> {",
+      "    \"use step\";",
       "    const scoped = await runtime.use(appDomain);",
-      "    const commentId = globalThis.crypto.randomUUID();",
-      '    const taskId = String((input as any)?.taskId ?? "").trim();',
-      "    if (!taskId) throw new Error(\"taskId is required\");",
-      "    await scoped.db.transact([",
-      "      scoped.db.tx.app_task_comments[commentId].update({",
-      '        body: String((input as any)?.body ?? "").trim() || "Empty comment",',
-      "        createdAt: Date.now(),",
-      "      }),",
-      "      scoped.db.tx.app_task_comments[commentId].link({ task: taskId }),",
-      "    ]);",
-      "    return { commentId, taskId };",
-      "  },",
-      "});",
+      "    const shipmentId = String(input?.shipmentId ?? \"\").trim();",
+      "    if (!shipmentId) throw new Error(\"shipmentId is required\");",
       "",
-      "export const seedDemoAction = defineDomainAction<",
-      "  Record<string, unknown>,",
-      "  Record<string, never>,",
-      "  { taskId: string },",
-      "  any",
-      ">({",
-      '  name: "app.demo.seed",',
-      "  async execute({ runtime }): Promise<{ taskId: string }> {",
-      '    "use step";',
-      "    const scoped = await runtime.use(appDomain);",
-      "    const taskId = globalThis.crypto.randomUUID();",
-      "    const commentId = globalThis.crypto.randomUUID();",
       "    await scoped.db.transact([",
-      "      scoped.db.tx.app_tasks[taskId].update({",
-      '        title: "Ship the first Ekairos loop",',
-      '        status: "ready",',
-      "        createdAt: Date.now(),",
+      "      scoped.db.tx.transportation_shipment[shipmentId].update({",
+      "        status: \"expedited\",",
+      "        etaHours: 16,",
       "      }),",
-      "      scoped.db.tx.app_task_comments[commentId].update({",
-      '        body: "Query me with app_tasks -> comments to validate the full CLI path.",',
-      "        createdAt: Date.now(),",
-      "      }),",
-      "      scoped.db.tx.app_task_comments[commentId].link({ task: taskId }),",
       "    ]);",
-      "    return { taskId };",
+      "",
+      "    return { shipmentId };",
       "  },",
       "});",
       "",
       "export const appDomain = baseDomain.actions({",
-      "  addTaskComment: addTaskCommentAction,",
-      "  createTask: createTaskAction,",
-      "  seedDemo: seedDemoAction,",
+      "  expediteShipment: expediteShipmentAction,",
+      "  launchOrder: launchOrderAction,",
       "});",
       "",
       "export default appDomain;",
@@ -1219,29 +2248,29 @@ function buildNextTemplateFiles(params: {
       "});",
     ].join("\n"),
     "src/workflows/demo.workflow.ts": [
-      'import { executeRuntimeAction } from "@ekairos/domain/runtime";',
-      'import { createRuntime } from "../runtime";',
+      "import appDomain from \"../domain\";",
+      "import { createRuntime } from \"../runtime\";",
       "",
       "export type DemoWorkflowInput = {",
-      "  title: string;",
-      "  comment?: string;",
+      "  expedite?: boolean;",
+      "  reference?: string;",
+      "  sku?: string;",
+      "  supplierName?: string;",
       "};",
       "",
       "export async function runDemoWorkflow(input: DemoWorkflowInput) {",
-      '  "use workflow";',
+      "  \"use workflow\";",
       "  const runtime = createRuntime();",
-      "  const created = (await executeRuntimeAction({",
-      "    runtime,",
-      '    action: "app.task.create",',
-      "    input: { title: input.title, status: \"workflow\" },",
-      "  })) as { taskId: string };",
+      "  const scoped = await runtime.use(appDomain);",
+      "  const created = await scoped.actions.launchOrder({",
+      "    reference: input.reference,",
+      "    sku: input.sku,",
+      "    supplierName: input.supplierName,",
+      "  });",
       "",
-      '  const comment = String(input.comment ?? "").trim();',
-      "  if (comment) {",
-      "    await executeRuntimeAction({",
-      "      runtime,",
-      '      action: "app.task.comment.add",',
-      "      input: { taskId: created.taskId, body: comment },",
+      "  if (input.expedite) {",
+      "    await scoped.actions.expediteShipment({",
+      "      shipmentId: created.shipmentId,",
       "    });",
       "  }",
       "",
@@ -1256,6 +2285,12 @@ export async function createDomainApp(
 ): Promise<CreateDomainAppResult> {
   if (params.framework !== "next") {
     throw new Error("Only --next is supported right now.")
+  }
+  if (params.smoke && !params.install) {
+    throw new Error("--smoke requires dependencies. Remove --no-install or run smoke after installing.")
+  }
+  if (params.demo && !params.smoke) {
+    throw new Error("--demo runs the full app cycle and requires smoke validation.")
   }
 
   const targetDir = resolve(params.directory || ".")
@@ -1330,6 +2365,13 @@ export async function createDomainApp(
 
   const appId = explicitAppId || provisioned?.appId || null
   const adminToken = explicitAdminToken || provisioned?.adminToken || null
+  if (params.smoke && (!appId || !adminToken)) {
+    throw new Error(
+      params.demo
+        ? "--demo requires Instant provisioning. Set INSTANT_PERSONAL_ACCESS_TOKEN or pass --instantToken."
+        : "--smoke requires a configured Instant app. Pass --instantToken or --appId with --adminToken.",
+    )
+  }
 
   await emitProgress(params.onProgress, {
     stage: "write-files",
@@ -1351,7 +2393,8 @@ export async function createDomainApp(
     progress: 72,
   })
 
-  if (appId && adminToken) {
+  const envFile = appId && adminToken ? join(targetDir, ".env.local") : null
+  if (appId && adminToken && envFile) {
     await emitProgress(params.onProgress, {
       stage: "write-env",
       status: "running",
@@ -1359,7 +2402,7 @@ export async function createDomainApp(
       progress: 78,
     })
     await writeFile(
-      join(targetDir, ".env.local"),
+      envFile,
       [
         `NEXT_PUBLIC_INSTANT_APP_ID=${appId}`,
         `INSTANT_ADMIN_TOKEN=${adminToken}`,
@@ -1391,15 +2434,30 @@ export async function createDomainApp(
     })
   }
 
+  const smoke = params.smoke
+    ? await runSmoke({
+        demo: Boolean(params.demo),
+        targetDir,
+        packageManager,
+        keepServer: Boolean(params.keepServer),
+        onKeepServer: params.onKeepServer,
+        onProgress: params.onProgress,
+      })
+    : null
+
+  const cliCommand = packageBinCommandFor(packageManager, "domain")
+  const reviewUrl = smoke?.baseUrl ?? "http://localhost:3000"
   const nextSteps = [
     `cd ${targetDir}`,
-    params.install
-      ? runScriptCommandFor(packageManager, "dev")
-      : `${installCommandFor(packageManager)} && ${runScriptCommandFor(packageManager, "dev")}`,
-    "Open http://localhost:3000 and click Seed Demo in the showcase UI",
-    "npx @ekairos/domain inspect --baseUrl=http://localhost:3000 --admin --pretty",
-    "npx @ekairos/domain seedDemo --baseUrl=http://localhost:3000 --admin --pretty",
-    "npx @ekairos/domain query \"{ app_tasks: { comments: {} } }\" --baseUrl=http://localhost:3000 --admin --pretty",
+    smoke?.keepServer
+      ? `Open ${reviewUrl} for review`
+      : params.install
+        ? runScriptCommandFor(packageManager, "dev")
+        : `${installCommandFor(packageManager)} && ${runScriptCommandFor(packageManager, "dev")}`,
+    `Open ${reviewUrl} and launch a purchase order from the control tower UI`,
+    `${cliCommand} inspect --baseUrl=${reviewUrl} --admin --pretty`,
+    `${cliCommand} "supplyChain.order.launch" "{ reference: 'PO-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }" --baseUrl=${reviewUrl} --admin --pretty`,
+    `${cliCommand} query "{ procurement_order: { supplier: {}, stockItems: {}, shipments: { inspections: {} } } }" --baseUrl=${reviewUrl} --admin --pretty`,
   ]
 
   const result: CreateDomainAppResult = {
@@ -1411,6 +2469,10 @@ export async function createDomainApp(
     provisioned: Boolean(provisioned),
     appId,
     adminToken,
+    adminTokenWritten: Boolean(envFile),
+    envFile,
+    smoke,
+    demo: Boolean(params.demo),
     nextSteps,
   }
 

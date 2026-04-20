@@ -28,7 +28,7 @@ importers:
     dependencies:
       instant-cli:
         specifier: latest
-        version: 1.0.1(@effect/cluster@0.56.4(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/workflow@0.16.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))
+        version: 1.0.11(@effect/cluster@0.56.4(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/workflow@0.16.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))
       svix:
         specifier: ^1.81.0
         version: 1.81.0
@@ -75,6 +75,9 @@ importers:
       '@ekairos/dataset':
         specifier: workspace:*
         version: link:../dataset
+      '@ekairos/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@instantdb/admin':
         specifier: 0.22.126
         version: 0.22.126
@@ -406,9 +409,6 @@ importers:
       '@instantdb/admin':
         specifier: 0.22.126
         version: 0.22.126
-      ekairos-cli:
-        specifier: workspace:*
-        version: link:../cli
     devDependencies:
       '@ekairos/tsconfig':
         specifier: workspace:*
@@ -910,7 +910,7 @@ importers:
         version: 24.5.0
       '@workflow/vitest':
         specifier: 5.0.0-beta.1
-        version: 5.0.0-beta.1(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
+        version: 5.0.0-beta.1(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
       typescript:
         specifier: ^5.9.2
         version: 5.9.3
@@ -1091,7 +1091,7 @@ importers:
         version: 0.25.12
       workflow:
         specifier: 5.0.0-beta.1
-        version: 5.0.0-beta.1(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.13(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.0(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(typescript@5.9.3)
+        version: 5.0.0-beta.1(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.13(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.0(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(typescript@5.9.2)
     optionalDependencies:
       '@swc/core-win32-x64-msvc':
         specifier: 1.15.3
@@ -2730,8 +2730,8 @@ packages:
   '@instantdb/core@0.22.158':
     resolution: {integrity: sha512-nq0FddMU7CyJymE5QCWjfcBTTH/Ac6NzL99++92aFhRnt8JilHbcLljUKC9N5k0uVkzRaxAo2uBcP/LIZ8OgYA==}
 
-  '@instantdb/core@1.0.1':
-    resolution: {integrity: sha512-piwH+Dvt/ZYUuyssu8zL+Nk3/1TFvNK11qwX8x8OQlhyuyZs3+y9XbdEFpkn3SqoxW+1IkbNP6wlMB7QTRDn1A==}
+  '@instantdb/core@1.0.11':
+    resolution: {integrity: sha512-OPYSkSToPy0t4TTZxi0SCYU+bSSwD77YBFruFt0K8gE6sTzaIJ6QCVLhQjBc5nuXN79QsmgOAyFkVPpuAAhSVg==}
 
   '@instantdb/platform@0.22.126':
     resolution: {integrity: sha512-qf1tsKnLjiq2/exTg0aSfoxI96p+USNYN4GoX3SP7TY3ZfeTil8kqGk+Zmii7Lw3Tepw6TrBtAZTITWRjxTQRA==}
@@ -2742,8 +2742,8 @@ packages:
   '@instantdb/platform@0.22.158':
     resolution: {integrity: sha512-BbFvfK8Gqi5ZiiQ4v3rMeN138+ObDVByB5M+q0E6tPyA+6TPD3QVMNklB6GEpCJxxlamtV2xqGu7Iwu9AXWG2g==}
 
-  '@instantdb/platform@1.0.1':
-    resolution: {integrity: sha512-r7mh/ZBRBMLIlEvGESczzekDvLU5LtnE8FrAokI8LLiP0j/NFPJsQiK8PqkrUPkKtXPxRh6lChLdY9ilR3CzkA==}
+  '@instantdb/platform@1.0.11':
+    resolution: {integrity: sha512-CopZKv0XK+VFdtkqZg6t9axY9zS7OyCRFBT0+g4H48ki+jd5kMn2/cY/+Thk7wJBDFy/ikU9FyvzehZfslt8EA==}
 
   '@instantdb/react-common@0.22.126':
     resolution: {integrity: sha512-K+6lHMg0DpVU/Ta2Xjsl0ZsHh810wHBCjnSgvqev0dufAUc+Cw/vTBkBOPqOzdQtBimktFFmqw+DEJ0ncMzWwQ==}
@@ -2774,8 +2774,8 @@ packages:
   '@instantdb/version@0.22.158':
     resolution: {integrity: sha512-RkO73PcZbYdczZMUGfwM5u0OPCG2Bzs1e/cI9adAPmh/1tSvEpJDCU4j0R9JQnHAoMGJ/XNrGT2DqHfkfBV8Cw==}
 
-  '@instantdb/version@1.0.1':
-    resolution: {integrity: sha512-y8w3M73AgRznrSG06XUigXUjfvd/lbyu+4B5q1BP64Xnyv5nl73YOToP27VZVjq06wJAzE5T9DATq6pI3cGEcg==}
+  '@instantdb/version@1.0.11':
+    resolution: {integrity: sha512-+ZiEA/SYJNBgFdEtFcO7PVthggD7jtuzWV70Gin3QcC2NM9lVheQgLSENuhx5JfHv+fXVbUxKiwAQMQ7Vip1mA==}
 
   '@isaacs/balanced-match@4.0.1':
     resolution: {integrity: sha512-yzMTt9lEb8Gv7zRioUilSglI0c0smZ9k5D65677DLWLtWJaXIS3CqcGyUFByYKlnUj6TkjLVs54fBl6+TiGQDQ==}
@@ -7418,8 +7418,8 @@ packages:
   inspect-with-kind@1.0.5:
     resolution: {integrity: sha512-MAQUJuIo7Xqk8EVNP+6d3CKq9c80hi4tjIbIAT6lmGW9W6WzlHiu9PS8uSuUYU+Do+j1baiFp3H25XEVxDIG2g==}
 
-  instant-cli@1.0.1:
-    resolution: {integrity: sha512-X0/4CxhbgEf1fm+cFK00cqGQxcZTAp1zHAdgesTj8OgQN3CpAfEhw5qUwOu+J6cKggubWhl+QQ28kno3fa2KJQ==}
+  instant-cli@1.0.11:
+    resolution: {integrity: sha512-zh9GXc2V1YpnLKIzWY6zVqx+sAx62OKW4dxJieMBIDCfL2hrkKhetk24hzkcUKviivkzYDKKYnWucJHdGHt3iA==}
     hasBin: true
 
   internmap@1.0.1:
@@ -12698,9 +12698,9 @@ snapshots:
       mutative: 1.3.0
       uuid: 11.1.0
 
-  '@instantdb/core@1.0.1':
+  '@instantdb/core@1.0.11':
     dependencies:
-      '@instantdb/version': 1.0.1
+      '@instantdb/version': 1.0.11
       mutative: 1.3.0
       uuid: 11.1.0
 
@@ -12725,12 +12725,12 @@ snapshots:
       '@instantdb/core': 0.22.158
       '@instantdb/version': 0.22.158
 
-  '@instantdb/platform@1.0.1':
+  '@instantdb/platform@1.0.11':
     dependencies:
       '@babel/parser': 8.0.0-rc.1
       '@babel/types': 8.0.0-rc.1
-      '@instantdb/core': 1.0.1
-      '@instantdb/version': 1.0.1
+      '@instantdb/core': 1.0.11
+      '@instantdb/version': 1.0.11
 
   '@instantdb/react-common@0.22.126(react@19.2.1)':
     dependencies:
@@ -12766,7 +12766,7 @@ snapshots:
 
   '@instantdb/version@0.22.158': {}
 
-  '@instantdb/version@1.0.1': {}
+  '@instantdb/version@1.0.11': {}
 
   '@isaacs/balanced-match@4.0.1': {}
 
@@ -15432,7 +15432,7 @@ snapshots:
       msw: 2.11.6(@types/node@24.5.0)(typescript@5.9.2)
       vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
 
-  '@vitest/mocker@3.2.4(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))':
+  '@vitest/mocker@3.2.4(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))':
     dependencies:
       '@vitest/spy': 3.2.4
       estree-walker: 3.0.3
@@ -15793,6 +15793,23 @@ snapshots:
       '@workflow/world': 5.0.0-beta.1(zod@4.3.6)
       '@workflow/world-local': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
       vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.2))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+    optionalDependencies:
+      vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+      - '@swc/helpers'
+      - aws-crt
+      - supports-color
+      - zod
+
+  '@workflow/vitest@5.0.0-beta.1(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)':
+    dependencies:
+      '@workflow/builders': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/core': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/rollup': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/world': 5.0.0-beta.1(zod@4.3.6)
+      '@workflow/world-local': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
     optionalDependencies:
       vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
     transitivePeerDependencies:
@@ -18243,14 +18260,14 @@ snapshots:
     dependencies:
       kind-of: 6.0.3
 
-  instant-cli@1.0.1(@effect/cluster@0.56.4(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/workflow@0.16.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0)):
+  instant-cli@1.0.11(@effect/cluster@0.56.4(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/workflow@0.16.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0)):
     dependencies:
       '@commander-js/extra-typings': 14.0.0(commander@14.0.2)
       '@effect/platform': 0.94.5(effect@3.21.0)
       '@effect/platform-node': 0.104.1(@effect/cluster@0.56.4(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/workflow@0.16.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(@effect/rpc@0.73.2(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(@effect/platform@0.94.5(effect@3.21.0))(effect@3.21.0))(effect@3.21.0)
-      '@instantdb/core': 1.0.1
-      '@instantdb/platform': 1.0.1
-      '@instantdb/version': 1.0.1
+      '@instantdb/core': 1.0.11
+      '@instantdb/platform': 1.0.11
+      '@instantdb/version': 1.0.11
       acorn: 8.15.0
       acorn-typescript: 1.4.13(acorn@8.15.0)
       ansi-escapes: 4.3.2
@@ -18265,6 +18282,7 @@ snapshots:
       json-diff: 1.0.6
       json5: 2.2.3
       lodash.throttle: 4.1.1
+      minimist: 1.2.8
       open: 10.2.0
       package-directory: 8.1.0
       package-manager-detector: 1.6.0
@@ -21677,7 +21695,49 @@ snapshots:
     dependencies:
       '@types/chai': 5.2.2
       '@vitest/expect': 3.2.4
-      '@vitest/mocker': 3.2.4(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))
+      '@vitest/mocker': 3.2.4(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))
+      '@vitest/pretty-format': 3.2.4
+      '@vitest/runner': 3.2.4
+      '@vitest/snapshot': 3.2.4
+      '@vitest/spy': 3.2.4
+      '@vitest/utils': 3.2.4
+      chai: 5.3.3
+      debug: 4.4.3(supports-color@8.1.1)
+      expect-type: 1.2.2
+      magic-string: 0.30.21
+      pathe: 2.0.3
+      picomatch: 4.0.3
+      std-env: 3.9.0
+      tinybench: 2.9.0
+      tinyexec: 0.3.2
+      tinyglobby: 0.2.15
+      tinypool: 1.1.1
+      tinyrainbow: 2.0.0
+      vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+      vite-node: 3.2.4(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/debug': 4.1.12
+      '@types/node': 24.5.0
+    transitivePeerDependencies:
+      - jiti
+      - less
+      - lightningcss
+      - msw
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - supports-color
+      - terser
+      - tsx
+      - yaml
+
+  vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2):
+    dependencies:
+      '@types/chai': 5.2.2
+      '@vitest/expect': 3.2.4
+      '@vitest/mocker': 3.2.4(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))
       '@vitest/pretty-format': 3.2.4
       '@vitest/runner': 3.2.4
       '@vitest/snapshot': 3.2.4
@@ -21821,6 +21881,35 @@ snapshots:
       '@workflow/errors': 5.0.0-beta.0
       '@workflow/nest': 5.0.0-beta.1(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.13(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.0(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)
       '@workflow/next': 5.0.0-beta.1(@opentelemetry/api@1.9.0)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@18.3.1))(react@18.3.1))
+      '@workflow/nitro': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/nuxt': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/rollup': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/sveltekit': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/typescript-plugin': 5.0.0-beta.1(typescript@5.9.2)
+      '@workflow/utils': 5.0.0-beta.0
+      ms: 2.1.3
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.0
+    transitivePeerDependencies:
+      - '@nestjs/common'
+      - '@nestjs/core'
+      - '@swc/cli'
+      - '@swc/core'
+      - '@swc/helpers'
+      - aws-crt
+      - magicast
+      - next
+      - supports-color
+      - typescript
+
+  workflow@5.0.0-beta.1(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.13(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.0(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(typescript@5.9.2):
+    dependencies:
+      '@workflow/astro': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/cli': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/core': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
+      '@workflow/errors': 5.0.0-beta.0
+      '@workflow/nest': 5.0.0-beta.1(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.13(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.0(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)
+      '@workflow/next': 5.0.0-beta.1(@opentelemetry/api@1.9.0)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))
       '@workflow/nitro': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
       '@workflow/nuxt': 5.0.0-beta.1(@opentelemetry/api@1.9.0)
       '@workflow/rollup': 5.0.0-beta.1(@opentelemetry/api@1.9.0)

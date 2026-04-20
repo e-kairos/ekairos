@@ -191,20 +191,24 @@ type EnsureIncludesSchema<
   Required extends InstantSchemaDef<any, any, any>
 > =
   // Check entities: Full must contain all entities from Required with compatible types
+  [
   {
     [K in keyof EntitiesOf<Required>]:
       K extends keyof EntitiesOf<Full>
-        ? (EntitiesOf<Full>[K] extends EntitiesOf<Required>[K] ? unknown : never)
-        : never
-  }[keyof EntitiesOf<Required>] extends never
+        ? (EntitiesOf<Full>[K] extends EntitiesOf<Required>[K] ? never : K)
+        : K
+  }[keyof EntitiesOf<Required>]
+  ] extends [never]
     ? (
         // Check links: Full must contain all links from Required with compatible types
+        [
         {
           [K in keyof LinksOf<Required>]:
             K extends keyof LinksOf<Full>
-              ? (LinksOf<Full>[K] extends LinksOf<Required>[K] ? unknown : never)
-              : never
-        }[keyof LinksOf<Required>] extends never
+              ? (LinksOf<Full>[K] extends LinksOf<Required>[K] ? never : K)
+              : K
+        }[keyof LinksOf<Required>]
+        ] extends [never]
           ? Full
           : never
       )

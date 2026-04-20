@@ -58,11 +58,15 @@ type LinksOf<S> = S extends InstantSchemaDef<any, infer L, any> ? L : never;
  * Verifies that Full schema includes all entities and links from Required schema.
  * Returns Full if compatible, never otherwise.
  */
-type EnsureIncludesSchema<Full extends InstantSchemaDef<any, any, any>, Required extends InstantSchemaDef<any, any, any>> = {
-    [K in keyof EntitiesOf<Required>]: K extends keyof EntitiesOf<Full> ? (EntitiesOf<Full>[K] extends EntitiesOf<Required>[K] ? unknown : never) : never;
-}[keyof EntitiesOf<Required>] extends never ? ({
-    [K in keyof LinksOf<Required>]: K extends keyof LinksOf<Full> ? (LinksOf<Full>[K] extends LinksOf<Required>[K] ? unknown : never) : never;
-}[keyof LinksOf<Required>] extends never ? Full : never) : never;
+type EnsureIncludesSchema<Full extends InstantSchemaDef<any, any, any>, Required extends InstantSchemaDef<any, any, any>> = [
+    {
+        [K in keyof EntitiesOf<Required>]: K extends keyof EntitiesOf<Full> ? (EntitiesOf<Full>[K] extends EntitiesOf<Required>[K] ? never : K) : K;
+    }[keyof EntitiesOf<Required>]
+] extends [never] ? ([
+    {
+        [K in keyof LinksOf<Required>]: K extends keyof LinksOf<Full> ? (LinksOf<Full>[K] extends LinksOf<Required>[K] ? never : K) : K;
+    }[keyof LinksOf<Required>]
+] extends [never] ? Full : never) : never;
 /**
  * Schema S restricted to be compatible with RequiredDomain.
  * Returns S if compatible, never otherwise.

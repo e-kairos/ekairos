@@ -95,7 +95,7 @@ describeCreateAppE2E("domain cli create-app", () => {
       await rm(projectDir, { recursive: true, force: true }).catch(() => {})
     })
 
-    const createIo = createIo()
+    const createIoState = createIo()
     const createCode = await runCli(
       [
         "create-app",
@@ -106,16 +106,19 @@ describeCreateAppE2E("domain cli create-app", () => {
         "--package-manager=pnpm",
         `--workspace=${workspaceRoot}`,
         `--instantToken=${String(process.env.INSTANT_PERSONAL_ACCESS_TOKEN ?? "").trim()}`,
+        "--json",
       ],
-      createIo.io as any,
+      createIoState.io as any,
     )
 
-    expect(createCode, JSON.stringify(createIo.read())).toBe(0)
-    const createPayload = JSON.parse(createIo.read().stdout)
+    expect(createCode, JSON.stringify(createIoState.read())).toBe(0)
+    const createPayload = JSON.parse(createIoState.read().stdout)
     expect(createPayload.ok).toBe(true)
     expect(createPayload.data.provisioned).toBe(true)
     expect(typeof createPayload.data.appId).toBe("string")
-    expect(typeof createPayload.data.adminToken).toBe("string")
+    expect(createPayload.data.adminToken).toBeUndefined()
+    expect(createPayload.data.adminTokenWritten).toBe(true)
+    expect(typeof createPayload.data.envFile).toBe("string")
 
     const appId = String(createPayload.data.appId)
     cleanup.push(async () => {
@@ -132,12 +135,14 @@ describeCreateAppE2E("domain cli create-app", () => {
 
     const port = await reservePort()
     const baseUrl = `http://127.0.0.1:${port}`
+    const serverEnv = { ...process.env }
+    delete serverEnv.NODE_ENV
     const server = spawn(
       "pnpm",
       ["exec", "next", "dev", "--hostname", "127.0.0.1", "--port", String(port)],
       {
         cwd: projectDir,
-        env: process.env,
+        env: serverEnv,
         shell: process.platform === "win32",
         stdio: "pipe",
       },
@@ -168,21 +173,27 @@ describeCreateAppE2E("domain cli create-app", () => {
       )
     })
 
-    const seedIo = createIo()
-    const seedCode = await runCli(
-      ["seedDemo", "{}", `--baseUrl=${baseUrl}`, "--admin", "--pretty"],
-      seedIo.io as any,
+    const launchIo = createIo()
+    const launchCode = await runCli(
+      [
+        "supplyChain.order.launch",
+        "{ reference: 'PO-E2E-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }",
+        `--baseUrl=${baseUrl}`,
+        "--admin",
+        "--pretty",
+      ],
+      launchIo.io as any,
     )
-    expect(seedCode, JSON.stringify(seedIo.read())).toBe(0)
-    const seedPayload = JSON.parse(seedIo.read().stdout)
-    expect(seedPayload.ok).toBe(true)
-    expect(seedPayload.data.action).toBe("app.demo.seed")
+    expect(launchCode, JSON.stringify(launchIo.read())).toBe(0)
+    const launchPayload = JSON.parse(launchIo.read().stdout)
+    expect(launchPayload.ok).toBe(true)
+    expect(launchPayload.data.action).toBe("supplyChain.order.launch")
 
     const queryIo = createIo()
     const queryCode = await runCli(
       [
         "query",
-        "{ app_tasks: { comments: {} } }",
+        "{ procurement_order: { supplier: {}, stockItems: {}, shipments: { inspections: {} } } }",
         `--baseUrl=${baseUrl}`,
         "--admin",
         "--meta",
@@ -194,9 +205,13 @@ describeCreateAppE2E("domain cli create-app", () => {
     const queryPayload = JSON.parse(queryIo.read().stdout)
     expect(queryPayload.ok).toBe(true)
     expect(queryPayload.source).toBe("server")
-    expect(Array.isArray(queryPayload.data.app_tasks)).toBe(true)
-    expect(queryPayload.data.app_tasks.length).toBeGreaterThan(0)
-    expect(Array.isArray(queryPayload.data.app_tasks[0].comments)).toBe(true)
-    expect(queryPayload.data.app_tasks[0].comments.length).toBeGreaterThan(0)
+    expect(Array.isArray(queryPayload.data.procurement_order)).toBe(true)
+    expect(queryPayload.data.procurement_order.length).toBeGreaterThan(0)
+    expect(Array.isArray(queryPayload.data.procurement_order[0].stockItems)).toBe(true)
+    expect(queryPayload.data.procurement_order[0].stockItems.length).toBeGreaterThan(0)
+    expect(Array.isArray(queryPayload.data.procurement_order[0].shipments)).toBe(true)
+    expect(queryPayload.data.procurement_order[0].shipments.length).toBeGreaterThan(0)
+    expect(Array.isArray(queryPayload.data.procurement_order[0].shipments[0].inspections)).toBe(true)
+    expect(queryPayload.data.procurement_order[0].shipments[0].inspections.length).toBeGreaterThan(0)
   }, 10 * 60 * 1000)
 })

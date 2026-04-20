@@ -6,14 +6,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist",
-    "bin"
+    "dist"
   ],
   "publishConfig": {
     "access": "public"
-  },
-  "bin": {
-    "ekairos": "./bin/cli.js"
   },
   "license": "MIT",
   "repository": {
@@ -69,8 +65,7 @@
     "@ekairos/dataset": "workspace:*",
     "@ekairos/domain": "^1.22.0",
     "@ekairos/events": "workspace:*",
-    "@instantdb/admin": "0.22.126",
-    "ekairos-cli": "workspace:*"
+    "@instantdb/admin": "0.22.126"
   },
   "devDependencies": {
     "@ekairos/tsconfig": "workspace:*",

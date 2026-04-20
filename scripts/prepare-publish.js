@@ -38,11 +38,7 @@ function updatePackageJson(packagePath) {
         const depPackageJsonPath = path.join(linkedPackages[dep], 'package.json');
         if (fs.existsSync(depPackageJsonPath)) {
           const depPackageJson = JSON.parse(fs.readFileSync(depPackageJsonPath, 'utf8'));
-          if (dep === 'ekairos-cli') {
-            nextVersion = `^${depPackageJson.version}`;
-          } else {
-            nextVersion = `^${rootVersion}`;
-          }
+          nextVersion = `^${rootVersion}`;
         }
       }
 

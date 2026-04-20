@@ -19,7 +19,7 @@ Use `./skill.sh` to list, validate, bundle, and install skills.
 ### ekairos-domain-cli
 
 - Path: `skills/ekairos-domain-cli`
-- Purpose: Scaffold and operate Ekairos apps through the `@ekairos/domain` CLI.
+- Purpose: Scaffold and operate Ekairos apps through the installed `ekairos` CLI.
 - Adoption value: lowers time-to-first-app by standardizing `create-app`, `inspect`, `action`, and `query` flows.
 - Related packages:
   - `@ekairos/domain`

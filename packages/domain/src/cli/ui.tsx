@@ -34,6 +34,7 @@ const STAGE_LABELS: Array<{ id: CreateDomainAppProgressStage; label: string }> =
   { id: "write-files", label: "Write scaffold files" },
   { id: "write-env", label: "Write environment" },
   { id: "install", label: "Install dependencies" },
+  { id: "smoke", label: "Run smoke test" },
   { id: "complete", label: "Complete" },
 ]
 
@@ -106,6 +107,7 @@ function CreateAppInk(props: {
       `Directory: ${state.result.directory}`,
       `Package manager: ${state.result.packageManager}`,
       ...(state.result.appId ? [`Instant app: ${state.result.appId}`] : []),
+      ...(state.result.smoke?.baseUrl ? [`Review URL: ${state.result.smoke.baseUrl}`] : []),
     ]
   }, [state.result])
 

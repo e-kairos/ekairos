@@ -1,16 +1,30 @@
 # Command Cookbook
 
+## Install
+
+```bash
+npm install -g @ekairos/cli
+```
+
+All commands below assume `ekairos` is available on PATH.
+
 ## Scaffold
 
 ```bash
-npx @ekairos/domain create-app my-app --next
-npx @ekairos/domain create-app my-app --next --instantToken=$INSTANT_PERSONAL_ACCESS_TOKEN
+ekairos create-app my-app --next --install --smoke
+ekairos create-app my-app --next --instantToken=$INSTANT_PERSONAL_ACCESS_TOKEN
+```
+
+For agents and CI:
+
+```bash
+ekairos create-app my-app --next --install --smoke --json
 ```
 
 ## Inspect
 
 ```bash
-npx @ekairos/domain inspect --baseUrl=http://localhost:3000 --admin --pretty
+ekairos domain inspect --baseUrl=http://localhost:3000 --admin --pretty
 ```
 
 The CLI defaults to `/api/ekairos/domain` and falls back to legacy `.well-known`.
@@ -18,13 +32,13 @@ The CLI defaults to `/api/ekairos/domain` and falls back to legacy `.well-known`
 ## Run An Action
 
 ```bash
-npx @ekairos/domain createTask "{ title: 'Ship CLI onboarding' }" --baseUrl=http://localhost:3000 --admin --pretty
+ekairos domain "supplyChain.order.launch" "{ reference: 'PO-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }" --baseUrl=http://localhost:3000 --admin --pretty
 ```
 
 ## Query Nested Data
 
 ```bash
-npx @ekairos/domain query "{ app_tasks: { comments: {} } }" --baseUrl=http://localhost:3000 --admin --pretty
+ekairos domain query "{ procurement_order: { supplier: {}, stockItems: {}, shipments: { inspections: {} } } }" --baseUrl=http://localhost:3000 --admin --pretty
 ```
 
 ## Query From File
@@ -33,9 +47,13 @@ npx @ekairos/domain query "{ app_tasks: { comments: {} } }" --baseUrl=http://loc
 
 ```json5
 {
-  app_tasks: {
+  procurement_order: {
     $: { limit: 10, order: { createdAt: "desc" } },
-    comments: {}
+    supplier: {},
+    stockItems: {},
+    shipments: {
+      inspections: {}
+    }
   }
 }
 ```
@@ -43,12 +61,12 @@ npx @ekairos/domain query "{ app_tasks: { comments: {} } }" --baseUrl=http://loc
 Run:
 
 ```bash
-npx @ekairos/domain query @query.json5 --baseUrl=http://localhost:3000 --admin
+ekairos domain query @query.json5 --baseUrl=http://localhost:3000 --admin
 ```
 
 ## Switch To User Scope
 
 ```bash
-npx @ekairos/domain login http://localhost:3000 --refreshToken=<token> --appId=<app-id>
-npx @ekairos/domain query "{ app_tasks: {} }" --meta
+ekairos domain login http://localhost:3000 --refreshToken=<token> --appId=<app-id>
+ekairos domain query "{ procurement_order: {} }" --meta
 ```
