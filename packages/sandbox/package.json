@@ -37,6 +37,12 @@
       "require": "./dist/runtime.js",
       "default": "./dist/runtime.js"
     },
+    "./domain": {
+      "types": "./dist/domain.d.ts",
+      "import": "./dist/domain.js",
+      "require": "./dist/domain.js",
+      "default": "./dist/domain.js"
+    },
     "./sandbox": {
       "types": "./dist/sandbox.d.ts",
       "import": "./dist/sandbox.js",

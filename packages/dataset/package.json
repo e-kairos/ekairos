@@ -25,6 +25,11 @@
       "require": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./domain": {
+      "types": "./dist/domain.d.ts",
+      "require": "./dist/domain.js",
+      "default": "./dist/domain.js"
+    },
     "./file/scripts": {
       "default": "./dist/file/scripts"
     },
