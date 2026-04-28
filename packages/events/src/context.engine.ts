@@ -589,14 +589,6 @@ async function readActiveWorkflowRunId() {
 
 type ContextStepPatch = {
   status?: "running" | "completed" | "failed"
-  kind?: "message" | "action_execute" | "action_result"
-  actionName?: string
-  actionInput?: unknown
-  actionOutput?: unknown
-  actionError?: string
-  actionRequests?: any
-  actionResults?: any
-  continueLoop?: boolean
   errorText?: string
 }
 
@@ -862,11 +854,11 @@ async function createRuntimeOps<Context>(
       return { stepId }
     },
     updateContextStep: async (params) => {
+      const update: any = { updatedAt: new Date() }
+      if (params.patch.status !== undefined) update.status = params.patch.status
+      if (params.patch.errorText !== undefined) update.errorText = params.patch.errorText
       await instrumentedDb.transact([
-        instrumentedDb.tx.event_steps[params.stepId].update({
-          ...(params.patch as any),
-          updatedAt: new Date(),
-        }),
+        instrumentedDb.tx.event_steps[params.stepId].update(update),
       ])
     },
     finalizeReactionStep: async (params) => {
@@ -878,11 +870,11 @@ async function createRuntimeOps<Context>(
         })
       }
 
+      const update: any = { updatedAt: new Date() }
+      if (params.patch.status !== undefined) update.status = params.patch.status
+      if (params.patch.errorText !== undefined) update.errorText = params.patch.errorText
       await instrumentedDb.transact([
-        instrumentedDb.tx.event_steps[params.stepId].update({
-          ...(params.patch as any),
-          updatedAt: new Date(),
-        }),
+        instrumentedDb.tx.event_steps[params.stepId].update(update),
       ])
 
       if (!params.reactionEventId || !params.reactionEvent) {
@@ -1649,9 +1641,6 @@ export abstract class ContextEngine<
         }
         story.opts.onEventCreated?.(assistantEventEffective)
 
-        const firstActionRequest = (actionRequests as any[])?.[0] as
-          | { actionName?: string; actionRef?: string; input?: unknown }
-          | undefined
         await emitContextEvents({
           silent,
           writable,
@@ -1663,11 +1652,6 @@ export abstract class ContextEngine<
               executionId,
               iteration: iter,
               status: "running",
-              kind: firstActionRequest ? "action_execute" : "message",
-              actionName:
-                firstActionRequest && typeof firstActionRequest.actionName === "string"
-                  ? firstActionRequest.actionName
-                  : undefined,
             },
           ],
         })
@@ -1689,10 +1673,6 @@ export abstract class ContextEngine<
                   stepId: openedStep.stepId,
                   patch: {
                     status: "completed",
-                    kind: "message",
-                    actionRequests: [],
-                    actionResults: [],
-                    continueLoop: false,
                   },
                   reactionEventId,
                   reactionEvent: completedReactionEvent,
@@ -1714,7 +1694,6 @@ export abstract class ContextEngine<
                   executionId,
                   iteration: iter,
                   status: "completed",
-                  kind: "message",
                 },
                 {
                   type: "step.completed",
@@ -1944,7 +1923,6 @@ export abstract class ContextEngine<
             }),
         )
 
-        const firstActionResult = (actionResults as any[])?.[0]
         const finalizedReactionStatus = continueLoop === false ? "completed" : "pending"
         const finalizedReactionEvent: ContextItem = {
           ...reactionEvent,
@@ -1959,23 +1937,6 @@ export abstract class ContextEngine<
               stepId: openedStep.stepId,
               patch: {
                 status: "completed",
-                kind: (actionRequests as any[])?.length ? "action_result" : "message",
-                actionName:
-                  typeof firstActionResult?.actionRequest?.actionName === "string"
-                    ? firstActionResult.actionRequest.actionName
-                    : undefined,
-                actionInput: firstActionResult?.actionRequest?.input,
-                actionOutput:
-                  firstActionResult?.success === true
-                    ? firstActionResult?.output
-                    : undefined,
-                actionError:
-                  firstActionResult?.success === false
-                    ? String(firstActionResult?.errorText ?? "action_execution_failed")
-                    : undefined,
-                actionRequests,
-                actionResults,
-                continueLoop: continueLoop !== false,
               },
               reactionEventId,
               reactionEvent: finalizedReactionEvent,
@@ -1998,11 +1959,6 @@ export abstract class ContextEngine<
               executionId,
               iteration: iter,
               status: "completed",
-              kind: (actionRequests as any[])?.length ? "action_result" : "message",
-              actionName:
-                typeof firstActionResult?.actionRequest?.actionName === "string"
-                  ? firstActionResult.actionRequest.actionName
-                  : undefined,
             },
             {
               type: "step.completed",

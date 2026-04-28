@@ -3,7 +3,6 @@ import type {
   ExecutionStatus,
   ItemStatus,
   ItemType,
-  StepKind,
   StepStatus,
   ContextStreamChunkType,
 } from "./context.contract.js"
@@ -108,8 +107,6 @@ export type StepUpdatedEvent = ContextStreamEventBase & {
   executionId: string
   iteration?: number
   status?: StepStatus
-  kind?: StepKind
-  actionName?: string
 }
 
 export type StepCompletedEvent = ContextStreamEventBase & {
@@ -302,8 +299,6 @@ export function parseContextStreamEvent(value: unknown): ContextStreamEvent {
       assertString(value.executionId, `${type}.executionId`)
       if (value.iteration !== undefined) assertNumber(value.iteration, `${type}.iteration`)
       assertOptionalString(value.status, `${type}.status`)
-      assertOptionalString(value.kind, `${type}.kind`)
-      assertOptionalString(value.actionName, `${type}.actionName`)
       return value as StepUpdatedEvent
     }
     case "step.completed":

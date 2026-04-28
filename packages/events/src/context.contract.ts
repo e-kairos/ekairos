@@ -12,13 +12,6 @@ export type ExecutionStatus = (typeof EXECUTION_STATUSES)[number]
 export const STEP_STATUSES = ["running", "completed", "failed"] as const
 export type StepStatus = (typeof STEP_STATUSES)[number]
 
-export const STEP_KINDS = [
-  "message",
-  "action_execute",
-  "action_result",
-] as const
-export type StepKind = (typeof STEP_KINDS)[number]
-
 export const ITEM_STATUSES = ["stored", "pending", "completed"] as const
 export type ItemStatus = (typeof ITEM_STATUSES)[number]
 

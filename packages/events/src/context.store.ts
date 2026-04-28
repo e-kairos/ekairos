@@ -3,7 +3,6 @@ import type {
   ContextStatus,
   ExecutionStatus,
   StepStatus,
-  StepKind,
   ItemStatus,
   ItemType,
   Channel,
@@ -47,14 +46,6 @@ export type ContextStep = {
   updatedAt?: Date
   status: StepStatus
   iteration: number
-  kind?: StepKind
-  actionName?: string
-  actionInput?: unknown
-  actionOutput?: unknown
-  actionError?: string
-  actionRequests?: any
-  actionResults?: any
-  continueLoop?: boolean
   errorText?: string
 }
 
@@ -101,14 +92,6 @@ export interface ContextStore {
       Pick<
         ContextStep,
         | "status"
-        | "kind"
-        | "actionName"
-        | "actionInput"
-        | "actionOutput"
-        | "actionError"
-        | "actionRequests"
-        | "actionResults"
-        | "continueLoop"
         | "errorText"
         | "updatedAt"
       >

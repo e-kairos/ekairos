@@ -35,14 +35,6 @@ export const eventsDomain = domain("events")
                 updatedAt: i.date().optional(),
                 status: i.string().optional().indexed(), // running | completed | failed
                 iteration: i.number().indexed(),
-                kind: i.string().optional().indexed(), // message | action_execute | action_result
-                actionName: i.string().optional().indexed(),
-                actionInput: i.any().optional(),
-                actionOutput: i.any().optional(),
-                actionError: i.string().optional(),
-                actionRequests: i.any().optional(),
-                actionResults: i.any().optional(),
-                continueLoop: i.boolean().optional(),
                 errorText: i.string().optional(),
                 streamId: i.string().optional().indexed(),
                 streamClientId: i.string().optional().indexed(),

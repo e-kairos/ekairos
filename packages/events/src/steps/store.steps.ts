@@ -62,14 +62,6 @@ export type ContextReviewRequest = {
 
 type ContextStepPatch = {
   status?: "running" | "completed" | "failed"
-  kind?: "message" | "action_execute" | "action_result"
-  actionName?: string
-  actionInput?: unknown
-  actionOutput?: unknown
-  actionError?: string
-  actionRequests?: any
-  actionResults?: any
-  continueLoop?: boolean
   errorText?: string
 }
 
@@ -781,15 +773,7 @@ export async function updateContextStep(params: {
         stepId: String(params.stepId),
         payload: {
           status: params.patch.status,
-          kind: params.patch.kind,
-          actionName: params.patch.actionName,
-          actionInput: params.patch.actionInput,
-          actionOutput: params.patch.actionOutput,
-          actionError: params.patch.actionError,
           iteration: params.iteration,
-          actionRequests: params.patch.actionRequests,
-          actionResults: params.patch.actionResults,
-          continueLoop: params.patch.continueLoop,
           errorText: params.patch.errorText,
         },
       },
@@ -848,15 +832,7 @@ export async function finalizeReactionStep(params: {
         stepId: String(params.stepId),
         payload: {
           status: params.patch.status,
-          kind: params.patch.kind,
-          actionName: params.patch.actionName,
-          actionInput: params.patch.actionInput,
-          actionOutput: params.patch.actionOutput,
-          actionError: params.patch.actionError,
           iteration: params.iteration,
-          actionRequests: params.patch.actionRequests,
-          actionResults: params.patch.actionResults,
-          continueLoop: params.patch.continueLoop,
           errorText: params.patch.errorText,
         },
       },

@@ -637,14 +637,6 @@ export class InstantStore implements ContextStore {
     stepId: string,
     patch: Partial<{
       status: "running" | "completed" | "failed"
-      kind: "message" | "action_execute" | "action_result"
-      actionName: string
-      actionInput: unknown
-      actionOutput: unknown
-      actionError: string
-      actionRequests: any
-      actionResults: any
-      continueLoop: boolean
       errorText: string
       updatedAt: Date
     }>,
@@ -664,9 +656,10 @@ export class InstantStore implements ContextStore {
     }
 
     const update: any = {
-      ...(patch as any),
       updatedAt: patch.updatedAt ?? new Date(),
     }
+    if (patch.status !== undefined) update.status = patch.status
+    if (patch.errorText !== undefined) update.errorText = patch.errorText
 
     await this.db.transact([this.db.tx.event_steps[stepId].update(update)])
   }

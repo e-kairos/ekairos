@@ -95,6 +95,30 @@ describe("AI SDK chunk map part identity", () => {
     expect(output.partId).toMatch(UUID_RE)
   })
 
+  it("preserves streamed tool input deltas in normalized chunk data", () => {
+    // given
+    const event = mapAiSdkChunkToContextEvent({
+      contextId: "context_1",
+      executionId: "execution_1",
+      stepId: "step_1",
+      itemId: "reaction_1",
+      provider: "openai",
+      sequence: 1,
+      chunk: {
+        type: "tool-input-delta",
+        toolCallId: "call_1",
+        inputTextDelta: "{\"message\":\"hello",
+      },
+    })
+
+    // then
+    expect(event.chunkType).toBe("chunk.action_input_delta")
+    expect(event.data).toMatchObject({
+      toolCallId: "call_1",
+      inputTextDelta: "{\"message\":\"hello",
+    })
+  })
+
   it("does not assign part identity to AI SDK lifecycle chunks", () => {
     // given
     // A lifecycle chunk that is not a semantic part mutation.
