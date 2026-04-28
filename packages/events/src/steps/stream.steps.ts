@@ -4,10 +4,13 @@ import type { ContextEnvironment } from "../context.config.js"
 import type { ContextRuntime } from "../context.runtime.js"
 import { getContextRuntimeServices } from "../context.runtime.js"
 import {
+  createContextStepStreamChunk,
   contextStreamByteLength,
+  encodeContextStepStreamChunk,
   parseContextStepStreamChunk,
   type ContextStepStreamChunk,
 } from "../context.step-stream.js"
+import { resolveContextPartChunkIdentity } from "../context.part-identity.js"
 import type { ContextStreamEvent } from "../context.stream.js"
 
 export async function writeContextEvents(params: {
@@ -65,6 +68,18 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
+}
+
+function toJsonSafeRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === "undefined") return undefined
+  try {
+    const json = JSON.parse(JSON.stringify(value)) as unknown
+    return json && typeof json === "object"
+      ? (json as Record<string, unknown>)
+      : { value: json }
+  } catch {
+    return undefined
+  }
 }
 
 function createUnsetStreamLinkTx(
@@ -247,6 +262,120 @@ export async function abortPersistedContextStepStream(params: {
     mode: "abort",
     abortReason: params.reason,
   })
+}
+
+export async function writeActionResultPartChunks(params: {
+  session?: PersistedContextStepStreamSession | null
+  contextId: string
+  executionId: string
+  itemId: string
+  actionResults: Array<{
+    actionRequest: {
+      actionRef: string
+      actionName: string
+      input: unknown
+    }
+    success: boolean
+    output: unknown
+    errorText?: string
+  }>
+}): Promise<ContextStreamEvent[]> {
+  "use step"
+  if (!params.session || params.actionResults.length === 0) return []
+
+  const writer = params.session.stream.getWriter()
+  const events: ContextStreamEvent[] = []
+  const sequenceBase = Date.now()
+
+  try {
+    for (let index = 0; index < params.actionResults.length; index += 1) {
+      const result = params.actionResults[index]!
+      const actionRef = String(result.actionRequest.actionRef || "")
+      const actionName = String(result.actionRequest.actionName || "")
+      if (!actionRef || !actionName) continue
+
+      const chunkType = result.success
+        ? "chunk.action_completed"
+        : "chunk.action_failed"
+      const identity = resolveContextPartChunkIdentity({
+        stepId: params.session.stepId,
+        provider: "ekairos",
+        providerPartId: actionRef,
+        chunkType,
+      })
+      if (!identity) continue
+
+      const data = result.success
+        ? {
+            actionRef,
+            actionCallId: actionRef,
+            actionName,
+            toolCallId: actionRef,
+            toolName: actionName,
+            output: toJsonSafeRecord(result.output),
+          }
+        : {
+            actionRef,
+            actionCallId: actionRef,
+            actionName,
+            toolCallId: actionRef,
+            toolName: actionName,
+            error: {
+              message: String(result.errorText || "Action failed."),
+            },
+          }
+
+      const at = new Date().toISOString()
+      const sequence = sequenceBase + index
+      const persistedChunk = createContextStepStreamChunk({
+        at,
+        sequence,
+        chunkType,
+        stepId: params.session.stepId,
+        partId: identity.partId,
+        providerPartId: identity.providerPartId,
+        partType: identity.partType,
+        partSlot: identity.partSlot,
+        provider: "ekairos",
+        providerChunkType: result.success
+          ? "action_completed"
+          : "action_failed",
+        actionRef,
+        data,
+      })
+
+      await writer.write(encodeContextStepStreamChunk(persistedChunk, {
+        stepId: params.session.stepId,
+      }))
+
+      events.push({
+        type: "chunk.emitted",
+        at,
+        chunkType,
+        contextId: params.contextId,
+        executionId: params.executionId,
+        stepId: params.session.stepId,
+        itemId: params.itemId,
+        sequence,
+        provider: "ekairos",
+        providerChunkType: result.success
+          ? "action_completed"
+          : "action_failed",
+        actionRef,
+        partId: identity.partId,
+        providerPartId: identity.providerPartId,
+        partType: identity.partType,
+        partSlot: identity.partSlot,
+        data,
+      })
+    }
+  } finally {
+    if (typeof (writer as any)?.releaseLock === "function") {
+      writer.releaseLock()
+    }
+  }
+
+  return events
 }
 
 export async function readPersistedContextStepStream(params: {
