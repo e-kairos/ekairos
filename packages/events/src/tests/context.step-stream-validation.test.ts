@@ -152,4 +152,59 @@ describe("context step stream chunk validation", () => {
     expect(event.partType).toBe("action")
     expect(event.partSlot).toBe("action:completed")
   })
+
+  it("rejects action chunks without actionRef", () => {
+    // given
+    // Action chunks need a stable call identity in addition to the semantic slot.
+    const stepId = "step_1"
+    const identity = resolveContextPartChunkIdentity({
+      stepId,
+      provider: "codex",
+      providerPartId: "call_1",
+      chunkType: "chunk.action_completed",
+    })
+
+    // when / then
+    // The stream refuses action chunks that cannot be grouped by actionRef.
+    expect(() =>
+      createContextStepStreamChunk({
+        stepId,
+        sequence: 1,
+        chunkType: "chunk.action_completed",
+        provider: "codex",
+        providerChunkType: "action_completed",
+        partId: identity?.partId,
+        providerPartId: identity?.providerPartId,
+        partType: identity?.partType,
+        partSlot: identity?.partSlot,
+      }),
+    ).toThrow(/actionRef/)
+  })
+
+  it("rejects action chunks whose actionRef does not match providerPartId", () => {
+    // given
+    const stepId = "step_1"
+    const identity = resolveContextPartChunkIdentity({
+      stepId,
+      provider: "codex",
+      providerPartId: "call_1",
+      chunkType: "chunk.action_completed",
+    })
+
+    // when / then
+    expect(() =>
+      createContextStepStreamChunk({
+        stepId,
+        sequence: 1,
+        chunkType: "chunk.action_completed",
+        provider: "codex",
+        providerChunkType: "action_completed",
+        actionRef: "other_call",
+        partId: identity?.partId,
+        providerPartId: identity?.providerPartId,
+        partType: identity?.partType,
+        partSlot: identity?.partSlot,
+      }),
+    ).toThrow(/match providerPartId/)
+  })
 })

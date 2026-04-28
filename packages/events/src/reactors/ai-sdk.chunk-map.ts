@@ -110,6 +110,7 @@ function buildNormalizedData(chunk: Record<string, unknown>): Record<string, unk
     "inputTextDelta",
     "outputTextDelta",
     "state",
+    "actionName",
     "toolName",
     "toolCallId",
     "input",
@@ -141,6 +142,7 @@ export type MapAiSdkChunkToContextEventParams = {
   itemId?: string
   provider?: string
   sequence: number
+  actionNameByRef?: Map<string, string>
 }
 
 function readProviderPartId(chunk: Record<string, unknown>, chunkType: ContextStreamChunkType) {
@@ -176,6 +178,28 @@ export function mapAiSdkChunkToContextEvent(
   const actionRef =
     readString(chunk, "toolCallId") ??
     readString(chunk, "id")
+  let data = buildNormalizedData(chunk)
+
+  if (chunkType.startsWith("chunk.action_") && actionRef) {
+    const observedActionName =
+      readString(chunk, "actionName") ??
+      readString(chunk, "toolName") ??
+      readString(data, "actionName") ??
+      readString(data, "toolName")
+    if (observedActionName) {
+      params.actionNameByRef?.set(actionRef, observedActionName)
+    }
+
+    const knownActionName =
+      observedActionName ?? params.actionNameByRef?.get(actionRef)
+    if (knownActionName) {
+      data = {
+        ...data,
+        actionName: readString(data, "actionName") ?? knownActionName,
+        toolName: readString(data, "toolName") ?? knownActionName,
+      }
+    }
+  }
 
   return {
     type: "chunk.emitted",
@@ -193,7 +217,7 @@ export function mapAiSdkChunkToContextEvent(
     provider: params.provider,
     providerChunkType,
     sequence: params.sequence,
-    data: buildNormalizedData(chunk),
+    data,
     raw: sanitizeRaw(chunk),
   }
 }

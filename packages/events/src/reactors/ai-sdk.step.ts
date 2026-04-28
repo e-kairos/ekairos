@@ -207,6 +207,7 @@ export async function executeAiSdkReaction<Env extends ContextEnvironment = Cont
     modelId.includes("/") ? modelId.split("/")[0] || "ai-sdk" : "ai-sdk"
 
   const contextStepStreamWriter = params.contextStepStream?.getWriter()
+  const actionNameByRef = new Map<string, string>()
 
   try {
     const uiStream = result
@@ -249,6 +250,7 @@ export async function executeAiSdkReaction<Env extends ContextEnvironment = Cont
                 itemId: params.eventId,
                 provider: mappedProvider,
                 sequence: ++chunkSequence,
+                actionNameByRef,
               })
               const persistedChunk = createContextStepStreamChunk({
                 at: mapped.at,

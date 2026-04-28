@@ -348,8 +348,13 @@ export function assertValidContextPartChunkIdentity(
   if (!isActionChunk && typeof input.actionRef !== "undefined") {
     throw new Error(`Invalid ${fieldLabel(label, "actionRef")}: only action chunks can carry actionRef.`)
   }
-  if (isActionChunk && typeof input.actionRef !== "undefined") {
-    assertPartIdentityString(input.actionRef, fieldLabel(label, "actionRef"))
+  if (isActionChunk) {
+    const actionRef = assertPartIdentityString(input.actionRef, fieldLabel(label, "actionRef"))
+    if (actionRef !== providerPartId) {
+      throw new Error(
+        `Invalid ${fieldLabel(label, "actionRef")}: action chunks require actionRef to match providerPartId.`,
+      )
+    }
   }
 
   const stepId = normalizeIdentityField(input.stepId)

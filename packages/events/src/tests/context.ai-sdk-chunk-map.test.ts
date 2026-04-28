@@ -84,6 +84,8 @@ describe("AI SDK chunk map part identity", () => {
     // The provider id correlates both chunks, but the semantic part slots stay distinct.
     expect(input.chunkType).toBe("chunk.action_started")
     expect(output.chunkType).toBe("chunk.action_completed")
+    expect(input.actionRef).toBe("call_1")
+    expect(output.actionRef).toBe("call_1")
     expect(input.providerPartId).toBe("call_1")
     expect(output.providerPartId).toBe("call_1")
     expect(input.partType).toBe("action")
@@ -113,8 +115,52 @@ describe("AI SDK chunk map part identity", () => {
 
     // then
     expect(event.chunkType).toBe("chunk.action_input_delta")
+    expect(event.actionRef).toBe("call_1")
+    expect(event.providerPartId).toBe("call_1")
     expect(event.data).toMatchObject({
       toolCallId: "call_1",
+      inputTextDelta: "{\"message\":\"hello",
+    })
+  })
+
+  it("carries the last known action name onto action input deltas", () => {
+    // given
+    const actionNameByRef = new Map<string, string>()
+    const base = {
+      contextId: "context_1",
+      executionId: "execution_1",
+      stepId: "step_1",
+      itemId: "reaction_1",
+      provider: "openai",
+      actionNameByRef,
+    }
+
+    // when
+    mapAiSdkChunkToContextEvent({
+      ...base,
+      sequence: 1,
+      chunk: {
+        type: "tool-input-start",
+        toolCallId: "call_1",
+        toolName: "createMessage",
+      },
+    })
+    const delta = mapAiSdkChunkToContextEvent({
+      ...base,
+      sequence: 2,
+      chunk: {
+        type: "tool-input-delta",
+        toolCallId: "call_1",
+        inputTextDelta: "{\"message\":\"hello",
+      },
+    })
+
+    // then
+    // Deltas can be rendered as the intended action before the terminal chunk arrives.
+    expect(delta.chunkType).toBe("chunk.action_input_delta")
+    expect(delta.data).toMatchObject({
+      actionName: "createMessage",
+      toolName: "createMessage",
       inputTextDelta: "{\"message\":\"hello",
     })
   })
