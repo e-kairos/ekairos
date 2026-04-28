@@ -123,7 +123,7 @@ describe("context step stream chunk validation", () => {
       stepId,
       provider: "codex",
       providerPartId: "call_1",
-      chunkType: "chunk.action_output_available",
+      chunkType: "chunk.action_completed",
     })
 
     // when
@@ -136,9 +136,9 @@ describe("context step stream chunk validation", () => {
       stepId,
       itemId: "item_1",
       sequence: 1,
-      chunkType: "chunk.action_output_available",
+      chunkType: "chunk.action_completed",
       provider: "codex",
-      providerChunkType: "action_output_available",
+      providerChunkType: "action_completed",
       actionRef: "call_1",
       partId: identity?.partId,
       providerPartId: identity?.providerPartId,

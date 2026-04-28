@@ -212,11 +212,10 @@ export function resolveContextStreamPartType(
   }
 
   if (
-    chunkType === "chunk.action_input_start" ||
+    chunkType === "chunk.action_started" ||
     chunkType === "chunk.action_input_delta" ||
-    chunkType === "chunk.action_input_available" ||
-    chunkType === "chunk.action_output_available" ||
-    chunkType === "chunk.action_output_error"
+    chunkType === "chunk.action_completed" ||
+    chunkType === "chunk.action_failed"
   ) {
     return "action"
   }
@@ -233,8 +232,8 @@ export function resolveContextStreamPartSlot(
   if (partType === "source") return "source"
 
   if (partType === "action") {
-    if (chunkType === "chunk.action_output_error") return "action:failed"
-    if (chunkType === "chunk.action_output_available") return "action:completed"
+    if (chunkType === "chunk.action_failed") return "action:failed"
+    if (chunkType === "chunk.action_completed") return "action:completed"
     return "action:started"
   }
 

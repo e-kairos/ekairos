@@ -71,7 +71,7 @@ function mapAiSdkChunkType(providerChunkType: string): ContextStreamChunkType {
       return "chunk.reasoning_end"
     case "tool-input-start":
     case "tool-call-start":
-      return "chunk.action_input_start"
+      return "chunk.action_started"
     case "tool-input-delta":
     case "tool-call-delta":
       return "chunk.action_input_delta"
@@ -79,11 +79,11 @@ function mapAiSdkChunkType(providerChunkType: string): ContextStreamChunkType {
     case "tool-input-end":
     case "tool-call":
     case "tool-call-end":
-      return "chunk.action_input_available"
+      return "chunk.action_started"
     case "tool-output-available":
-      return "chunk.action_output_available"
+      return "chunk.action_completed"
     case "tool-output-error":
-      return "chunk.action_output_error"
+      return "chunk.action_failed"
     case "source-url":
       return "chunk.source_url"
     case "source-document":

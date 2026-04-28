@@ -65,11 +65,10 @@ export const STREAM_REASONING_CHUNK_TYPES = [
 ] as const
 
 export const STREAM_ACTION_CHUNK_TYPES = [
-  "chunk.action_input_start",
+  "chunk.action_started",
   "chunk.action_input_delta",
-  "chunk.action_input_available",
-  "chunk.action_output_available",
-  "chunk.action_output_error",
+  "chunk.action_completed",
+  "chunk.action_failed",
 ] as const
 
 export const STREAM_SOURCE_CHUNK_TYPES = [

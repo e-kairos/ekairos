@@ -287,9 +287,10 @@ export function mapCodexChunkType(providerChunkType: string): ContextStreamChunk
   if (value.includes("reasoning_delta")) return "chunk.reasoning_delta"
   if (value.includes("reasoning_end")) return "chunk.reasoning_end"
 
-  if (value.includes("action_input_start") || value.includes("tool_input_start")) {
-    return "chunk.action_input_start"
-  }
+  if (value.includes("action_started") || value.includes("tool_started")) return "chunk.action_started"
+  if (value.includes("action_completed") || value.includes("tool_completed")) return "chunk.action_completed"
+  if (value.includes("action_failed") || value.includes("tool_failed")) return "chunk.action_failed"
+  if (value.includes("action_input_start") || value.includes("tool_input_start")) return "chunk.action_started"
   if (value.includes("action_input_delta") || value.includes("tool_input_delta")) {
     return "chunk.action_input_delta"
   }
@@ -298,13 +299,13 @@ export function mapCodexChunkType(providerChunkType: string): ContextStreamChunk
     value.includes("tool_input_available") ||
     value.includes("action_call")
   ) {
-    return "chunk.action_input_available"
+    return "chunk.action_started"
   }
   if (value.includes("action_output_available") || value.includes("tool_output_available")) {
-    return "chunk.action_output_available"
+    return "chunk.action_completed"
   }
   if (value.includes("action_output_error") || value.includes("tool_output_error")) {
-    return "chunk.action_output_error"
+    return "chunk.action_failed"
   }
 
   if (value.includes("message_metadata")) return "chunk.message_metadata"
@@ -494,19 +495,19 @@ export function mapCodexAppServerNotification(
     case "item/commandExecution/outputDelta":
     case "item/fileChange/outputDelta":
     case "item/mcpToolCall/progress":
-      return map("chunk.action_output_available")
+      return map("chunk.action_completed")
     case "item/tool/call":
-      return map("chunk.action_input_available")
+      return map("chunk.action_started")
     case "item/tool/result":
       if (asRecord(params.result).success === false || asString(params.error)) {
-        return map("chunk.action_output_error")
+        return map("chunk.action_failed")
       }
-      return map("chunk.action_output_available")
+      return map("chunk.action_completed")
     case "item/started": {
       if (itemType === "agentmessage") return map("chunk.text_start")
       if (itemType === "reasoning") return map("chunk.reasoning_start")
       if (itemType === "usermessage") return map("chunk.message_metadata")
-      if (isActionItemType(itemType)) return map("chunk.action_input_available")
+      if (isActionItemType(itemType)) return map("chunk.action_started")
       return map("chunk.message_metadata")
     }
     case "item/completed": {
@@ -515,9 +516,9 @@ export function mapCodexAppServerNotification(
       if (itemType === "usermessage") return map("chunk.message_metadata")
       if (isActionItemType(itemType)) {
         if (hasItemError || itemStatus === "failed" || itemStatus === "declined") {
-          return map("chunk.action_output_error")
+          return map("chunk.action_failed")
         }
-        return map("chunk.action_output_available")
+        return map("chunk.action_completed")
       }
       if (hasItemError || itemStatus === "failed" || itemStatus === "declined") {
         return map("chunk.error")

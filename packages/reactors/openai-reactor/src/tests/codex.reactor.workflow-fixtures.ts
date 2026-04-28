@@ -3,6 +3,7 @@ import {
   createContextStepStreamChunk,
   encodeContextStepStreamChunk,
   eventsDomain,
+  resolveContextPartChunkIdentity,
   runContextReactionDirect,
   type ContextDurableWorkflowPayload,
   type ContextItem,
@@ -234,12 +235,24 @@ export async function executeMockCodexTurnStep(
       const mapped = defaultMapCodexChunk(providerChunk)
       if (!mapped || mapped.skip) continue
       const sequence = mappedChunks.length + 1
+      const identity = resolveContextPartChunkIdentity({
+        stepId: args.stepId,
+        provider: "codex",
+        providerPartId: mapped.providerPartId,
+        chunkType: mapped.chunkType,
+        partType: mapped.partType,
+        partSlot: mapped.partSlot,
+      })
       const mappedChunk: CodexMappedChunk = {
         at: new Date().toISOString(),
         sequence,
         chunkType: mapped.chunkType,
         providerChunkType: mapped.providerChunkType,
-        actionRef: mapped.actionRef,
+        partId: identity?.partId,
+        providerPartId: identity?.providerPartId,
+        partType: identity?.partType,
+        partSlot: identity?.partSlot,
+        actionRef: mapped.actionRef || (mapped.chunkType.startsWith("chunk.action_") ? identity?.providerPartId : undefined),
         data: mapped.data,
         raw: mapped.raw ?? toJsonSafe(providerChunk),
       }
@@ -251,6 +264,10 @@ export async function executeMockCodexTurnStep(
         chunkType: mappedChunk.chunkType,
         provider: "codex" as const,
         providerChunkType: mappedChunk.providerChunkType,
+        partId: mappedChunk.partId,
+        providerPartId: mappedChunk.providerPartId,
+        partType: mappedChunk.partType,
+        partSlot: mappedChunk.partSlot,
         actionRef: mappedChunk.actionRef,
         data: mappedChunk.data,
         raw: mappedChunk.raw,

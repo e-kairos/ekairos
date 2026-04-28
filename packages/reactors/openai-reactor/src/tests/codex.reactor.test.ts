@@ -614,11 +614,11 @@ describe("createCodexReactor", () => {
       { type: "reasoning_delta", id: "reasoning_001", delta: "Inspecting repository context..." },
       { type: "text_delta", id: "msg_001", text: "I inspected README.md." },
       {
-        type: "action_input_available",
+        type: "action_started",
         actionName: "runCommand",
         toolCallId: "call_001",
       },
-      { type: "action_output_available", toolCallId: "call_001", text: "Command done." },
+      { type: "action_completed", toolCallId: "call_001", text: "Command done." },
       { type: "finish", finishReason: "stop" },
     ]
 
@@ -673,17 +673,17 @@ describe("createCodexReactor", () => {
       "chunk.start": 1,
       "chunk.reasoning_delta": 1,
       "chunk.text_delta": 1,
-      "chunk.action_input_available": 1,
-      "chunk.action_output_available": 1,
+      "chunk.action_started": 1,
+      "chunk.action_completed": 1,
       "chunk.finish": 1,
     })
     const payloads = getChunkPayloads(collected.written)
     const textDelta = payloads.find((payload) => asString(payload.chunkType) === "chunk.text_delta")
     const actionInput = payloads.find(
-      (payload) => asString(payload.chunkType) === "chunk.action_input_available",
+      (payload) => asString(payload.chunkType) === "chunk.action_started",
     )
     const actionOutput = payloads.find(
-      (payload) => asString(payload.chunkType) === "chunk.action_output_available",
+      (payload) => asString(payload.chunkType) === "chunk.action_completed",
     )
     expect(asString(textDelta?.providerPartId)).toBe("msg_001")
     expect(asString(textDelta?.partType)).toBe("message")
@@ -707,7 +707,7 @@ describe("createCodexReactor", () => {
     const providerChunks: Record<string, unknown>[] = [
       { event: "start", id: "e1" },
       { event: "text_delta", id: "e2", message: "Drafting response..." },
-      { event: "action_input_available", id: "e3", actionRef: "call_777" },
+      { event: "action_started", id: "e3", actionRef: "call_777" },
       { event: "finish", id: "e4", finishReason: "stop" },
     ]
 
@@ -783,11 +783,11 @@ describe("createCodexReactor", () => {
     expect(audit.persisted.streamTraceProviderChunkTypes).toMatchObject({
       start: 1,
       text_delta: 1,
-      action_input_available: 1,
+      action_started: 1,
       finish: 1,
     })
     const actionInput = getChunkPayloads(collected.written).find(
-      (payload) => asString(payload.chunkType) === "chunk.action_input_available",
+      (payload) => asString(payload.chunkType) === "chunk.action_started",
     )
     expect(asString(actionInput?.providerPartId)).toBe("call_777")
     expect(asString(actionInput?.actionRef)).toBe("call_777")
@@ -1009,8 +1009,8 @@ describe("createCodexReactor", () => {
       "chunk.message_metadata": 2,
       "chunk.finish": 1,
     })
-    expect((audit.stream.emittedChunkTypes as Record<string, number>)["chunk.action_input_available"]).toBeUndefined()
-    expect((audit.stream.emittedChunkTypes as Record<string, number>)["chunk.action_output_available"]).toBeUndefined()
+    expect((audit.stream.emittedChunkTypes as Record<string, number>)["chunk.action_started"]).toBeUndefined()
+    expect((audit.stream.emittedChunkTypes as Record<string, number>)["chunk.action_completed"]).toBeUndefined()
   })
 
   it("maps Codex commandExecution notifications to sandbox_run_command action parts", async () => {
@@ -1322,8 +1322,8 @@ describe("defaultMapCodexChunk", () => {
       defaultMapCodexChunk({ type: "start" }),
       defaultMapCodexChunk({ type: "reasoning_delta", id: "reasoning-1", delta: "thinking" }),
       defaultMapCodexChunk({ type: "text_delta", id: "message-1", text: "hello" }),
-      defaultMapCodexChunk({ type: "action_input_available", toolCallId: "call-1" }),
-      defaultMapCodexChunk({ type: "action_output_available", toolCallId: "call-1" }),
+      defaultMapCodexChunk({ type: "action_started", toolCallId: "call-1" }),
+      defaultMapCodexChunk({ type: "action_completed", toolCallId: "call-1" }),
       defaultMapCodexChunk({ type: "finish", finishReason: "stop" }),
     ]
 
@@ -1331,8 +1331,8 @@ describe("defaultMapCodexChunk", () => {
       "chunk.start",
       "chunk.reasoning_delta",
       "chunk.text_delta",
-      "chunk.action_input_available",
-      "chunk.action_output_available",
+      "chunk.action_started",
+      "chunk.action_completed",
       "chunk.finish",
     ])
     expect(mapped[0]?.providerPartId).toBeUndefined()

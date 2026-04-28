@@ -485,8 +485,8 @@ async function writeActionResultPartChunks(params: {
       if (!actionRef || !actionName) continue
 
       const chunkType = result.success
-        ? "chunk.action_output_available"
-        : "chunk.action_output_error"
+        ? "chunk.action_completed"
+        : "chunk.action_failed"
       const identity = resolveContextPartChunkIdentity({
         stepId: params.session.stepId,
         provider: "ekairos",
@@ -522,8 +522,8 @@ async function writeActionResultPartChunks(params: {
         partSlot: identity.partSlot,
         provider: "ekairos",
         providerChunkType: result.success
-          ? "action_output_available"
-          : "action_output_error",
+          ? "action_completed"
+          : "action_failed",
         actionRef,
         data,
       })
@@ -543,8 +543,8 @@ async function writeActionResultPartChunks(params: {
         sequence,
         provider: "ekairos",
         providerChunkType: result.success
-          ? "action_output_available"
-          : "action_output_error",
+          ? "action_completed"
+          : "action_failed",
         actionRef,
         partId: identity.partId,
         providerPartId: identity.providerPartId,

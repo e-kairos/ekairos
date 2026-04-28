@@ -82,6 +82,8 @@ describe("AI SDK chunk map part identity", () => {
 
     // then
     // The provider id correlates both chunks, but the semantic part slots stay distinct.
+    expect(input.chunkType).toBe("chunk.action_started")
+    expect(output.chunkType).toBe("chunk.action_completed")
     expect(input.providerPartId).toBe("call_1")
     expect(output.providerPartId).toBe("call_1")
     expect(input.partType).toBe("action")
