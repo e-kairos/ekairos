@@ -1,5 +1,5 @@
-import { id as newId } from "@instantdb/admin"
 import { DatasetService } from "../service.js"
+import { createDatasetId } from "../id.js"
 
 export type QueryDomainStepInput = {
   runtime: any
@@ -75,7 +75,7 @@ export async function queryDomainStep(
   const db = await getRuntimeDb(params.runtime)
   const service = new DatasetService(db)
 
-  const datasetId = params.datasetId ?? newId()
+  const datasetId = params.datasetId ?? createDatasetId()
   const queryResult = await db.query(params.query as any)
   const rows = normalizeRows(queryResult)
   const previewRows = rows.slice(0, 20)

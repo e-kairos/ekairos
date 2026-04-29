@@ -1,9 +1,9 @@
-import { id as newId } from "@instantdb/admin"
 import type { DomainInstantSchema, DomainSchemaResult } from "@ekairos/domain"
 import type { ContextReactor } from "@ekairos/events"
 import type { ValidQuery } from "@instantdb/core"
 
 import { buildObjectOutputInstructions } from "./builder/instructions.js"
+import { createDatasetId } from "./id.js"
 import {
   materializeDerivedDataset,
   materializeSingleFileLikeSource,
@@ -241,7 +241,7 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
 }
 
 function normalizeDatasetId(datasetId?: string): string {
-  const normalized = String(datasetId ?? newId()).trim()
+  const normalized = String(datasetId ?? createDatasetId()).trim()
   if (!normalized) {
     throw new Error("dataset_id_required")
   }

@@ -1,6 +1,7 @@
-import { init, id as newId, InstantAdminDatabase } from "@instantdb/admin"
+import type { InstantAdminDatabase } from "@instantdb/admin"
 import { SchemaOf } from "@ekairos/domain";
 import { datasetDomain } from "./schema.js";
+import { createDatasetId } from "./id.js";
 
 
 export type ServiceResult<T = any> = { ok: true; data: T } | { ok: false; error: string }
@@ -48,9 +49,9 @@ export class DatasetService {
         [key: string]: any
     }): Promise<ServiceResult<{ datasetId: string }>> {
         try {
-            const datasetId = params.id ?? newId()
+            const datasetId = params.id ?? createDatasetId()
             const existing = await this.resolveDatasetEntityId(datasetId)
-            const entityId = existing.ok ? existing.data : newId()
+            const entityId = existing.ok ? existing.data : createDatasetId()
             const mutations = []
 
             mutations.push(
@@ -104,7 +105,7 @@ export class DatasetService {
             const mutations: any[] = []
 
             for (const record of params.records) {
-                const recordId = newId()
+                const recordId = createDatasetId()
                 mutations.push(
                     this.db.tx.dataset_records[recordId].update({
                         rowContent: record.rowContent,

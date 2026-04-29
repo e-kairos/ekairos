@@ -4,7 +4,6 @@ import {
   WEB_CHANNEL,
   type ContextReactor,
 } from "@ekairos/events"
-import { id } from "@instantdb/admin"
 
 import { createClearDatasetTool } from "../clearDataset.tool.js"
 import {
@@ -19,6 +18,7 @@ import {
   ensureTransformSourcesInSandboxStep,
   generateTransformSourcePreviewsStep,
 } from "./transform-dataset.steps.js"
+import { createDatasetId } from "../id.js"
 import type {
   TransformDatasetAgentParams,
   TransformDatasetContext,
@@ -199,7 +199,7 @@ export function createTransformDatasetContext<Env extends { orgId: string }>(
     reactor?: ContextReactor<any, any>
   },
 ) {
-  const datasetId = params.datasetId ?? id()
+  const datasetId = params.datasetId ?? createDatasetId()
   const { context } = createTransformDatasetContextDefinition<Env>({
     sourceDatasetIds: params.sourceDatasetIds,
     outputSchema: params.outputSchema,
@@ -222,7 +222,7 @@ export function createTransformDatasetContext<Env extends { orgId: string }>(
           : `${params.sourceDatasetIds.length} source datasets`
 
       const triggerEvent = {
-        id: id(),
+        id: createDatasetId(),
         type: INPUT_TEXT_ITEM_TYPE,
         channel: WEB_CHANNEL,
         createdAt: new Date().toISOString(),

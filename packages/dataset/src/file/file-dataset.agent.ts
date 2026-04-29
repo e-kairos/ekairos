@@ -4,7 +4,6 @@ import {
   WEB_CHANNEL,
   type ContextReactor,
 } from "@ekairos/events"
-import { id } from "@instantdb/admin"
 
 import { createClearDatasetTool } from "../clearDataset.tool.js"
 import {
@@ -20,6 +19,7 @@ import {
   generateFileParsePreviewStep,
   initializeFileParseSandboxStep,
 } from "./file-dataset.steps.js"
+import { createDatasetId } from "../id.js"
 import type {
   DatasetResult,
   FileParseContext,
@@ -205,7 +205,7 @@ export function createFileParseContext<Env extends { orgId: string }>(
     reactor?: ContextReactor<any, any>
   },
 ) {
-  const datasetId = opts?.datasetId ?? id()
+  const datasetId = opts?.datasetId ?? createDatasetId()
   const params: FileParseContextParams = {
     fileId,
     instructions: opts?.instructions,
@@ -223,7 +223,7 @@ export function createFileParseContext<Env extends { orgId: string }>(
       options: FileParseRunOptions = {},
     ): Promise<{ datasetId: string }> {
       const triggerEvent = {
-        id: id(),
+        id: createDatasetId(),
         type: INPUT_TEXT_ITEM_TYPE,
         channel: WEB_CHANNEL,
         createdAt: new Date().toISOString(),
