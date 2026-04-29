@@ -167,6 +167,31 @@ export async function writeDatasetSandboxFilesStep(params: {
   if (!result.ok) throw new Error(result.error)
 }
 
+export async function writeDatasetSandboxTextFilesStep(params: {
+  runtime: any
+  sandboxId: DatasetSandboxId
+  files: Array<{ path: string; content: string }>
+}): Promise<void> {
+  "use step"
+
+  if (isLocalDatasetSandboxMode()) {
+    for (const file of params.files) {
+      await fs.mkdir(path.dirname(file.path), { recursive: true })
+      await fs.writeFile(file.path, file.content, "utf-8")
+    }
+    return
+  }
+
+  const db = await getRuntimeDb(params.runtime)
+  const service = new SandboxService(db)
+  const files = params.files.map((file) => ({
+    path: file.path,
+    contentBase64: Buffer.from(file.content, "utf-8").toString("base64"),
+  }))
+  const result = await service.writeFiles(params.sandboxId, files)
+  if (!result.ok) throw new Error(result.error)
+}
+
 export async function readDatasetSandboxFileStep(params: {
   runtime: any
   sandboxId: DatasetSandboxId
@@ -184,6 +209,25 @@ export async function readDatasetSandboxFileStep(params: {
   const result = await service.readFile(params.sandboxId, params.path)
   if (!result.ok) throw new Error(result.error)
   return result.data
+}
+
+export async function readDatasetSandboxTextFileStep(params: {
+  runtime: any
+  sandboxId: DatasetSandboxId
+  path: string
+}): Promise<{ content: string }> {
+  "use step"
+
+  if (isLocalDatasetSandboxMode()) {
+    const content = await fs.readFile(params.path, "utf-8")
+    return { content }
+  }
+
+  const db = await getRuntimeDb(params.runtime)
+  const service = new SandboxService(db)
+  const result = await service.readFile(params.sandboxId, params.path)
+  if (!result.ok) throw new Error(result.error)
+  return { content: Buffer.from(result.data.contentBase64, "base64").toString("utf-8") }
 }
 
 export async function stopDatasetSandboxStep(params: { runtime: any; sandboxId: DatasetSandboxId }): Promise<void> {

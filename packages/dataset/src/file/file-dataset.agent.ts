@@ -10,6 +10,7 @@ import { createClearDatasetTool } from "../clearDataset.tool.js"
 import {
   createCompleteDatasetTool,
   didCompleteDatasetSucceed,
+  getDatasetFatalFailure,
 } from "../completeDataset.tool.js"
 import { datasetGetByIdStep } from "../dataset/steps.js"
 import { createExecuteCommandTool } from "../executeCommand.tool.js"
@@ -176,6 +177,10 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
       return actions as any
     })
     .shouldContinue(({ reactionEvent }: { reactionEvent: any }) => {
+      const fatalFailure = getDatasetFatalFailure(reactionEvent as any)
+      if (fatalFailure) {
+        throw new Error(fatalFailure)
+      }
       return !didCompleteDatasetSucceed(reactionEvent as any)
     })
 

@@ -10,6 +10,7 @@ import { createClearDatasetTool } from "../clearDataset.tool.js"
 import {
   createCompleteDatasetTool,
   didCompleteDatasetSucceed,
+  getDatasetFatalFailure,
 } from "../completeDataset.tool.js"
 import { datasetUpdateSchemaStep } from "../dataset/steps.js"
 import { createExecuteCommandTool } from "../executeCommand.tool.js"
@@ -169,6 +170,10 @@ function createTransformDatasetContextDefinition<Env extends { orgId: string }>(
       } as any
     })
     .shouldContinue(({ reactionEvent }: { reactionEvent: any }) => {
+      const fatalFailure = getDatasetFatalFailure(reactionEvent as any)
+      if (fatalFailure) {
+        throw new Error(fatalFailure)
+      }
       return !didCompleteDatasetSucceed(reactionEvent as any)
     })
 

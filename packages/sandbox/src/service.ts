@@ -1076,6 +1076,7 @@ export class SandboxService {
             teamId: creds.teamId,
             projectId: creds.projectId,
             token: creds.token,
+            resume: true,
           } as any)
 
           if (!sandbox) return { ok: false, error: "Sandbox not found" }

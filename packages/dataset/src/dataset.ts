@@ -4,7 +4,10 @@ import type { ContextReactor } from "@ekairos/events"
 import type { ValidQuery } from "@instantdb/core"
 
 import { buildObjectOutputInstructions } from "./builder/instructions.js"
-import { getDatasetAgentMaterializers } from "./builder/agentMaterializers.js"
+import {
+  materializeDerivedDataset,
+  materializeSingleFileLikeSource,
+} from "./builder/materialize.js"
 import { materializeQuerySource } from "./builder/materializeQuery.js"
 import { finalizeBuildResult } from "./builder/persistence.js"
 import type {
@@ -212,7 +215,7 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
         if (!effectiveState.reactor) {
           throw new Error("dataset_reactor_required")
         }
-        await getDatasetAgentMaterializers().materializeSingleFileLikeSource(
+        await materializeSingleFileLikeSource(
           effectiveState,
           onlySource as any,
           targetDatasetId,
@@ -226,7 +229,7 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
       if (!effectiveState.reactor) {
         throw new Error("dataset_reactor_required")
       }
-      await getDatasetAgentMaterializers().materializeDerivedDataset(effectiveState, targetDatasetId)
+      await materializeDerivedDataset(effectiveState, targetDatasetId)
       return finalizeOutputResult(
         await finalizeBuildResult(effectiveState.runtime, targetDatasetId, effectiveState.first),
         effectiveState.output,

@@ -76,14 +76,14 @@ export async function datasetUpdateSchemaStep(params: {
 export async function datasetUploadOutputFileStep(params: {
   runtime: any
   datasetId: string
-  fileBuffer: Buffer
+  contentBase64: string
 }) {
   "use step"
   const db = await getRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   return await service.uploadDatasetOutputFile({
     datasetId: params.datasetId,
-    fileBuffer: params.fileBuffer,
+    fileBuffer: Buffer.from(params.contentBase64, "base64"),
   })
 }
 

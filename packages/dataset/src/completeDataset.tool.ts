@@ -1,6 +1,6 @@
 import { tool } from "ai"
 import { z } from "zod"
-import { readDatasetSandboxFileStep, runDatasetSandboxCommandStep } from "./sandbox/steps.js"
+import { readDatasetSandboxFileStep, readDatasetSandboxTextFileStep, runDatasetSandboxCommandStep } from "./sandbox/steps.js"
 import Ajv, { ValidateFunction } from "ajv"
 import {
     getDatasetOutputPath,
@@ -137,11 +137,13 @@ export function createCompleteDatasetTool({ datasetId, sandboxId, runtime }: Com
                 }
             }
 
-            const fileBuffer = Buffer.from(fileRead.contentBase64, "base64")
-
             console.log(`[Dataset ${datasetId}] Uploading file to InstantDB storage`)
             
-            const uploadResult = await datasetUploadOutputFileStep({ runtime, datasetId, fileBuffer })
+            const uploadResult = await datasetUploadOutputFileStep({
+                runtime,
+                datasetId,
+                contentBase64: fileRead.contentBase64,
+            })
 
             if (!uploadResult.ok) {
                 console.error(`[Dataset ${datasetId}] File upload failed: ${uploadResult.error}`)
@@ -213,6 +215,38 @@ export function didCompleteDatasetSucceed(event: { content?: { parts?: any[] } }
     })
 }
 
+export function getDatasetFatalFailure(event: { content?: { parts?: any[] } }): string | null {
+    const parts = Array.isArray(event?.content?.parts) ? event.content.parts : []
+
+    for (const part of parts) {
+        let actionName: string | undefined
+        let output: any
+
+        if (part?.type === "action") {
+            actionName = part.content?.actionName
+            output = part.content?.output
+        } else if (typeof part?.type === "string" && part.type.startsWith("tool-")) {
+            actionName = part.type.slice("tool-".length)
+            output = part.output ?? part.result
+        }
+
+        if (!output || output.fatal !== true) {
+            continue
+        }
+
+        const message =
+            typeof output.error === "string" && output.error.trim()
+                ? output.error.trim()
+                : typeof output.message === "string" && output.message.trim()
+                    ? output.message.trim()
+                    : "Dataset action failed fatally"
+
+        return actionName ? `${actionName}: ${message}` : message
+    }
+
+    return null
+}
+
 
 
 async function ensureFileExists(runtime: any, sandboxId: string, path: string): Promise<void> {
@@ -251,8 +285,8 @@ async function validateJsonlRows({ runtime, sandboxId, outputPath, validator, da
 
     console.log(`[Dataset ${datasetId}] Reading and validating JSONL file from sandbox`)
 
-    const fileRead = await readDatasetSandboxFileStep({ runtime, sandboxId, path: outputPath })
-    if (!fileRead.contentBase64) {
+    const fileRead = await readDatasetSandboxTextFileStep({ runtime, sandboxId, path: outputPath })
+    if (!fileRead.content) {
         console.log(`[Dataset ${datasetId}] Empty output file`)
         return {
             success: false,
@@ -265,8 +299,7 @@ async function validateJsonlRows({ runtime, sandboxId, outputPath, validator, da
         }
     }
 
-    const fileContent = Buffer.from(fileRead.contentBase64, "base64").toString()
-    const lines = fileContent.split("\n")
+    const lines = fileRead.content.split("\n")
     console.log(`[Dataset ${datasetId}] Validating ${lines.length} lines`)
 
     for (let index = 0; index < lines.length; index++)
