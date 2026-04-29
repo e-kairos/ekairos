@@ -1,4 +1,9 @@
-import { domain, configureDomainDocLoader } from "./index.js";
+import {
+  domain,
+  configureDomainDocLoader,
+  configureDomainDocNormalizer,
+} from "./index.js";
+import { domainDocNormalizer } from "./domain-doc.js";
 import { i } from "@instantdb/core";
 
 type TestFn = () => void | Promise<void>;
@@ -63,6 +68,8 @@ configureDomainDocLoader(({ scope, meta }) => {
   }
   return null;
 });
+
+configureDomainDocNormalizer(domainDocNormalizer);
 
 const alphaDomain = domain("alpha").schema({
   entities: { alpha_items: i.entity({ name: i.string() }) },

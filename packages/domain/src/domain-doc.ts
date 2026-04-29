@@ -1,4 +1,5 @@
 import { parse as parseYaml } from "yaml";
+import type { DomainDocNormalizer } from "./index.js";
 
 export type DomainDocEntity = {
   summary?: string;
@@ -550,3 +551,17 @@ export function renderDomainDoc(
 
   return lines.join("\n").trim() + "\n";
 }
+
+export const domainDocNormalizer: DomainDocNormalizer = ({ docInfo, options }) => {
+  const parsed = parseDomainDoc(docInfo.doc);
+  if (!parsed) return { doc: docInfo.doc, docPath: docInfo.docPath };
+  const filtered = filterDomainDoc(parsed.data, {
+    subdomains: options.subdomains,
+    entities: options.entities,
+  });
+  const rendered = renderDomainDoc(filtered, {
+    titlePrefix: options.titlePrefix,
+    includeSubdomains: options.includeSubdomains,
+  });
+  return { doc: rendered, docPath: docInfo.docPath };
+};

@@ -1,6 +1,5 @@
 import { i } from "@instantdb/core";
 import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef } from "@instantdb/core";
-export { parseDomainDoc, renderDomainDoc, filterDomainDoc, type DomainDoc, type DomainDocEntity, type DomainDocSubdomain, type DomainDocSection, type DomainDocFilter, type DomainDocRenderOptions, type ParsedDomainDoc, } from "./domain-doc.js";
 type DomainIncludeRef = () => unknown;
 type DomainMeta = {
     name?: string;
@@ -21,8 +20,22 @@ export type DomainDocLoader = (input: {
     scope: "root" | "subdomain";
     meta?: DomainMeta | null;
 }) => DomainDocInfo | null;
+export type DomainDocNormalizeOptions = {
+    subdomains?: string[];
+    entities?: string[];
+    titlePrefix?: "Domain" | "Subdomain";
+    includeSubdomains?: boolean;
+};
+export type DomainDocNormalizer = (input: {
+    docInfo: DomainDocInfo;
+    options: DomainDocNormalizeOptions;
+}) => {
+    doc: string | null;
+    docPath?: string;
+} | null | undefined;
 export type DomainInclude = DomainInstance<any, any, any> | DomainSchemaResult<any, any, any> | InstantSchemaDef<any, any, any> | (() => DomainInstance<any, any, any> | DomainSchemaResult<any, any, any> | InstantSchemaDef<any, any, any> | undefined) | undefined;
 export declare function configureDomainDocLoader(loader?: DomainDocLoader | null): void;
+export declare function configureDomainDocNormalizer(normalizer?: DomainDocNormalizer | null): void;
 export type DomainContextEntry = {
     name?: string;
     entities?: string[];

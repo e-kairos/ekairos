@@ -2,24 +2,6 @@ import { i } from "@instantdb/core";
 import type { InstantAdminDatabase } from "@instantdb/admin";
 import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef } from "@instantdb/core";
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";
-import {
-  filterDomainDoc,
-  parseDomainDoc,
-  renderDomainDoc,
-} from "./domain-doc.js";
-
-export {
-  parseDomainDoc,
-  renderDomainDoc,
-  filterDomainDoc,
-  type DomainDoc,
-  type DomainDocEntity,
-  type DomainDocSubdomain,
-  type DomainDocSection,
-  type DomainDocFilter,
-  type DomainDocRenderOptions,
-  type ParsedDomainDoc,
-} from "./domain-doc.js";
 export {
   EkairosRuntime,
   type RuntimeForDomain,
@@ -51,6 +33,18 @@ export type DomainDocLoader = (input: {
   scope: "root" | "subdomain";
   meta?: DomainMeta | null;
 }) => DomainDocInfo | null;
+
+export type DomainDocNormalizeOptions = {
+  subdomains?: string[];
+  entities?: string[];
+  titlePrefix?: "Domain" | "Subdomain";
+  includeSubdomains?: boolean;
+};
+
+export type DomainDocNormalizer = (input: {
+  docInfo: DomainDocInfo;
+  options: DomainDocNormalizeOptions;
+}) => { doc: string | null; docPath?: string } | null | undefined;
 
 export type DomainInclude =
   | DomainInstance<any, any, any>
@@ -181,9 +175,14 @@ export type DomainActionCollection =
   | DomainActionRegistration[];
 
 let domainDocLoader: DomainDocLoader | null = null;
+let domainDocNormalizer: DomainDocNormalizer | null = null;
 
 export function configureDomainDocLoader(loader?: DomainDocLoader | null) {
   domainDocLoader = loader ?? null;
+}
+
+export function configureDomainDocNormalizer(normalizer?: DomainDocNormalizer | null) {
+  domainDocNormalizer = normalizer ?? null;
 }
 
 export type DomainContextEntry = {
@@ -1051,25 +1050,19 @@ function loadDomainDoc(scope: "root" | "subdomain", meta: DomainMeta | null): Do
 
 function normalizeDoc(
   docInfo: DomainDocInfo | null,
-  options: {
-    subdomains?: string[];
-    entities?: string[];
-    titlePrefix?: "Domain" | "Subdomain";
-    includeSubdomains?: boolean;
-  }
+  options: DomainDocNormalizeOptions
 ): { doc: string | null; docPath?: string } {
   if (!docInfo?.doc) return { doc: null, docPath: docInfo?.docPath };
-  const parsed = parseDomainDoc(docInfo.doc);
-  if (!parsed) return { doc: docInfo.doc, docPath: docInfo.docPath };
-  const filtered = filterDomainDoc(parsed.data, {
-    subdomains: options.subdomains,
-    entities: options.entities,
-  });
-  const rendered = renderDomainDoc(filtered, {
-    titlePrefix: options.titlePrefix,
-    includeSubdomains: options.includeSubdomains,
-  });
-  return { doc: rendered, docPath: docInfo.docPath };
+  if (domainDocNormalizer) {
+    try {
+      const normalized = domainDocNormalizer({ docInfo, options });
+      if (normalized) return normalized;
+    } catch {
+      // Fall through to raw docs. Domain context must remain usable without the
+      // optional markdown/YAML parser in workflow bundles.
+    }
+  }
+  return { doc: docInfo.doc, docPath: docInfo.docPath };
 }
 
 function buildRegistryEntries(

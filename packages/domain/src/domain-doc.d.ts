@@ -1,3 +1,5 @@
+import type { DomainDocNormalizer } from "./index.js";
+
 export type DomainDocEntity = {
     summary?: string;
     notes?: string[];
@@ -42,3 +44,4 @@ export type DomainDocRenderOptions = {
     includeEntities?: boolean;
 };
 export declare function renderDomainDoc(doc: DomainDoc, options?: DomainDocRenderOptions): string;
+export declare const domainDocNormalizer: DomainDocNormalizer;
