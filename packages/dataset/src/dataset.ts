@@ -209,9 +209,6 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
       }
 
       if (isSingleSource && (onlySource.kind === "file" || onlySource.kind === "text")) {
-        if (!effectiveState.sandboxId) {
-          throw new Error("dataset_sandbox_required")
-        }
         if (!effectiveState.reactor) {
           throw new Error("dataset_reactor_required")
         }
@@ -226,9 +223,6 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
         )
       }
 
-      if (!effectiveState.sandboxId) {
-        throw new Error("dataset_sandbox_required")
-      }
       if (!effectiveState.reactor) {
         throw new Error("dataset_reactor_required")
       }

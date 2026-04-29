@@ -2,20 +2,18 @@ import { execFile } from "node:child_process"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import { promisify } from "node:util"
-import { SandboxService } from "@ekairos/sandbox"
+import { SandboxService, type SandboxConfig } from "@ekairos/sandbox"
 
 const execFileAsync = promisify(execFile)
 const localSandboxRoots = new Map<string, string>()
 
 export type DatasetSandboxId = string
 
-export type CreateDatasetSandboxParams = {
+export type CreateDatasetSandboxParams = Pick<
+  SandboxConfig,
+  "provider" | "timeoutMs" | "ports" | "resources" | "purpose" | "params" | "env" | "domain" | "dataset" | "vercel"
+> & {
   sandboxRuntime?: string
-  timeoutMs?: number
-  ports?: number[]
-  resources?: { vcpus?: number }
-  purpose?: string
-  params?: Record<string, any>
 }
 
 export type DatasetSandboxRunCommandResult = {
@@ -111,7 +109,10 @@ export async function createDatasetSandboxStep(
 
   const db = await getRuntimeDb(params.runtime)
   const service = new SandboxService(db)
-  const sandboxParams = { ...params, runtime: params.sandboxRuntime } as any
+  const sandboxParams = {
+    ...params,
+    ...(params.sandboxRuntime ? { runtime: params.sandboxRuntime } : {}),
+  } as any
   delete sandboxParams.sandboxRuntime
   const created = await service.createSandbox(sandboxParams)
   if (!created.ok) throw new Error(created.error)

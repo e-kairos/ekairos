@@ -16,6 +16,7 @@ import {
 } from "./persistence.js"
 import { getDomainDescriptor } from "./sourceRows.js"
 import { materializeQuerySource } from "./materializeQuery.js"
+import { createDatasetSandboxStep } from "../sandbox/steps.js"
 import type {
   AnyDatasetRuntime,
   DatasetBuilderState,
@@ -27,6 +28,29 @@ function makeIntermediateDatasetId(targetDatasetId: string, sourceKind: string, 
   return `${targetDatasetId}__${sourceKind}_${index}`
 }
 
+async function resolveDatasetSandboxId<Runtime extends AnyDatasetRuntime>(
+  state: DatasetBuilderState<Runtime>,
+  targetDatasetId: string,
+) {
+  const sandboxId = String(state.sandboxId ?? "").trim()
+  if (sandboxId) return sandboxId
+
+  const created = await createDatasetSandboxStep({
+    runtime: state.runtime,
+    provider: "vercel",
+    sandboxRuntime: "python3.13",
+    timeoutMs: 20 * 60 * 1000,
+    resources: { vcpus: 2 },
+    purpose: "dataset.materialize",
+    params: { datasetId: targetDatasetId },
+    vercel: {
+      profile: "ephemeral",
+      deleteOnStop: true,
+    },
+  })
+  return created.sandboxId
+}
+
 export async function materializeSingleFileLikeSource<Runtime extends AnyDatasetRuntime>(
   state: DatasetBuilderState<Runtime>,
   source: Extract<InternalSource, { kind: "file" | "text" }>,
@@ -35,9 +59,8 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
   if (!state.reactor) {
     throw new Error("dataset_reactor_required")
   }
-  if (!state.sandboxId) {
-    throw new Error("dataset_sandbox_required")
-  }
+
+  const sandboxId = await resolveDatasetSandboxId(state, targetDatasetId)
 
   const fileId =
     source.kind === "file"
@@ -46,7 +69,7 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
 
   await createOrUpdateDatasetMetadata(state.runtime, {
     datasetId: targetDatasetId,
-    sandboxId: state.sandboxId,
+    sandboxId,
     title: state.title ?? targetDatasetId,
     instructions: state.instructions,
     sources: [
@@ -68,7 +91,7 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
     datasetId: targetDatasetId,
     instructions: state.instructions ?? buildFileDefaultInstructions(state.outputSchema),
     reactor: state.reactor as any,
-    sandboxId: state.sandboxId,
+    sandboxId,
   })
 
   await parseContext.parse(state.runtime as any, { durable: state.durable })
@@ -131,17 +154,19 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
   if (!state.reactor) {
     throw new Error("dataset_reactor_required")
   }
-  if (!state.sandboxId) {
-    throw new Error("dataset_sandbox_required")
-  }
+
+  const sandboxId = await resolveDatasetSandboxId(state, targetDatasetId)
+  const stateWithSandbox = { ...state, sandboxId }
 
   const normalizedSources: string[] = []
-  for (let index = 0; index < state.sources.length; index++) {
-    normalizedSources.push(await normalizeSourceToDatasetId(state, state.sources[index], targetDatasetId, index))
+  for (let index = 0; index < stateWithSandbox.sources.length; index++) {
+    normalizedSources.push(
+      await normalizeSourceToDatasetId(stateWithSandbox, stateWithSandbox.sources[index], targetDatasetId, index),
+    )
   }
 
   const transformSchema =
-    state.outputSchema ??
+    stateWithSandbox.outputSchema ??
     ({
       title: "DatasetRow",
       description: "One dataset row",
@@ -152,12 +177,12 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
       },
     } satisfies DatasetSchemaInput)
 
-  await createOrUpdateDatasetMetadata(state.runtime, {
+  await createOrUpdateDatasetMetadata(stateWithSandbox.runtime, {
     datasetId: targetDatasetId,
-    sandboxId: state.sandboxId,
-    title: state.title ?? targetDatasetId,
-    instructions: state.instructions,
-    sources: state.sources.map((source) =>
+    sandboxId,
+    title: stateWithSandbox.title ?? targetDatasetId,
+    instructions: stateWithSandbox.instructions,
+    sources: stateWithSandbox.sources.map((source) =>
       source.kind === "query"
         ? {
             kind: "query",
@@ -168,7 +193,7 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
           }
         : source,
     ),
-    sourceKinds: state.sources.map((source) => source.kind),
+    sourceKinds: stateWithSandbox.sources.map((source) => source.kind),
     schema: transformSchema,
     status: "building",
   })
@@ -176,25 +201,29 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
   const transformContext = createTransformDatasetContext<typeof state.env>({
     sourceDatasetIds: normalizedSources,
     outputSchema: transformSchema,
-    instructions: buildTransformInstructions(normalizedSources.length, state.instructions, state.outputSchema),
+    instructions: buildTransformInstructions(
+      normalizedSources.length,
+      stateWithSandbox.instructions,
+      stateWithSandbox.outputSchema,
+    ),
     datasetId: targetDatasetId,
-    reactor: state.reactor as any,
-    sandboxId: state.sandboxId,
+    reactor: stateWithSandbox.reactor as any,
+    sandboxId,
   })
 
-  await transformContext.transform(state.runtime as any, { durable: state.durable })
+  await transformContext.transform(stateWithSandbox.runtime as any, { durable: stateWithSandbox.durable })
 
-  if (!state.outputSchema) {
+  if (!stateWithSandbox.outputSchema) {
     await datasetInferAndUpdateSchemaStep({
-      runtime: state.runtime,
+      runtime: stateWithSandbox.runtime,
       datasetId: targetDatasetId,
       title: `${targetDatasetId}Row`,
       description: "One dataset row",
     })
   }
 
-  if (state.first) {
-    await datasetReadOneStep({ runtime: state.runtime, datasetId: targetDatasetId })
+  if (stateWithSandbox.first) {
+    await datasetReadOneStep({ runtime: stateWithSandbox.runtime, datasetId: targetDatasetId })
   }
 
   return targetDatasetId
