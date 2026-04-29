@@ -158,15 +158,15 @@ export const eventsDomain = domain("events")
             },
             contextStepStream: {
                 forward: { on: "event_steps", has: "one", label: "stream" },
-                reverse: { on: "$streams" as any, has: "many", label: "step" },
+                reverse: { on: "$streams", has: "many", label: "step" },
             },
             contextExecutionActiveStream: {
                 forward: { on: "event_executions", has: "one", label: "activeStream" },
-                reverse: { on: "$streams" as any, has: "many", label: "activeOf" },
+                reverse: { on: "$streams", has: "many", label: "activeOf" },
             },
             contextExecutionLastStream: {
                 forward: { on: "event_executions", has: "one", label: "lastStream" },
-                reverse: { on: "$streams" as any, has: "many", label: "lastOf" },
+                reverse: { on: "$streams", has: "many", label: "lastOf" },
             },
             documentFile: {
                 forward: {
