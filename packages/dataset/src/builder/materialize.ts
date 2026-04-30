@@ -12,6 +12,7 @@ import {
 } from "./instructions.js"
 import {
   createOrUpdateDatasetMetadata,
+  materializeRowsToDataset,
   uploadInlineTextSource,
 } from "./persistence.js"
 import { getDomainDescriptor } from "./sourceRows.js"
@@ -26,6 +27,67 @@ import type {
 
 function makeIntermediateDatasetId(targetDatasetId: string, sourceKind: string, index: number) {
   return `${targetDatasetId}__${sourceKind}_${index}`
+}
+
+function normalizeParsedTextRows(value: unknown): any[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => (item && typeof item === "object" ? item : { value: item }))
+  }
+  if (value && typeof value === "object") return [value]
+  return [{ value }]
+}
+
+function materializeRawTextRows(source: Extract<InternalSource, { kind: "text" }>): any[] {
+  const text = String(source.text ?? "")
+  const mimeType = String(source.mimeType ?? "").toLowerCase()
+  const name = String(source.name ?? "").toLowerCase()
+  const shouldParseJson =
+    mimeType.includes("json") || name.endsWith(".json") || name.endsWith(".jsonl")
+
+  if (shouldParseJson) {
+    try {
+      if (name.endsWith(".jsonl")) {
+        const rows = text
+          .split(/\r?\n/g)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+        return rows.flatMap((row) => normalizeParsedTextRows(row))
+      }
+      return normalizeParsedTextRows(JSON.parse(text))
+    } catch {
+      return [{ text }]
+    }
+  }
+
+  return [{ text }]
+}
+
+async function materializeRawTextSource<Runtime extends AnyDatasetRuntime>(
+  state: DatasetBuilderState<Runtime>,
+  source: Extract<InternalSource, { kind: "text" }>,
+  targetDatasetId: string,
+) {
+  const rows = materializeRawTextRows(source)
+  await materializeRowsToDataset(state.runtime, {
+    datasetId: targetDatasetId,
+    sandboxId: state.sandboxId,
+    title: state.title ?? source.name ?? targetDatasetId,
+    instructions: state.instructions,
+    sources: [
+      {
+        kind: "text",
+        mimeType: source.mimeType,
+        name: source.name,
+        description: source.description,
+      },
+    ],
+    sourceKinds: ["text"],
+    rows,
+    schema: state.outputSchema,
+    first: state.first,
+  })
+  return targetDatasetId
 }
 
 async function resolveDatasetSandboxId<Runtime extends AnyDatasetRuntime>(
@@ -131,6 +193,21 @@ async function normalizeSourceToDatasetId<Runtime extends AnyDatasetRuntime>(
       title: source.title,
       first: false,
     })
+    return intermediateDatasetId
+  }
+
+  if (source.kind === "text") {
+    await materializeRawTextSource(
+      {
+        ...state,
+        outputSchema: undefined,
+        first: false,
+        instructions: buildRawSourceInstructions(source.kind),
+        title: source.name ?? state.title,
+      },
+      source,
+      intermediateDatasetId,
+    )
     return intermediateDatasetId
   }
 

@@ -517,6 +517,83 @@ describeInstant("dataset() builder direct API", () => {
       ])
   }, 240000)
 
+  it("multiple text sources materialize raw rows before the transform reactor runs", async () => {
+    const reactor = createScriptedReactor({
+      steps: [
+        scriptedToolStep(
+          "executeCommand",
+          {
+            scriptName: "combine_text_sources",
+            pythonCode: [
+              "import json",
+              `items_path = ${JSON.stringify(`${getDatasetWorkstation("combined_text_sources_v1")}/source_combined_text_sources_v1__text_0.jsonl`)}`,
+              `criteria_path = ${JSON.stringify(`${getDatasetWorkstation("combined_text_sources_v1")}/source_combined_text_sources_v1__text_1.jsonl`)}`,
+              `output_path = ${JSON.stringify(getDatasetOutputPath("combined_text_sources_v1"))}`,
+              "def read_rows(path):",
+              "  rows = []",
+              "  with open(path, 'r', encoding='utf-8') as src:",
+              "    for line in src:",
+              "      if not line.strip():",
+              "        continue",
+              "      rows.append(json.loads(line).get('data') or {})",
+              "  return rows",
+              "items = read_rows(items_path)",
+              "criteria = read_rows(criteria_path)",
+              "criterion = criteria[0]['title']",
+              "with open(output_path, 'w', encoding='utf-8') as out:",
+              "  for item in items:",
+              "    payload = {'type': 'row', 'data': {'sku': item['sku'], 'criterion': criterion}}",
+              "    out.write(json.dumps(payload) + '\\n')",
+              "print('combined text sources')",
+            ].join("\n"),
+          },
+        ),
+        scriptedToolStep("completeDataset", { summary: "combined text sources complete" }),
+      ],
+    })
+
+    const result = await dataset(testRuntime)
+      .sandbox({ sandboxId: suiteSandboxId! })
+      .from({
+        kind: "text",
+        name: "items.json",
+        mimeType: "application/json",
+        text: JSON.stringify([
+          { sku: "A1", price: 10 },
+          { sku: "A2", price: 20 },
+        ]),
+      })
+      .from({
+        kind: "text",
+        name: "criterion.json",
+        mimeType: "application/json",
+        text: JSON.stringify({ title: "Operational safety" }),
+      })
+      .instructions("Join items with criterion.")
+      .schema({
+        title: "CombinedTextSource",
+        description: "Combined text source row",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            sku: { type: "string" },
+            criterion: { type: "string" },
+          },
+          required: ["sku", "criterion"],
+        },
+      })
+      .reactor(reactor)
+      .build({ datasetId: "combined_text_sources_v1" })
+
+    const snapshot = await getDatasetSnapshot(result.datasetId)
+    expect(snapshot.dataset.sourceKinds).toEqual(["text", "text"])
+    expect(snapshot.rows).toEqual([
+      { sku: "A1", criterion: "Operational safety" },
+      { sku: "A2", criterion: "Operational safety" },
+    ])
+  }, 240000)
+
   it("multiple sources with reactor and instructions produce a combined dataset", async () => {
     const { electronicsCategory } = await seedSampleRows(`combined-${Date.now()}`)
     const sourceDataset = await dataset(testRuntime)
