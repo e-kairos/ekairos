@@ -78,6 +78,58 @@ describe("domain conflict-free composition", () => {
     ]);
   });
 
+  it("keeps transitive includes when the same dependency is included more than once", () => {
+    const organizationDomain = domain("organization").schema({
+      entities: {
+        organization_organizations: i.entity({
+          name: i.string().optional().indexed(),
+        }),
+      },
+      links: {},
+      rooms: {},
+    });
+
+    const requisitionDomain = domain("requisition")
+      .includes(organizationDomain)
+      .schema({
+        entities: {
+          requisition_requisitions: i.entity({
+            title: i.string().optional().indexed(),
+          }),
+        },
+        links: {
+          requisitionsOrganization: {
+            forward: {
+              on: "requisition_requisitions",
+              has: "one",
+              label: "organization",
+            },
+            reverse: {
+              on: "organization_organizations",
+              has: "many",
+              label: "requisitions",
+            },
+          },
+        },
+        rooms: {},
+      });
+
+    const appDomain = domain("app")
+      .includes(organizationDomain)
+      .includes(requisitionDomain)
+      .schema({
+        entities: {},
+        links: {},
+        rooms: {},
+      });
+
+    const schema = appDomain.instantSchema();
+
+    expect(schema.entities.organization_organizations).toBeDefined();
+    expect(schema.entities.requisition_requisitions).toBeDefined();
+    expect(schema.links.requisitionsOrganization).toBeDefined();
+  });
+
   it("rejects repeated attrs when merging the same entity name", () => {
     // given: an included domain that already owns the status attr.
     const publicDomain = domain("merge-conflict-public").schema({

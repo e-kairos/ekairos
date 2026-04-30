@@ -1268,16 +1268,38 @@ function stripRuntimeEntityLinks(entity: unknown) {
   return i.entity({ ...entity.attrs } as any);
 }
 
+function normalizeRuntimeAttrDef(value: unknown): unknown {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const record = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(record).sort()) {
+    sorted[key] = normalizeRuntimeAttrDef(record[key]);
+  }
+  return sorted;
+}
+
+function stableRuntimeAttrDef(value: unknown): string {
+  return JSON.stringify(normalizeRuntimeAttrDef(value));
+}
+
+function areRuntimeAttrDefsEquivalent(baseAttr: unknown, nextAttr: unknown) {
+  if (baseAttr === nextAttr) return true;
+  return stableRuntimeAttrDef(baseAttr) === stableRuntimeAttrDef(nextAttr);
+}
+
 function mergeRuntimeEntityDefs(entityName: string, baseEntity: unknown, nextEntity: unknown) {
   if (!isRuntimeEntityDef(baseEntity) || !isRuntimeEntityDef(nextEntity)) {
     return stripRuntimeEntityLinks(nextEntity);
   }
 
-  const duplicateAttrs = Object.keys(nextEntity.attrs).filter((attr) =>
-    Object.prototype.hasOwnProperty.call(baseEntity.attrs, attr),
+  const conflictingAttrs = Object.keys(nextEntity.attrs).filter((attr) =>
+    Object.prototype.hasOwnProperty.call(baseEntity.attrs, attr) &&
+    !areRuntimeAttrDefsEquivalent(baseEntity.attrs[attr], nextEntity.attrs[attr]),
   );
-  if (duplicateAttrs.length > 0) {
-    throw new Error(`domain_duplicate_entity_attr:${entityName}.${duplicateAttrs.join(",")}`);
+  if (conflictingAttrs.length > 0) {
+    throw new Error(`domain_duplicate_entity_attr:${entityName}.${conflictingAttrs.join(",")}`);
   }
 
   return i.entity({
