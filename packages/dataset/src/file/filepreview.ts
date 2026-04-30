@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs"
-import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
@@ -29,17 +28,10 @@ const PYTHON_SCRIPT_FILES = [
     "preview_tail_excel.py",
 ]
 
-const require = createRequire(import.meta.url)
-
 function resolveScriptPath(scriptName: string): string {
-    try {
-        return require.resolve(`@ekairos/dataset/file/scripts/${scriptName}`)
-    }
-    catch {
-        // Prefer local scripts in src/ (tests/dev), and after build the scripts are copied to dist/
-        // at the same relative path, so this works in both environments.
-        return join(dirname(fileURLToPath(import.meta.url)), "scripts", scriptName)
-    }
+    // In src and dist the scripts live beside this module. Avoid package-resolution here:
+    // Turbopack treats package-resolved Python script paths as module edges.
+    return join(dirname(fileURLToPath(import.meta.url)), "scripts", scriptName)
 }
 
 const preparedSandboxIds = new Set<string>()
