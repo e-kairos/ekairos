@@ -17,25 +17,6 @@
           "type": "registry:hook"
         }
       ]
-    },
-    {
-      "name": "context-state-panel",
-      "type": "registry:component",
-      "title": "Context State Panel",
-      "description": "Minimal context-aware panel for @ekairos/events conversations.",
-      "registryDependencies": [
-        "button",
-        "use-context"
-      ],
-      "dependencies": [
-        "@ekairos/events"
-      ],
-      "files": [
-        {
-          "path": "registry/new-york/context-state-panel/context-state-panel.tsx",
-          "type": "registry:component"
-        }
-      ]
     }
   ]
 }

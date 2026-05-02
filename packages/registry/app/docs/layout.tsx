@@ -1,201 +1,115 @@
-"use client"
+"use client";
 
-import React, { useState, useEffect } from "react"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { Moon, Sun, Menu } from "lucide-react"
-import { domainRegistry } from "@/lib/domain-registry"
-import { TooltipProvider } from "@/components/ui/tooltip"
-import { registryData } from "@/lib/ui-registry"
-import { cn } from "@/lib/utils"
-import { EkairosLogo } from "@/components/ekairos/ekairos-logo"
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Menu, Moon, Sun } from "lucide-react";
+
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { registryData } from "@/lib/ui-registry";
+import { cn } from "@/lib/utils";
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
-  const [isDark, setIsDark] = useState(false)
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const pathname = usePathname();
+  const [isDark, setIsDark] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   useEffect(() => {
-    const isDarkMode = document.documentElement.classList.contains("dark")
-    setIsDark(isDarkMode)
-  }, [])
+    setIsDark(document.documentElement.classList.contains("dark"));
+  }, []);
 
   const toggleTheme = () => {
-    const newIsDark = !isDark
-    setIsDark(newIsDark)
-    if (newIsDark) {
-      document.documentElement.classList.add("dark")
-    } else {
-      document.documentElement.classList.remove("dark")
-    }
-  }
+    const next = !isDark;
+    setIsDark(next);
+    document.documentElement.classList.toggle("dark", next);
+  };
 
-  const isComponentActive = (itemId: string) => pathname === `/docs/components/${itemId}`
-  const isDomainActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
-  const isLinkActive = (href: string) => pathname === href
-
-  const libraryLinks = [
-    { label: "ekairos lib", href: "/docs/library/ekairos-lib" },
-  ]
+  const isComponentActive = (itemId: string) =>
+    pathname === `/docs/components/${itemId}`;
 
   return (
     <TooltipProvider>
-      <div className="min-h-screen flex bg-background text-foreground overflow-hidden">
-        {/* Mobile Overlay */}
+      <div className="flex min-h-screen overflow-hidden bg-background text-foreground">
         {isSidebarOpen && (
-          <div 
-            className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 lg:hidden"
+          <button
+            type="button"
+            aria-label="Close docs sidebar"
+            className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
             onClick={() => setIsSidebarOpen(false)}
           />
         )}
 
-        {/* Sidebar */}
-        <aside className={cn(
-          "fixed inset-y-0 left-0 z-50 w-64 bg-card border-r border-border/80 flex-shrink-0 flex flex-col transform transition-transform duration-300 lg:relative lg:translate-x-0",
-          !isSidebarOpen && "-translate-x-full lg:hidden"
-        )}>
-          <div className="p-4 border-b border-border/80 flex items-center justify-between">
-            <Link href="/" className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-              ← registry
+        <aside
+          className={cn(
+            "fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-border/80 bg-card transition-transform duration-300 lg:relative lg:translate-x-0",
+            !isSidebarOpen && "-translate-x-full lg:hidden",
+          )}
+        >
+          <div className="flex items-center justify-between border-b border-border/80 p-4">
+            <Link
+              href="/"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              back to registry
             </Link>
             <button
+              type="button"
               onClick={toggleTheme}
-              className="text-muted-foreground hover:text-foreground transition-colors p-1"
+              className="p-1 text-muted-foreground transition-colors hover:text-foreground"
               title="Toggle theme"
             >
               {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
             </button>
           </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 space-y-6">
-            <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3 px-2 font-semibold">
-                domains
-              </div>
-              <div className="space-y-1">
-                {domainRegistry.map(domain => (
-                  <Link
-                    key={domain.id}
-                    href={domain.href}
-                    className={cn(
-                      "block px-3 py-1.5 text-sm transition-colors rounded-md",
-                      isDomainActive(domain.href)
-                        ? "bg-muted text-foreground font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                    )}
-                  >
-                    {domain.title.toLowerCase()}
-                  </Link>
-                ))}
-              </div>
-            </div>
 
-            <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3 px-2 font-semibold">core</div>
-              <div className="space-y-1">
-                {registryData.filter(i => i.category === "core").map(item => (
-                  <Link
-                    key={item.id}
-                    href={`/docs/components/${item.id}`}
-                    className={cn(
-                      "block px-3 py-1.5 text-sm transition-colors rounded-md",
-                      isComponentActive(item.id)
-                        ? "bg-muted text-foreground font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                    )}
-                  >
-                    {item.title.toLowerCase()}
-                  </Link>
-                ))}
-              </div>
+          <nav className="flex-1 overflow-y-auto p-4">
+            <div className="mb-3 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              public surface
             </div>
-
-            <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3 px-2 font-semibold">compound</div>
-              <div className="space-y-1">
-                {registryData.filter(i => i.category === "compound").map(item => (
-                  <Link
-                    key={item.id}
-                    href={`/docs/components/${item.id}`}
-                    className={cn(
-                      "block px-3 py-1.5 text-sm transition-colors rounded-md",
-                      isComponentActive(item.id)
-                        ? "bg-muted text-foreground font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                    )}
-                  >
-                    {item.title.toLowerCase()}
-                  </Link>
-                ))}
-              </div>
+            <div className="space-y-1">
+              {registryData.map((item) => (
+                <Link
+                  key={item.id}
+                  href={`/docs/components/${item.id}`}
+                  className={cn(
+                    "block rounded-md px-3 py-1.5 text-sm transition-colors",
+                    isComponentActive(item.id)
+                      ? "bg-muted font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                  )}
+                >
+                  {item.title}
+                </Link>
+              ))}
             </div>
-
-            <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3 px-2 font-semibold">template</div>
-              <div className="space-y-1">
-                {registryData.filter(i => i.category === "template").map(item => (
-                  <Link
-                    key={item.id}
-                    href={`/docs/components/${item.id}`}
-                    className={cn(
-                      "block px-3 py-1.5 text-sm transition-colors rounded-md",
-                      isComponentActive(item.id)
-                        ? "bg-muted text-foreground font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                    )}
-                  >
-                    {item.title.toLowerCase()}
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs text-muted-foreground uppercase tracking-wider mb-3 px-2 font-semibold">
-                library
-              </div>
-              <div className="space-y-1">
-                {libraryLinks.map((link) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className={cn(
-                      "block px-3 py-1.5 text-sm transition-colors rounded-md",
-                      isLinkActive(link.href)
-                        ? "bg-muted text-foreground font-medium"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-                    )}
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
+          </nav>
         </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-          <header className={cn(
-            "h-14 border-b px-4 flex items-center gap-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 fixed top-11 right-0 left-0 z-40 transition-all duration-300",
-            isSidebarOpen && "lg:left-64"
-          )}>
-             <button 
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                className="p-2 hover:bg-accent rounded-md -ml-2 text-muted-foreground hover:text-foreground"
-             >
-                <Menu className="size-5" />
-             </button>
-             <EkairosLogo size="sm" />
+        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          <header
+            className={cn(
+              "fixed right-0 left-0 top-11 z-40 flex h-14 items-center gap-4 border-b bg-background/95 px-4 backdrop-blur transition-all duration-300 supports-[backdrop-filter]:bg-background/60",
+              isSidebarOpen && "lg:left-64",
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="-ml-2 rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+              aria-label="Toggle docs sidebar"
+            >
+              <Menu className="size-5" />
+            </button>
+            <span className="text-sm font-medium">useContext</span>
           </header>
 
           <div className="flex-1 overflow-auto pt-14">
-            <div className="w-full max-w-6xl mx-auto px-4 py-6 md:px-6 md:py-8 space-y-6">
+            <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6 md:px-6 md:py-8">
               {children}
             </div>
           </div>
         </main>
       </div>
     </TooltipProvider>
-  )
+  );
 }

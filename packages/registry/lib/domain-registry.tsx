@@ -28,28 +28,13 @@ export const eventsDomainEntry: DomainRegistryEntry = {
   href: "/docs/domains/events",
   schemaPackage: "@ekairos/events",
   components: [
-    { label: "Context", href: "/docs/components/context", kind: "component" },
-    { label: "Message", href: "/docs/components/message", kind: "component" },
-    { label: "Event Steps", href: "/docs/components/event-steps", kind: "component" },
-    { label: "Full Agent", href: "/docs/components/full-agent", kind: "template" },
-  ],
-  demos: [
     {
-      label: "Scripted",
-      href: "/docs/domains/events/demos/scripted",
-      description: "Canonical `events` UI driven by a scripted reactor stream.",
-    },
-    {
-      label: "AI SDK",
-      href: "/docs/domains/events/demos/ai-sdk",
-      description: "Canonical `events` UI driven by an AI SDK-shaped stream.",
-    },
-    {
-      label: "Codex",
-      href: "/docs/domains/events/demos/codex",
-      description: "Canonical `events` UI driven by a Codex-shaped notification stream.",
+      label: "useContext",
+      href: "/docs/components/use-context",
+      kind: "component",
     },
   ],
+  demos: [],
 };
 
 export const domainRegistry = [eventsDomainEntry];

@@ -70,14 +70,8 @@ const aiElementsRegistryBase =
   process.env.AI_ELEMENTS_REGISTRY_URL ?? defaultAiElementsRegistry;
 const runtimeProvidedDependencies = new Set(["next", "react", "react-dom"]);
 const versionlessDependencies = new Set(["ai", "streamdown"]);
-const localAiElementSources = new Set([
-  "ai-elements/conversation",
-  "ai-elements/message",
-  "ai-elements/sources",
-]);
 const packageVersionOverrides: Record<string, string> = {
-  "@ekairos/events":
-    process.env.EKAIROS_EVENTS_PACKAGE_VERSION ?? "beta",
+  "@ekairos/events": process.env.EKAIROS_EVENTS_PACKAGE_VERSION ?? "beta",
   ai: "^5.0.102",
   streamdown: "^1.3.0",
 };
@@ -132,30 +126,12 @@ const toComponentName = (relativePath: string) =>
   stripExtension(relativePath).split("/").join("-").toLowerCase();
 
 const PUBLISHED_EKAIROS_NAMES: Record<string, string> = {
-  "ekairos/events/context-agent/Agent": "agent",
   "ekairos/events/context/index": "use-context",
-  "ekairos/events/prompt/prompt": "prompt",
 };
 
 function shouldPublishSource(relativePath: string) {
   const basePath = stripExtension(relativePath);
-
-  if (basePath.startsWith("ai-elements/")) {
-    return localAiElementSources.has(basePath);
-  }
-
-  if (basePath in PUBLISHED_EKAIROS_NAMES) return true;
-
-  if (
-    basePath.startsWith("ekairos/agent/") ||
-    basePath.startsWith("ekairos/prompt/") ||
-    basePath.startsWith("ekairos/context/context/") ||
-    basePath === "ekairos/use-context"
-  ) {
-    return false;
-  }
-
-  return true;
+  return basePath in PUBLISHED_EKAIROS_NAMES;
 }
 
 function getRegistryName(relativePath: string) {
@@ -165,8 +141,13 @@ function getRegistryName(relativePath: string) {
   return toComponentName(relativePath);
 }
 
-const toTitle = (relativePath: string) =>
-  stripExtension(relativePath)
+const toTitle = (relativePath: string) => {
+  const basePath = stripExtension(relativePath);
+  if (basePath === "ekairos/events/context/index") {
+    return "useContext";
+  }
+
+  return basePath
     .split("/")
     .map((segment) =>
       segment
@@ -175,6 +156,7 @@ const toTitle = (relativePath: string) =>
         .join(" ")
     )
     .join(" / ");
+};
 
 const toDescription = (relativePath: string) => {
   const basePath = stripExtension(relativePath);
@@ -182,34 +164,8 @@ const toDescription = (relativePath: string) => {
   const fileName = segments[segments.length - 1] ?? basePath;
 
   switch (basePath) {
-    case "ekairos/events/context-agent/Agent":
-      return "Full Ekairos context agent shell from the Esolbay production surface.";
-    case "ekairos/events/prompt/prompt":
-      return "Ekairos prompt input from the Esolbay production surface, with streaming state and file attachments.";
     case "ekairos/events/context/index":
       return "React hook bridge for the canonical @ekairos/events context client runtime.";
-    case "ekairos/agent":
-      return "Full Ekairos chat agent shell that wires together prompt, messages, responses and tools.";
-    case "ekairos/prompt":
-      return "Ekairos prompt input with support for streaming state and file attachments.";
-    case "ekairos/context":
-      return "Utilities to work with Ekairos conversation contexts from your UI.";
-    case "ekairos/event":
-      return "Event-level building block to represent messages and agent activity in Ekairos.";
-    case "ekairos/use-context":
-      return "React hook to read and update the current Ekairos context from components.";
-    case "ekairos/use-story":
-      return "React hook to connect a UI to an Ekairos Story and its agent backend.";
-    case "ekairos/voice-provider":
-      return "Provider component that enables voice input and audio integration for Ekairos agents.";
-    case "ekairos/orb":
-      return "Animated Ekairos orb, ideal as a visual indicator for agent presence or thinking state.";
-    case "ekairos/cost-simulator":
-      return "Visualizer to estimate and simulate token and cost usage for Ekairos agents.";
-    case "ekairos/ekairos-logo":
-      return "Ekairos logo component ready to embed in headers, sidebars or empty states.";
-    case "open-in-v0-button":
-      return "Button that lets you open the current component in v0 for rapid iteration.";
     default: {
       const humanPath = basePath.replace(/\//g, " / ");
       return `Ekairos UI component defined in ${humanPath}.`;
@@ -240,22 +196,11 @@ async function collectSources(
       const isRootLevel = prefix === "";
       const isInsideEkairosTree = prefix.startsWith("ekairos");
 
-      // At the root level we expose Ekairos plus the AI Elements files vendored
-      // from Esolbay that the Ekairos agent depends on.
-      if (
-        isRootLevel &&
-        entry.name !== "ekairos" &&
-        entry.name !== "ai-elements"
-      ) {
+      if (isRootLevel && entry.name !== "ekairos") {
         continue;
       }
 
-      // Once we are inside an exposed tree we should keep recursing so nested building blocks are exposed.
-      if (
-        !isRootLevel &&
-        !isInsideEkairosTree &&
-        !prefix.startsWith("ai-elements")
-      ) {
+      if (!isRootLevel && !isInsideEkairosTree) {
         continue;
       }
 
@@ -281,15 +226,7 @@ async function collectSources(
         continue;
       }
 
-      // Special handling for Ekairos components:
-      // - Top-level files under components/ekairos (e.g. ekairos/agent.tsx)
-      //   are exposed with simplified names like "agent" => @ekairos/agent
-      // - Components in subdirectories with capitalized name (e.g. ekairos/agent/Agent.tsx)
-      //   are exposed as the directory name (e.g. "agent" => @ekairos/agent)
-      // - Other nested ekairos components (e.g. ekairos/prompt/prompt-button.tsx)
-      //   keep the default toComponentName naming so they can be used as dependencies.
       if (normalizedRelativePath.startsWith("ekairos/")) {
-        const segments = normalizedRelativePath.split("/");
         const canonicalName = PUBLISHED_EKAIROS_NAMES[stripExtension(normalizedRelativePath)];
 
         if (canonicalName) {
@@ -301,60 +238,9 @@ async function collectSources(
           });
           continue;
         }
-
-        if (segments.length === 2) {
-          // ekairos/agent.tsx -> agent
-          const fileName = segments[1] ?? "";
-          const ekairosName = stripExtension(fileName).toLowerCase();
-
-          if (!ekairosName) {
-            continue;
-          }
-
-          list.push({
-            name: ekairosName,
-            relativePath: normalizedRelativePath,
-            absolutePath,
-            content,
-          });
-          continue;
-        }
-
-        if (segments.length === 3) {
-          // ekairos/agent/Agent.tsx -> agent (if directory name matches file name)
-          const dirName = segments[1] ?? "";
-          const fileName = stripExtension(segments[2] ?? "");
-          const normalizedDirName = dirName.toLowerCase();
-          
-          // If directory name matches file name (case-insensitive), use directory name
-          if (normalizedDirName === fileName.toLowerCase()) {
-            list.push({
-              name: normalizedDirName,
-              relativePath: normalizedRelativePath,
-              absolutePath,
-              content,
-            });
-            continue;
-          }
-        }
-
-        // Nested ekairos sub-components: use default naming
-        list.push({
-          name: getRegistryName(normalizedRelativePath),
-          relativePath: normalizedRelativePath,
-          absolutePath,
-          content,
-        });
-        continue;
       }
 
-      // Default behavior for all other components (including ai-elements/*)
-      list.push({
-        name: getRegistryName(normalizedRelativePath),
-        relativePath: normalizedRelativePath,
-        absolutePath,
-        content,
-      });
+      continue;
     } catch (error) {
       console.warn(`Failed to read file ${absolutePath}:`, error);
     }

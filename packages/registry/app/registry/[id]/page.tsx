@@ -22,10 +22,10 @@ export default function RegistryRepoPage({
           Back to registry
         </Link>
         <Link
-          href="/docs/components/message"
+          href="/docs/components/use-context"
           className="rounded-full border border-border px-4 py-2 text-sm hover:bg-muted/50"
         >
-          Open docs
+          Open useContext docs
         </Link>
       </div>
     </main>

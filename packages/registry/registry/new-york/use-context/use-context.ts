@@ -1,4 +1,9 @@
-export { mergeContextStepPartsForUI, useContext } from "@ekairos/events/react";
+export {
+  ASSISTANT_MESSAGE_TYPE,
+  INPUT_TEXT_ITEM_TYPE,
+  mergeContextStepPartsForUI,
+  useContext,
+} from "@ekairos/events/react";
 
 export type {
   AppendArgs,
