@@ -4,11 +4,20 @@ import { describe, expect, it } from "vitest"
 import { start } from "workflow/api"
 
 import {
+  datasetAgentDurableResolutionWorkflow,
   datasetQueryBuilderWorkflow,
   DatasetWorkflowTestRuntime,
 } from "./workflow/dataset.workflow-fixtures.ts"
+import { resolveDatasetAgentDurable } from "../builder/materialize.ts"
 
 describe("dataset builder workflow integration", () => {
+  it("flattens internal dataset agents when already running in a workflow", async () => {
+    await expect(resolveDatasetAgentDurable(true)).resolves.toBe(true)
+
+    const run = await start(datasetAgentDurableResolutionWorkflow, [])
+    await expect(run.returnValue).resolves.toBe(false)
+  })
+
   it("runs query builder from a workflow without direct DB access outside steps", async () => {
     const runtime = new DatasetWorkflowTestRuntime({
       orgId: "org_dataset_workflow",

@@ -113,6 +113,20 @@ async function resolveDatasetSandboxId<Runtime extends AnyDatasetRuntime>(
   return created.sandboxId
 }
 
+export async function resolveDatasetAgentDurable(requestedDurable?: boolean): Promise<boolean> {
+  if (!requestedDurable) return false
+
+  try {
+    const { getWorkflowMetadata } = await import("workflow")
+    const workflowRunId = getWorkflowMetadata?.()?.workflowRunId
+    if (workflowRunId) return false
+  } catch {
+    // Outside Workflow runtime there is no active metadata, so honor the caller.
+  }
+
+  return true
+}
+
 export async function materializeSingleFileLikeSource<Runtime extends AnyDatasetRuntime>(
   state: DatasetBuilderState<Runtime>,
   source: Extract<InternalSource, { kind: "file" | "text" }>,
@@ -156,7 +170,9 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
     sandboxId,
   })
 
-  await parseContext.parse(state.runtime as any, { durable: state.durable })
+  await parseContext.parse(state.runtime as any, {
+    durable: await resolveDatasetAgentDurable(state.durable),
+  })
 
   if (!state.outputSchema) {
     await datasetInferAndUpdateSchemaStep({
@@ -288,7 +304,9 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
     sandboxId,
   })
 
-  await transformContext.transform(stateWithSandbox.runtime as any, { durable: stateWithSandbox.durable })
+  await transformContext.transform(stateWithSandbox.runtime as any, {
+    durable: await resolveDatasetAgentDurable(stateWithSandbox.durable),
+  })
 
   if (!stateWithSandbox.outputSchema) {
     await datasetInferAndUpdateSchemaStep({

@@ -5,6 +5,7 @@ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { getStepMetadata, getWorkflowMetadata } from "workflow"
 
 import { dataset } from "../../index.ts"
+import { resolveDatasetAgentDurable } from "../../builder/materialize.ts"
 import { datasetDomain } from "../../schema.ts"
 
 const sourceDomain = domain("dataset-workflow-source").schema({
@@ -268,4 +269,10 @@ export async function datasetQueryBuilderWorkflow(
     previewRows: result.previewRows,
     readRows: readResult.rows,
   }
+}
+
+export async function datasetAgentDurableResolutionWorkflow(): Promise<boolean> {
+  "use workflow";
+
+  return await resolveDatasetAgentDurable(true)
 }
