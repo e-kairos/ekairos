@@ -1,9 +1,11 @@
 import { createFileParseContext } from "../file/file-dataset.agent.js"
+import { readInstantFileStep } from "../file/steps.js"
 import { createTransformDatasetContext } from "../transform/transform-dataset.agent.js"
 import {
   datasetInferAndUpdateSchemaStep,
   datasetReadOneStep,
 } from "../dataset/steps.js"
+import { getDatasetOutputPath, getDatasetWorkstation } from "../datasetFiles.js"
 import { registerDatasetAgentMaterializers } from "./agentMaterializers.js"
 import {
   buildFileDefaultInstructions,
@@ -17,7 +19,13 @@ import {
 } from "./persistence.js"
 import { getDomainDescriptor } from "./sourceRows.js"
 import { materializeQuerySource } from "./materializeQuery.js"
-import { createDatasetSandboxStep } from "../sandbox/steps.js"
+import {
+  createDatasetSandboxStep,
+  readDatasetSandboxTextFileStep,
+  runDatasetSandboxCommandStep,
+  writeDatasetSandboxFilesStep,
+  writeDatasetSandboxTextFilesStep,
+} from "../sandbox/steps.js"
 import type {
   AnyDatasetRuntime,
   DatasetBuilderState,
@@ -61,6 +69,184 @@ function materializeRawTextRows(source: Extract<InternalSource, { kind: "text" }
   }
 
   return [{ text }]
+}
+
+function parseContentDispositionFileName(value: unknown): string {
+  const text = String(value ?? "")
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(text)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]).trim()
+    } catch {
+      return utf8Match[1].trim()
+    }
+  }
+
+  const quotedMatch = /filename="([^"]+)"/i.exec(text)
+  if (quotedMatch?.[1]) return quotedMatch[1].trim()
+
+  const plainMatch = /filename=([^;]+)/i.exec(text)
+  if (plainMatch?.[1]) return plainMatch[1].trim()
+
+  return ""
+}
+
+function isPdfContentDisposition(value: unknown): boolean {
+  const text = String(value ?? "").toLowerCase()
+  return text.includes("application/pdf") || text.includes(".pdf")
+}
+
+function sanitizePdfFileName(value: unknown, fallback: string): string {
+  const name = String(value ?? "").trim() || fallback
+  const cleaned = name.replace(/[\\/:"*?<>|]+/g, "_").replace(/\s+/g, "_").slice(0, 120)
+  return cleaned.toLowerCase().endsWith(".pdf") ? cleaned : `${cleaned || fallback}.pdf`
+}
+
+function pdfTextRowsSchema(): DatasetSchemaInput {
+  return {
+    title: "PdfTextPage",
+    description: "Extracted PDF page text",
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["fileId", "fileName", "pageNumber", "text"],
+      properties: {
+        fileId: { type: "string" },
+        fileName: { type: "string" },
+        pageNumber: { type: "number" },
+        text: { type: "string" },
+      },
+    },
+  }
+}
+
+function parseJsonlDataRows(content: string): any[] {
+  return String(content ?? "")
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .map((record) => record?.data)
+    .filter((row) => row && typeof row === "object" && !Array.isArray(row))
+}
+
+async function tryMaterializeRawPdfFileSource<Runtime extends AnyDatasetRuntime>(
+  state: DatasetBuilderState<Runtime>,
+  source: Extract<InternalSource, { kind: "file" }>,
+  targetDatasetId: string,
+): Promise<string | null> {
+  const file = await readInstantFileStep({ runtime: state.runtime, fileId: source.fileId })
+  if (!isPdfContentDisposition(file.contentDisposition)) return null
+
+  const sandboxId = await resolveDatasetSandboxId(state, targetDatasetId)
+  const workstation = getDatasetWorkstation(targetDatasetId)
+  const outputPath = getDatasetOutputPath(targetDatasetId)
+  const fileName = sanitizePdfFileName(
+    parseContentDispositionFileName(file.contentDisposition),
+    `${source.fileId}.pdf`,
+  )
+  const sourcePath = `${workstation}/${fileName}`
+  const scriptPath = `${workstation}/extract_pdf_text.py`
+
+  await runDatasetSandboxCommandStep({
+    runtime: state.runtime,
+    sandboxId,
+    cmd: "mkdir",
+    args: ["-p", workstation],
+  })
+
+  await writeDatasetSandboxFilesStep({
+    runtime: state.runtime,
+    sandboxId,
+    files: [{ path: sourcePath, contentBase64: file.contentBase64 }],
+  })
+
+  const install = await runDatasetSandboxCommandStep({
+    runtime: state.runtime,
+    sandboxId,
+    cmd: "python",
+    args: ["-m", "pip", "install", "pypdf", "--quiet"],
+  })
+  if (install.exitCode !== 0) {
+    throw new Error(`dataset_pdf_dependency_install_failed:${install.stderr || install.stdout}`)
+  }
+
+  await writeDatasetSandboxTextFilesStep({
+    runtime: state.runtime,
+    sandboxId,
+    files: [
+      {
+        path: scriptPath,
+        content: [
+          "from pathlib import Path",
+          "import json",
+          "import sys",
+          "from pypdf import PdfReader",
+          "",
+          "source_path = Path(sys.argv[1])",
+          "output_path = Path(sys.argv[2])",
+          "file_id = sys.argv[3]",
+          "file_name = sys.argv[4]",
+          "reader = PdfReader(str(source_path))",
+          "rows = 0",
+          "with output_path.open('w', encoding='utf-8') as out:",
+          "    for index, page in enumerate(reader.pages, start=1):",
+          "        text = page.extract_text() or ''",
+          "        text = text.replace('\\x00', '').strip()",
+          "        if not text:",
+          "            continue",
+          "        data = {",
+          "            'fileId': file_id,",
+          "            'fileName': file_name,",
+          "            'pageNumber': index,",
+          "            'text': text,",
+          "        }",
+          "        out.write(json.dumps({'type': 'row', 'data': data}, ensure_ascii=False) + '\\n')",
+          "        rows += 1",
+          "    if rows == 0:",
+          "        data = {'fileId': file_id, 'fileName': file_name, 'pageNumber': 0, 'text': ''}",
+          "        out.write(json.dumps({'type': 'row', 'data': data}, ensure_ascii=False) + '\\n')",
+          "        rows = 1",
+          "print(f'extracted_pdf_pages={len(reader.pages)} rows={rows} output={output_path}')",
+          "",
+        ].join("\n"),
+      },
+    ],
+  })
+
+  const extraction = await runDatasetSandboxCommandStep({
+    runtime: state.runtime,
+    sandboxId,
+    cmd: "python",
+    args: [scriptPath, sourcePath, outputPath, source.fileId, fileName],
+  })
+  if (extraction.exitCode !== 0) {
+    throw new Error(`dataset_pdf_text_extraction_failed:${extraction.stderr || extraction.stdout}`)
+  }
+
+  const output = await readDatasetSandboxTextFileStep({
+    runtime: state.runtime,
+    sandboxId,
+    path: outputPath,
+  })
+  const rows = parseJsonlDataRows(output.content)
+  if (rows.length === 0) {
+    throw new Error("dataset_pdf_text_extraction_empty")
+  }
+
+  await materializeRowsToDataset(state.runtime, {
+    datasetId: targetDatasetId,
+    sandboxId,
+    title: state.title ?? fileName,
+    instructions: state.instructions,
+    sources: [{ kind: "file", fileId: source.fileId, description: source.description }],
+    sourceKinds: ["file"],
+    rows,
+    schema: pdfTextRowsSchema(),
+    first: state.first,
+  })
+
+  return targetDatasetId
 }
 
 async function materializeRawTextSource<Runtime extends AnyDatasetRuntime>(
@@ -132,6 +318,11 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
   source: Extract<InternalSource, { kind: "file" | "text" }>,
   targetDatasetId: string,
 ) {
+  if (source.kind === "file" && !state.outputSchema) {
+    const materializedPdf = await tryMaterializeRawPdfFileSource(state, source, targetDatasetId)
+    if (materializedPdf) return materializedPdf
+  }
+
   if (!state.reactor) {
     throw new Error("dataset_reactor_required")
   }
