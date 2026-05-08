@@ -29,11 +29,15 @@ export type FileParseContextParams = {
   datasetId?: string
   model?: string
   reactor?: ContextReactor<any, any>
+  sandboxState?: SandboxState
+  filePreview?: FilePreviewContext
+  schema?: any | null
 }
 
 export type FileParseRunOptions = {
   prompt?: string
   durable?: boolean
+  initialContent?: Record<string, any>
 }
 
 export type FileParseContextBuilder<Env extends { orgId: string }> = {

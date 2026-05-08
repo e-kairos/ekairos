@@ -1,11 +1,26 @@
 import { createFileParseContext } from "../file/file-dataset.agent.js"
 import { readInstantFileStep } from "../file/steps.js"
+import {
+  generateFileParsePreviewStep,
+  initializeFileParseSandboxStep,
+} from "../file/file-dataset.steps.js"
 import { createTransformDatasetContext } from "../transform/transform-dataset.agent.js"
 import {
+  ensureTransformSourcesInSandboxStep,
+  generateTransformSourcePreviewsStep,
+} from "../transform/transform-dataset.steps.js"
+import {
+  datasetGetByIdStep,
   datasetInferAndUpdateSchemaStep,
+  datasetPreviewRowsStep,
   datasetReadOneStep,
 } from "../dataset/steps.js"
-import { getDatasetOutputPath, getDatasetWorkstation } from "../datasetFiles.js"
+import {
+  getDatasetOutputPath,
+  getDatasetScriptsDir,
+  getDatasetSourcesDir,
+  getDatasetStandardDirs,
+} from "../datasetFiles.js"
 import { registerDatasetAgentMaterializers } from "./agentMaterializers.js"
 import {
   buildFileDefaultInstructions,
@@ -20,7 +35,6 @@ import {
 import { getDomainDescriptor } from "./sourceRows.js"
 import { materializeQuerySource } from "./materializeQuery.js"
 import {
-  createDatasetSandboxStep,
   readDatasetSandboxTextFileStep,
   runDatasetSandboxCommandStep,
   writeDatasetSandboxFilesStep,
@@ -32,6 +46,12 @@ import type {
   DatasetSchemaInput,
   InternalSource,
 } from "./types.js"
+import type { SandboxState } from "../file/file-dataset.types.js"
+import type { FilePreviewContext } from "../file/filepreview.types.js"
+import type {
+  TransformSandboxState,
+  TransformSourcePreviewContext,
+} from "../transform/transform-dataset.types.js"
 
 function makeIntermediateDatasetId(targetDatasetId: string, sourceKind: string, index: number) {
   return `${targetDatasetId}__${sourceKind}_${index}`
@@ -138,21 +158,20 @@ async function tryMaterializeRawPdfFileSource<Runtime extends AnyDatasetRuntime>
   const file = await readInstantFileStep({ runtime: state.runtime, fileId: source.fileId })
   if (!isPdfContentDisposition(file.contentDisposition)) return null
 
-  const sandboxId = await resolveDatasetSandboxId(state, targetDatasetId)
-  const workstation = getDatasetWorkstation(targetDatasetId)
+  const sandboxId = resolveDatasetSandboxId(state, targetDatasetId)
   const outputPath = getDatasetOutputPath(targetDatasetId)
   const fileName = sanitizePdfFileName(
     parseContentDispositionFileName(file.contentDisposition),
     `${source.fileId}.pdf`,
   )
-  const sourcePath = `${workstation}/${fileName}`
-  const scriptPath = `${workstation}/extract_pdf_text.py`
+  const sourcePath = `${getDatasetSourcesDir(targetDatasetId)}/${fileName}`
+  const scriptPath = `${getDatasetScriptsDir(targetDatasetId)}/extract_pdf_text.py`
 
   await runDatasetSandboxCommandStep({
     runtime: state.runtime,
     sandboxId,
     cmd: "mkdir",
-    args: ["-p", workstation],
+    args: ["-p", ...getDatasetStandardDirs(targetDatasetId)],
   })
 
   await writeDatasetSandboxFilesStep({
@@ -276,27 +295,14 @@ async function materializeRawTextSource<Runtime extends AnyDatasetRuntime>(
   return targetDatasetId
 }
 
-async function resolveDatasetSandboxId<Runtime extends AnyDatasetRuntime>(
+function resolveDatasetSandboxId<Runtime extends AnyDatasetRuntime>(
   state: DatasetBuilderState<Runtime>,
-  targetDatasetId: string,
+  _targetDatasetId: string,
 ) {
   const sandboxId = String(state.sandboxId ?? "").trim()
   if (sandboxId) return sandboxId
 
-  const created = await createDatasetSandboxStep({
-    runtime: state.runtime,
-    provider: "vercel",
-    sandboxRuntime: "python3.13",
-    timeoutMs: 20 * 60 * 1000,
-    resources: { vcpus: 2 },
-    purpose: "dataset.materialize",
-    params: { datasetId: targetDatasetId },
-    vercel: {
-      profile: "ephemeral",
-      deleteOnStop: true,
-    },
-  })
-  return created.sandboxId
+  throw new Error("dataset_sandbox_required")
 }
 
 export async function resolveDatasetAgentDurable(requestedDurable?: boolean): Promise<boolean> {
@@ -313,6 +319,225 @@ export async function resolveDatasetAgentDurable(requestedDurable?: boolean): Pr
   return true
 }
 
+type PreparedFileDatasetContext = {
+  kind: "file"
+  datasetId: string
+  sandboxId: string
+  fileId: string
+  sandboxState: SandboxState
+  filePreview?: FilePreviewContext
+  schema?: DatasetSchemaInput | null
+}
+
+type PreparedTransformDatasetContext = {
+  kind: "transform"
+  datasetId: string
+  sandboxId: string
+  sourceDatasetIds: string[]
+  outputSchema: DatasetSchemaInput
+  sandboxState: TransformSandboxState
+  sourcePreviews?: Array<{ datasetId: string; preview: TransformSourcePreviewContext }>
+}
+
+type PreparedDatasetContext =
+  | PreparedFileDatasetContext
+  | PreparedTransformDatasetContext
+
+type DatasetContextInitialization = PreparedDatasetContext & {
+  prompt: string
+  instructions?: string
+}
+
+export async function initializeDatasetStep<Runtime extends AnyDatasetRuntime>(params: {
+  runtime: Runtime
+  datasetId: string
+  sandboxId: string
+  title?: string
+  instructions?: string
+  sources: any[]
+  sourceKinds: string[]
+  schema?: DatasetSchemaInput
+}) {
+  "use step"
+
+  await createOrUpdateDatasetMetadata(params.runtime, {
+    datasetId: params.datasetId,
+    sandboxId: params.sandboxId,
+    title: params.title ?? params.datasetId,
+    instructions: params.instructions,
+    sources: params.sources,
+    sourceKinds: params.sourceKinds,
+    schema: params.schema,
+    status: "building",
+  })
+
+  return {
+    datasetId: params.datasetId,
+    sandboxId: params.sandboxId,
+  }
+}
+
+export async function prepareDatasetSourcesStep<Runtime extends AnyDatasetRuntime>(
+  params:
+    | {
+        kind: "file"
+        runtime: Runtime
+        datasetId: string
+        sandboxId: string
+        source: Extract<InternalSource, { kind: "file" | "text" }>
+        schema?: DatasetSchemaInput
+      }
+    | {
+        kind: "transform"
+        runtime: Runtime
+        datasetId: string
+        sandboxId: string
+        sourceDatasetIds: string[]
+        outputSchema: DatasetSchemaInput
+      },
+): Promise<PreparedDatasetContext> {
+  "use step"
+
+  if (params.kind === "file") {
+    const fileId =
+      params.source.kind === "file"
+        ? params.source.fileId
+        : await uploadInlineTextSource(params.runtime, params.datasetId, params.source)
+
+    const initialized = await initializeFileParseSandboxStep({
+      runtime: params.runtime,
+      sandboxId: params.sandboxId,
+      datasetId: params.datasetId,
+      fileId,
+      state: { initialized: false, filePath: "" },
+    })
+
+    const filePreview = await generateFileParsePreviewStep({
+      runtime: params.runtime,
+      sandboxId: params.sandboxId,
+      sandboxFilePath: initialized.filePath,
+      datasetId: params.datasetId,
+    })
+
+    return {
+      kind: "file",
+      datasetId: params.datasetId,
+      sandboxId: params.sandboxId,
+      fileId,
+      sandboxState: initialized.state,
+      filePreview,
+      schema: params.schema ?? null,
+    }
+  }
+
+  const initialized = await ensureTransformSourcesInSandboxStep({
+    runtime: params.runtime,
+    sandboxId: params.sandboxId,
+    datasetId: params.datasetId,
+    sourceDatasetIds: params.sourceDatasetIds,
+    state: { initialized: false, sourcePaths: [] },
+  })
+
+  const sourcePreviews = await generateTransformSourcePreviewsStep({
+    runtime: params.runtime,
+    sandboxId: params.sandboxId,
+    datasetId: params.datasetId,
+    sourcePaths: initialized.sourcePaths,
+  })
+
+  return {
+    kind: "transform",
+    datasetId: params.datasetId,
+    sandboxId: params.sandboxId,
+    sourceDatasetIds: params.sourceDatasetIds,
+    outputSchema: params.outputSchema,
+    sandboxState: initialized.state,
+    sourcePreviews,
+  }
+}
+
+export async function initializeDatasetContextStep(params: {
+  prepared: PreparedDatasetContext
+  instructions?: string
+  outputSchema?: DatasetSchemaInput
+}): Promise<DatasetContextInitialization> {
+  "use step"
+
+  if (params.prepared.kind === "file") {
+    return {
+      ...params.prepared,
+      instructions:
+        params.instructions ?? buildFileDefaultInstructions(params.outputSchema),
+      prompt: "generate a dataset for this file",
+    }
+  }
+
+  return {
+    ...params.prepared,
+    instructions: params.instructions,
+    prompt:
+      params.prepared.sourceDatasetIds.length === 1
+        ? "Transform the source dataset into a new dataset matching the provided output schema"
+        : `Transform ${params.prepared.sourceDatasetIds.length} source datasets into a new dataset matching the provided output schema`,
+  }
+}
+
+export async function completeDatasetStep<Runtime extends AnyDatasetRuntime>(params: {
+  runtime: Runtime
+  datasetId: string
+  schema?: DatasetSchemaInput
+  first: boolean
+}) {
+  "use step"
+
+  let datasetResult = await datasetGetByIdStep({
+    runtime: params.runtime,
+    datasetId: params.datasetId,
+  })
+  if (!datasetResult.ok) throw new Error(datasetResult.error)
+
+  if (!params.schema && !datasetResult.data?.schema) {
+    await datasetInferAndUpdateSchemaStep({
+      runtime: params.runtime,
+      datasetId: params.datasetId,
+      title: `${params.datasetId}Row`,
+      description: "One dataset row",
+    })
+    datasetResult = await datasetGetByIdStep({
+      runtime: params.runtime,
+      datasetId: params.datasetId,
+    })
+    if (!datasetResult.ok) throw new Error(datasetResult.error)
+  }
+
+  const previewResult = await datasetPreviewRowsStep({
+    runtime: params.runtime,
+    datasetId: params.datasetId,
+    limit: 20,
+  })
+
+  if (!params.first) {
+    return {
+      datasetId: params.datasetId,
+      dataset: datasetResult.data,
+      previewRows: previewResult.rows,
+      firstRow: undefined,
+    }
+  }
+
+  const firstResult = await datasetReadOneStep({
+    runtime: params.runtime,
+    datasetId: params.datasetId,
+  })
+
+  return {
+    datasetId: params.datasetId,
+    dataset: datasetResult.data,
+    previewRows: previewResult.rows,
+    firstRow: firstResult.row,
+  }
+}
+
 export async function materializeSingleFileLikeSource<Runtime extends AnyDatasetRuntime>(
   state: DatasetBuilderState<Runtime>,
   source: Extract<InternalSource, { kind: "file" | "text" }>,
@@ -323,18 +548,14 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
     if (materializedPdf) return materializedPdf
   }
 
+  const sandboxId = resolveDatasetSandboxId(state, targetDatasetId)
+
   if (!state.reactor) {
     throw new Error("dataset_reactor_required")
   }
 
-  const sandboxId = await resolveDatasetSandboxId(state, targetDatasetId)
-
-  const fileId =
-    source.kind === "file"
-      ? source.fileId
-      : await uploadInlineTextSource(state.runtime, targetDatasetId, source)
-
-  await createOrUpdateDatasetMetadata(state.runtime, {
+  await initializeDatasetStep({
+    runtime: state.runtime,
     datasetId: targetDatasetId,
     sandboxId,
     title: state.title ?? targetDatasetId,
@@ -351,32 +572,49 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
     ],
     sourceKinds: [source.kind],
     schema: state.outputSchema,
-    status: "building",
   })
 
-  const parseContext = createFileParseContext<typeof state.env>(fileId, {
+  const prepared = await prepareDatasetSourcesStep({
+    kind: "file",
+    runtime: state.runtime,
     datasetId: targetDatasetId,
-    instructions: state.instructions ?? buildFileDefaultInstructions(state.outputSchema),
-    reactor: state.reactor as any,
     sandboxId,
+    source,
+    schema: state.outputSchema,
+  })
+
+  const context = await initializeDatasetContextStep({
+    prepared,
+    instructions: state.instructions,
+    outputSchema: state.outputSchema,
+  })
+  if (context.kind !== "file") {
+    throw new Error("dataset_context_kind_mismatch:file")
+  }
+
+  const parseContext = createFileParseContext<any>(context.fileId, {
+    datasetId: context.datasetId,
+    instructions: context.instructions,
+    reactor: state.reactor as any,
+    sandboxId: context.sandboxId,
+    sandboxState: context.sandboxState,
+    filePreview: context.filePreview,
+    schema: context.schema,
   })
 
   await parseContext.parse(state.runtime as any, {
     durable: await resolveDatasetAgentDurable(state.durable),
+    prompt: context.prompt,
+    initialContent: {
+      datasetId: context.datasetId,
+      fileId: context.fileId,
+      instructions: context.instructions ?? "",
+      sandboxId: context.sandboxId,
+      sandboxState: context.sandboxState,
+      filePreview: context.filePreview,
+      schema: context.schema,
+    },
   })
-
-  if (!state.outputSchema) {
-    await datasetInferAndUpdateSchemaStep({
-      runtime: state.runtime,
-      datasetId: targetDatasetId,
-      title: `${targetDatasetId}Row`,
-      description: "One dataset row",
-    })
-  }
-
-  if (state.first) {
-    await datasetReadOneStep({ runtime: state.runtime, datasetId: targetDatasetId })
-  }
 
   return targetDatasetId
 }
@@ -439,7 +677,7 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
     throw new Error("dataset_reactor_required")
   }
 
-  const sandboxId = await resolveDatasetSandboxId(state, targetDatasetId)
+  const sandboxId = resolveDatasetSandboxId(state, targetDatasetId)
   const stateWithSandbox = { ...state, sandboxId }
 
   const normalizedSources: string[] = []
@@ -461,7 +699,8 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
       },
     } satisfies DatasetSchemaInput)
 
-  await createOrUpdateDatasetMetadata(stateWithSandbox.runtime, {
+  await initializeDatasetStep({
+    runtime: stateWithSandbox.runtime,
     datasetId: targetDatasetId,
     sandboxId,
     title: stateWithSandbox.title ?? targetDatasetId,
@@ -479,38 +718,54 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
     ),
     sourceKinds: stateWithSandbox.sources.map((source) => source.kind),
     schema: transformSchema,
-    status: "building",
   })
 
-  const transformContext = createTransformDatasetContext<typeof state.env>({
+  const prepared = await prepareDatasetSourcesStep({
+    kind: "transform",
+    runtime: stateWithSandbox.runtime,
+    datasetId: targetDatasetId,
+    sandboxId,
     sourceDatasetIds: normalizedSources,
     outputSchema: transformSchema,
+  })
+
+  const context = await initializeDatasetContextStep({
+    prepared,
     instructions: buildTransformInstructions(
       normalizedSources.length,
       stateWithSandbox.instructions,
       stateWithSandbox.outputSchema,
     ),
-    datasetId: targetDatasetId,
+    outputSchema: transformSchema,
+  })
+  if (context.kind !== "transform") {
+    throw new Error("dataset_context_kind_mismatch:transform")
+  }
+
+  const transformContext = createTransformDatasetContext<any>({
+    sourceDatasetIds: context.sourceDatasetIds,
+    outputSchema: context.outputSchema,
+    instructions: context.instructions,
+    datasetId: context.datasetId,
     reactor: stateWithSandbox.reactor as any,
-    sandboxId,
+    sandboxId: context.sandboxId,
+    sandboxState: context.sandboxState,
+    sourcePreviews: context.sourcePreviews,
   })
 
   await transformContext.transform(stateWithSandbox.runtime as any, {
     durable: await resolveDatasetAgentDurable(stateWithSandbox.durable),
+    prompt: context.prompt,
+    initialContent: {
+      datasetId: context.datasetId,
+      sourceDatasetIds: context.sourceDatasetIds,
+      outputSchema: context.outputSchema,
+      instructions: context.instructions,
+      sandboxId: context.sandboxId,
+      sandboxState: context.sandboxState,
+      sourcePreviews: context.sourcePreviews,
+    },
   })
-
-  if (!stateWithSandbox.outputSchema) {
-    await datasetInferAndUpdateSchemaStep({
-      runtime: stateWithSandbox.runtime,
-      datasetId: targetDatasetId,
-      title: `${targetDatasetId}Row`,
-      description: "One dataset row",
-    })
-  }
-
-  if (stateWithSandbox.first) {
-    await datasetReadOneStep({ runtime: stateWithSandbox.runtime, datasetId: targetDatasetId })
-  }
 
   return targetDatasetId
 }

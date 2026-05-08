@@ -30,11 +30,14 @@ export type TransformDatasetAgentParams = {
   model?: string
   sandboxId?: string
   reactor?: ContextReactor<any, any>
+  sandboxState?: TransformSandboxState
+  sourcePreviews?: Array<{ datasetId: string; preview: TransformSourcePreviewContext }>
 }
 
 export type TransformDatasetRunOptions = {
   prompt?: string
   durable?: boolean
+  initialContent?: Record<string, any>
 }
 
 export type TransformDatasetResult = {

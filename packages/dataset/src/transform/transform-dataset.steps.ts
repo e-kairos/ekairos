@@ -1,4 +1,8 @@
-import { getDatasetOutputPath, getDatasetWorkstation } from "../datasetFiles.js"
+import {
+  getDatasetOutputPath,
+  getDatasetSourcesDir,
+  getDatasetStandardDirs,
+} from "../datasetFiles.js"
 import { datasetReadOutputJsonlStep } from "../dataset/steps.js"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
 import { generateSourcePreview } from "./filepreview.js"
@@ -30,19 +34,17 @@ export async function ensureTransformSourcesInSandboxStep(params: {
     }
   }
 
-  const workstation = getDatasetWorkstation(params.datasetId)
-
   await runDatasetSandboxCommandStep({
     runtime: params.runtime,
     sandboxId: params.sandboxId,
     cmd: "mkdir",
-    args: ["-p", workstation],
+    args: ["-p", ...getDatasetStandardDirs(params.datasetId)],
   })
 
   const sourcePaths: Array<{ datasetId: string; path: string }> = []
 
   for (const sourceDatasetId of params.sourceDatasetIds) {
-    const sourcePath = `${workstation}/source_${sourceDatasetId}.jsonl`
+    const sourcePath = `${getDatasetSourcesDir(params.datasetId)}/source_${sourceDatasetId}.jsonl`
 
     const source = await datasetReadOutputJsonlStep({
       runtime: params.runtime,

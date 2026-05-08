@@ -106,6 +106,54 @@ function ensureValidEntityId(value: unknown, label: string): string {
   return normalized
 }
 
+function sanitizeInstantString(value: string): string {
+  return value.includes("\u0000") ? value.replace(/\u0000/g, "") : value
+}
+
+function isOpaqueJsonValue(value: object): boolean {
+  return (
+    value instanceof Date ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value)
+  )
+}
+
+function sanitizeInstantValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if (typeof value === "string") {
+    return sanitizeInstantString(value) as T
+  }
+
+  if (value === null || value === undefined || typeof value !== "object") {
+    return value
+  }
+
+  if (isOpaqueJsonValue(value)) {
+    return value
+  }
+
+  const cached = seen.get(value)
+  if (cached) {
+    return cached as T
+  }
+
+  if (Array.isArray(value)) {
+    const out: unknown[] = []
+    seen.set(value, out)
+    for (const item of value) {
+      out.push(sanitizeInstantValue(item, seen))
+    }
+    return out as T
+  }
+
+  const out: Record<string, unknown> = {}
+  seen.set(value, out)
+  for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
+    out[sanitizeInstantString(key)] = sanitizeInstantValue(entryValue, seen)
+  }
+
+  return out as T
+}
+
 function logInstantTransactFailure(params: {
   action: string
   meta?: Record<string, unknown>
@@ -325,6 +373,7 @@ export class InstantStore implements ContextStore {
     event: ContextItem,
   ): Promise<ContextItem> {
     const eventId = ensureValidEntityId((event as any)?.id, "event.id")
+    const sanitizedEvent = sanitizeInstantValue(event)
     const context = await this.resolveContext(contextIdentifier)
     const existing = await this.getItem(eventId)
     if (existing?.status && existing.status !== "stored") {
@@ -332,7 +381,7 @@ export class InstantStore implements ContextStore {
     }
     const txs = [
       this.db.tx.event_items[eventId].update({
-        ...(event as any),
+        ...(sanitizedEvent as any),
         id: eventId,
         status: "stored",
       }),
@@ -359,7 +408,7 @@ export class InstantStore implements ContextStore {
     }
 
     return {
-      ...(event as any),
+      ...(sanitizedEvent as any),
       id: eventId,
       status: "stored",
     } as ContextItem
@@ -370,10 +419,11 @@ export class InstantStore implements ContextStore {
     if (current?.status && event.status && current.status !== event.status) {
       assertItemTransition(current.status, event.status)
     }
-    await this.db.transact([this.db.tx.event_items[eventId].update(event as any)])
+    const sanitizedEvent = sanitizeInstantValue(event)
+    await this.db.transact([this.db.tx.event_items[eventId].update(sanitizedEvent as any)])
     return {
       ...(current as any),
-      ...(event as any),
+      ...(sanitizedEvent as any),
       id: eventId,
     } as ContextItem
   }
@@ -671,7 +721,9 @@ export class InstantStore implements ContextStore {
   }
 
   async saveStepParts(params: { stepId: string; parts: any[] }): Promise<void> {
-    const parts = normalizePartsForPersistence(Array.isArray(params.parts) ? params.parts : [])
+    const parts = sanitizeInstantValue(
+      normalizePartsForPersistence(Array.isArray(params.parts) ? params.parts : []),
+    )
     if (parts.length === 0) return
 
     const txs = parts.map((part, idx) => {

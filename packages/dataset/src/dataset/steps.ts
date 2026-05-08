@@ -2,7 +2,7 @@ import { DatasetService } from "../service.js"
 import { datasetDomain } from "../schema.js"
 import { inferDatasetSchema } from "../builder/schemaInference.js"
 
-async function getRuntimeDb(runtime: any) {
+export async function getDatasetRuntimeDb(runtime: any) {
   if (!runtime) {
     throw new Error("Dataset step requires runtime.")
   }
@@ -19,12 +19,12 @@ async function getRuntimeDb(runtime: any) {
 
 export async function getDatasetServiceDb(runtime: any) {
   "use step"
-  return await getRuntimeDb(runtime)
+  return await getDatasetRuntimeDb(runtime)
 }
 
 export async function datasetGetByIdStep(params: { runtime: any; datasetId: string }) {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   return await service.getDatasetById(params.datasetId)
 }
@@ -34,7 +34,7 @@ export async function datasetReadOutputJsonlStep(params: {
   datasetId: string
 }): Promise<{ contentBase64: string }> {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   for (let attempt = 1; attempt <= 20; attempt++) {
     const query: any = await db.query({
       dataset_datasets: {
@@ -64,7 +64,7 @@ export async function datasetUpdateSchemaStep(params: {
   status?: string
 }) {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   return await service.updateDatasetSchema({
     datasetId: params.datasetId,
@@ -79,7 +79,7 @@ export async function datasetUploadOutputFileStep(params: {
   contentBase64: string
 }) {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   return await service.uploadDatasetOutputFile({
     datasetId: params.datasetId,
@@ -95,7 +95,7 @@ export async function datasetUpdateStatusStep(params: {
   actualGeneratedRowCount?: number
 }) {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   return await service.updateDatasetStatus({
     datasetId: params.datasetId,
@@ -107,7 +107,7 @@ export async function datasetUpdateStatusStep(params: {
 
 export async function datasetClearStep(params: { runtime: any; datasetId: string }) {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   return await service.clearDataset(params.datasetId)
 }
@@ -118,7 +118,7 @@ export async function datasetPreviewRowsStep(params: {
   limit?: number
 }): Promise<{ rows: any[] }> {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   const rowsResult = await service.previewRows(params.datasetId, params.limit ?? 20)
   if (!rowsResult.ok) {
@@ -134,7 +134,7 @@ export async function datasetReadRowsStep(params: {
   limit?: number
 }): Promise<{ rows: any[]; cursor: number; done: boolean }> {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   const rowsResult = await service.readRows({
     datasetId: params.datasetId,
@@ -152,7 +152,7 @@ export async function datasetReadOneStep(params: {
   datasetId: string
 }): Promise<{ row: any | null }> {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   const firstResult = await service.readOne(params.datasetId)
   if (!firstResult.ok) {
@@ -168,7 +168,7 @@ export async function datasetInferAndUpdateSchemaStep(params: {
   description?: string
 }) {
   "use step"
-  const db = await getRuntimeDb(params.runtime)
+  const db = await getDatasetRuntimeDb(params.runtime)
   const service = new DatasetService(db)
   const readResult = await service.readRows({
     datasetId: params.datasetId,

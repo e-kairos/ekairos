@@ -9,7 +9,7 @@ import { configureRuntime, EkairosRuntime } from "@ekairos/domain/runtime"
 import { createScriptedReactor, eventsDomain } from "@ekairos/events"
 import { sandboxDomain, SandboxService } from "@ekairos/sandbox"
 import { createMaterializeDatasetTool } from "../materializeDataset.tool"
-import { getDatasetOutputPath, getDatasetWorkstation } from "../datasetFiles"
+import { getDatasetOutputPath, getDatasetSourcesDir } from "../datasetFiles"
 import { datasetDomain } from "../schema"
 import { describeInstant, hasInstantAdmin, setupInstantTestEnv } from "./_env"
 import { attachMockInstantStreams } from "./_streams"
@@ -239,9 +239,9 @@ describeInstant("createMaterializeDatasetTool()", () => {
             scriptName: "parse_csv_to_jsonl",
             pythonCode: [
               "import csv, glob, json",
-              `workstation = ${JSON.stringify(getDatasetWorkstation("tool_file_v1"))}`,
+              `sources_dir = ${JSON.stringify(getDatasetSourcesDir("tool_file_v1"))}`,
               `output_path = ${JSON.stringify(getDatasetOutputPath("tool_file_v1"))}`,
-              "source_path = glob.glob(workstation + '/*.csv')[0]",
+              "source_path = glob.glob(sources_dir + '/*.csv')[0]",
               "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
               "  reader = csv.DictReader(src)",
               "  for row in reader:",

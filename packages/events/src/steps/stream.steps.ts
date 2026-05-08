@@ -264,23 +264,24 @@ export async function abortPersistedContextStepStream(params: {
   })
 }
 
-export async function writeActionResultPartChunks(params: {
+export type ContextActionResultForStream = {
+  actionRequest: {
+    actionRef: string
+    actionName: string
+    input: unknown
+  }
+  success: boolean
+  output: unknown
+  errorText?: string
+}
+
+export async function writeActionResultPartChunksToSession(params: {
   session?: PersistedContextStepStreamSession | null
   contextId: string
   executionId: string
   itemId: string
-  actionResults: Array<{
-    actionRequest: {
-      actionRef: string
-      actionName: string
-      input: unknown
-    }
-    success: boolean
-    output: unknown
-    errorText?: string
-  }>
+  actionResults: ContextActionResultForStream[]
 }): Promise<ContextStreamEvent[]> {
-  "use step"
   if (!params.session || params.actionResults.length === 0) return []
 
   const writer = params.session.stream.getWriter()

@@ -34,19 +34,18 @@ import {
   closeContextStream,
   createPersistedContextStepStreamForRuntime,
   finalizePersistedContextStepStreamForRuntime,
-  writeActionResultPartChunks,
+  writeActionResultPartChunksToSession,
   type PersistedContextStepStreamSession,
 } from "./steps/stream.steps.js"
 import {
   completeExecution,
+  completeExecutionStep,
   createContextStep,
-  finalizeReactionStep,
   getContextItems,
   initializeContext,
-  openReactionStep,
-  saveTriggerAndCreateExecution,
-  saveContextPartsAndUpdateReaction,
-  saveContextPartsStep,
+  openExecutionStep,
+  openExecution,
+  saveExecutionStepOutput,
   updateContextContent,
   updateContextReactor,
   updateContextStatus,
@@ -526,7 +525,7 @@ type ContextEngineOps<Context> = {
     status: "open_idle" | "open_streaming" | "closed",
   ) => Promise<void>
   getItems: (contextIdentifier: ContextIdentifier) => Promise<ContextItem[]>
-  saveTriggerAndCreateExecution: (params: {
+  openExecution: (params: {
     contextIdentifier: ContextIdentifier
     triggerEvent: ContextItem
   }) => Promise<{
@@ -534,7 +533,7 @@ type ContextEngineOps<Context> = {
     reactionEvent: ContextItem
     execution: ContextExecution
   }>
-  openReactionStep: (params: {
+  openExecutionStep: (params: {
     contextIdentifier: ContextIdentifier
     content: Context
     executionId: string
@@ -556,24 +555,32 @@ type ContextEngineOps<Context> = {
     iteration?: number
     patch: ContextStepPatch
   }) => Promise<void>
-  finalizeReactionStep: (params: {
+  completeExecutionStep: (params: {
     session?: PersistedContextStepStreamSession | null
     stepId: string
     executionId?: string
     contextId?: string
     iteration?: number
-    patch: ContextStepPatch
+    parts?: any[]
+    actionResults?: Array<{
+      actionRequest: {
+        actionRef: string
+        actionName: string
+        input: unknown
+      }
+      success: boolean
+      output: unknown
+      errorText?: string
+    }>
+    stepStatus?: ContextStepPatch["status"]
+    errorText?: string
     reactionEventId?: string
     reactionEvent?: ContextItem
-  }) => Promise<{ reactionEvent?: ContextItem }>
-  saveContextPartsStep: (params: {
-    stepId: string
-    executionId?: string
-    contextId?: string
-    iteration?: number
-    parts: any[]
-  }) => Promise<void>
-  saveContextPartsAndUpdateReaction: (params: {
+  }) => Promise<{
+    reactionEvent?: ContextItem
+    actionResultChunkEvents: ContextStreamEvent[]
+  }>
+  saveExecutionStepOutput: (params: {
     stepId: string
     executionId?: string
     contextId?: string
@@ -591,7 +598,12 @@ type ContextEngineOps<Context> = {
     contextIdentifier: ContextIdentifier,
     executionId: string,
     status: "completed" | "failed",
-  ) => Promise<void>
+    opts?: {
+      contextId?: string
+      reactionEventId?: string
+      reactionEvent?: ContextItem
+    },
+  ) => Promise<{ reactionEvent?: ContextItem }>
 }
 
 async function createRuntimeOps<Context>(
@@ -668,7 +680,7 @@ async function createRuntimeOps<Context>(
           updatedAt: new Date(),
         }),
       ]),
-    saveTriggerAndCreateExecution: async ({ contextIdentifier, triggerEvent }) => {
+    openExecution: async ({ contextIdentifier, triggerEvent }) => {
       const contextId = requireContextId(contextIdentifier)
       const triggerId = String(triggerEvent.id)
       const reactionId = makeRuntimeId()
@@ -727,7 +739,7 @@ async function createRuntimeOps<Context>(
         },
       }
     },
-    openReactionStep: async ({ contextIdentifier, content, executionId, iteration }) => {
+    openExecutionStep: async ({ contextIdentifier, content, executionId, iteration }) => {
       const stepId = makeRuntimeId()
       const now = new Date()
       await instrumentedDb.transact([
@@ -777,7 +789,17 @@ async function createRuntimeOps<Context>(
         instrumentedDb.tx.event_steps[params.stepId].update(update),
       ])
     },
-    finalizeReactionStep: async (params) => {
+    completeExecutionStep: async (params) => {
+      const actionResultChunkEvents = await writeActionResultPartChunksToSession({
+        session: params.session,
+        contextId: String(params.contextId ?? ""),
+        executionId: String(params.executionId ?? ""),
+        itemId: String(params.reactionEventId ?? ""),
+        actionResults: params.actionResults ?? [],
+      })
+      if (params.parts) {
+        await store.saveStepParts({ stepId: params.stepId, parts: params.parts })
+      }
       if (params.session) {
         await finalizePersistedContextStepStreamForRuntime({
           runtime: { db: instrumentedDb },
@@ -787,14 +809,14 @@ async function createRuntimeOps<Context>(
       }
 
       const update: any = { updatedAt: new Date() }
-      if (params.patch.status !== undefined) update.status = params.patch.status
-      if (params.patch.errorText !== undefined) update.errorText = params.patch.errorText
+      update.status = params.stepStatus ?? "completed"
+      if (params.errorText !== undefined) update.errorText = params.errorText
       await instrumentedDb.transact([
         instrumentedDb.tx.event_steps[params.stepId].update(update),
       ])
 
       if (!params.reactionEventId || !params.reactionEvent) {
-        return {}
+        return { actionResultChunkEvents }
       }
 
       await instrumentedDb.transact([
@@ -808,12 +830,10 @@ async function createRuntimeOps<Context>(
           ...(params.reactionEvent as any),
           id: params.reactionEventId,
         } as ContextItem,
+        actionResultChunkEvents,
       }
     },
-    saveContextPartsStep: async (params) => {
-      await store.saveStepParts({ stepId: params.stepId, parts: params.parts })
-    },
-    saveContextPartsAndUpdateReaction: async (params) => {
+    saveExecutionStepOutput: async (params) => {
       await store.saveStepParts({ stepId: params.stepId, parts: params.parts })
       await instrumentedDb.transact([
         instrumentedDb.tx.event_items[params.reactionEventId].update(
@@ -835,9 +855,9 @@ async function createRuntimeOps<Context>(
         id: itemId,
       } as ContextItem
     },
-    completeExecution: async (contextIdentifier, executionId, status) => {
+    completeExecution: async (contextIdentifier, executionId, status, opts) => {
       const contextId = requireContextId(contextIdentifier)
-      await instrumentedDb.transact([
+      const txs = [
         instrumentedDb.tx.event_executions[executionId].update({
           status,
           updatedAt: new Date(),
@@ -846,7 +866,23 @@ async function createRuntimeOps<Context>(
           status: "closed",
           updatedAt: new Date(),
         }),
-      ])
+      ]
+      if (opts?.reactionEventId && opts.reactionEvent) {
+        txs.push(
+          instrumentedDb.tx.event_items[opts.reactionEventId].update(
+            opts.reactionEvent as any,
+          ),
+        )
+      }
+      await instrumentedDb.transact(txs)
+      return opts?.reactionEventId && opts.reactionEvent
+        ? {
+            reactionEvent: {
+              ...(opts.reactionEvent as any),
+              id: opts.reactionEventId,
+            } as ContextItem,
+          }
+        : {}
     },
   }
 }
@@ -864,26 +900,24 @@ async function createWorkflowOps<Context>(
       await updateContextReactor<Context>({ runtime, contextIdentifier, reactor }),
     updateContextStatus: async (contextIdentifier, status) =>
       await updateContextStatus({ runtime, contextIdentifier, status }),
-    saveTriggerAndCreateExecution: async ({ contextIdentifier, triggerEvent }) =>
-      await saveTriggerAndCreateExecution({ runtime, contextIdentifier, triggerEvent }),
-    openReactionStep: async (params) =>
-      await openReactionStep<Context>({ runtime, ...params }),
+    openExecution: async ({ contextIdentifier, triggerEvent }) =>
+      await openExecution({ runtime, contextIdentifier, triggerEvent }),
+    openExecutionStep: async (params) =>
+      await openExecutionStep<Context>({ runtime, ...params }),
     createContextStep: async ({ executionId, iteration }) =>
       await createContextStep({ runtime, executionId, iteration }),
     updateContextStep: async (params) =>
       await updateContextStep({ runtime, ...params }),
-    finalizeReactionStep: async (params) =>
-      await finalizeReactionStep({ runtime, ...params }),
-    saveContextPartsStep: async (params) =>
-      await saveContextPartsStep({ runtime, ...params }),
-    saveContextPartsAndUpdateReaction: async (params) =>
-      await saveContextPartsAndUpdateReaction({ runtime, ...params }),
+    completeExecutionStep: async (params) =>
+      await completeExecutionStep({ runtime, ...params }),
+    saveExecutionStepOutput: async (params) =>
+      await saveExecutionStepOutput({ runtime, ...params }),
     getItems: async (contextIdentifier) =>
       await getContextItems({ runtime, contextIdentifier }),
     updateItem: async (itemId, item, opts) =>
       await updateItem({ runtime, eventId: itemId, event: item, opts }),
-    completeExecution: async (contextIdentifier, executionId, status) =>
-      await completeExecution({ runtime, contextIdentifier, executionId, status }),
+    completeExecution: async (contextIdentifier, executionId, status, opts) =>
+      await completeExecution({ runtime, contextIdentifier, executionId, status, ...opts }),
   }
 }
 
@@ -1067,9 +1101,9 @@ export abstract class ContextEngine<
 
     const shell = await measureBenchmark(
       params.__benchmark,
-      "react.bootstrapShellMs",
+      "react.openExecutionMs",
       async () =>
-        await ops.saveTriggerAndCreateExecution({
+        await ops.openExecution({
           contextIdentifier: contextSelector,
           triggerEvent,
         }),
@@ -1388,9 +1422,9 @@ export abstract class ContextEngine<
 
         const openedStep = await measureBenchmark(
           params.__benchmark,
-          `${stagePrefix}.openReactionStepMs`,
+          `${stagePrefix}.openExecutionStepMs`,
           async () =>
-            await ops.openReactionStep({
+            await ops.openExecutionStep({
               contextIdentifier: activeContextSelector,
               content: nextContent,
               executionId,
@@ -1472,7 +1506,7 @@ export abstract class ContextEngine<
           if (nextSignature === persistedReactionPartsSignature) return
           persistedReactionPartsSignature = nextSignature
 
-          const saved = await ops.saveContextPartsAndUpdateReaction({
+          const saved = await ops.saveExecutionStepOutput({
             stepId: openedStep.stepId,
             parts: normalizedParts,
             reactionEventId: reactionEvent.id,
@@ -1564,9 +1598,9 @@ export abstract class ContextEngine<
         }
         const appendedReactorOutput = await measureBenchmark(
           params.__benchmark,
-          `${stagePrefix}.appendReactorOutputMs`,
+          `${stagePrefix}.saveExecutionStepOutputMs`,
           async () =>
-            await ops.saveContextPartsAndUpdateReaction({
+            await ops.saveExecutionStepOutput({
               stepId: openedStep.stepId,
               parts: stepParts,
               reactionEventId: reactionEvent.id,
@@ -1635,14 +1669,12 @@ export abstract class ContextEngine<
             }
             const finalized = await measureBenchmark(
               params.__benchmark,
-              `${stagePrefix}.finalizeReactionStepMs`,
+              `${stagePrefix}.completeExecutionStepMs`,
               async () =>
-                await ops.finalizeReactionStep({
+                await ops.completeExecutionStep({
                   session: currentStepStream,
                   stepId: openedStep.stepId,
-                  patch: {
-                    status: "completed",
-                  },
+                  stepStatus: "completed",
                   reactionEventId,
                   reactionEvent: completedReactionEvent,
                   executionId,
@@ -1651,6 +1683,7 @@ export abstract class ContextEngine<
                 }),
             )
             currentStepStream = null
+            currentStepId = null
             reactionEvent = finalized.reactionEvent ?? completedReactionEvent
             await emitContextEvents({
               silent,
@@ -1808,25 +1841,7 @@ export abstract class ContextEngine<
             ),
         )
 
-        const actionResultChunkEvents = await measureBenchmark(
-          params.__benchmark,
-          `${stagePrefix}.writeActionResultPartChunksMs`,
-          async () =>
-            await writeActionResultPartChunks({
-              session: currentStepStream,
-              contextId: String(currentContext.id),
-              executionId,
-              itemId: reactionEventId,
-              actionResults: actionResults as any,
-            }),
-        )
-        await emitContextEvents({
-          silent,
-          writable,
-          events: actionResultChunkEvents,
-        })
-
-        // Merge action results into persisted parts (so next LLM call can see them)
+        // Merge action results into step parts so the next reaction can see them.
         let finalizedStepParts = Array.isArray(stepParts) ? [...stepParts] : []
         for (const r of actionResults as any[]) {
           finalizedStepParts = applyToolExecutionResultToParts(
@@ -1843,20 +1858,7 @@ export abstract class ContextEngine<
           )
         }
 
-        await measureBenchmark(
-          params.__benchmark,
-          `${stagePrefix}.saveFinalStepPartsMs`,
-          async () =>
-            await ops.saveContextPartsStep({
-              stepId: openedStep.stepId,
-              parts: finalizedStepParts,
-              executionId,
-              contextId: String(currentContext.id),
-              iteration: iter,
-            }),
-        )
-
-        reactionEvent = {
+        const pendingReactionEvent: ContextItem = {
           ...reactionEvent,
           content: {
             ...reactionEvent.content,
@@ -1866,61 +1868,32 @@ export abstract class ContextEngine<
           },
           status: "pending",
         }
-
-        // Callback for observability/integration
-        for (const r of actionResults as any[]) {
-          await story.opts.onActionExecuted?.({
-            actionRequest: r.actionRequest,
-            success: r.success,
-            output: r.output,
-            errorText: r.errorText,
-            eventId: reactionEventId,
-            executionId,
-          })
-        }
-
-        // Stop/continue boundary: allow the Context to decide if the loop should continue.
-        // IMPORTANT: we call this after tool results have been merged into the persisted `reactionEvent`,
-        // so stories can inspect `reactionEvent.content.parts` deterministically.
-        const continueLoop = await measureBenchmark(
+        const completedStep = await measureBenchmark(
           params.__benchmark,
-          `${stagePrefix}.shouldContinueMs`,
+          `${stagePrefix}.completeExecutionStepMs`,
           async () =>
-            await story.shouldContinue({
-              env,
-              runtime: runtimeHandle,
-              context: updatedContext,
-              reactionEvent,
-              assistantEvent: assistantEventEffective,
-              actionRequests,
-              actionResults: actionResults as any,
-            }),
-        )
-
-        const finalizedReactionStatus = continueLoop === false ? "completed" : "pending"
-        const finalizedReactionEvent: ContextItem = {
-          ...reactionEvent,
-          status: finalizedReactionStatus,
-        }
-        const finalizedStep = await measureBenchmark(
-          params.__benchmark,
-          `${stagePrefix}.finalizeReactionStepMs`,
-          async () =>
-            await ops.finalizeReactionStep({
+            await ops.completeExecutionStep({
               session: currentStepStream,
               stepId: openedStep.stepId,
-              patch: {
-                status: "completed",
-              },
+              parts: finalizedStepParts,
+              actionResults: actionResults as any,
+              stepStatus: "completed",
               reactionEventId,
-              reactionEvent: finalizedReactionEvent,
+              reactionEvent: pendingReactionEvent,
               executionId,
               contextId: String(currentContext.id),
               iteration: iter,
             }),
         )
         currentStepStream = null
-        reactionEvent = finalizedStep.reactionEvent ?? finalizedReactionEvent
+        currentStepId = null
+        reactionEvent = completedStep.reactionEvent ?? pendingReactionEvent
+
+        await emitContextEvents({
+          silent,
+          writable,
+          events: completedStep.actionResultChunkEvents,
+        })
 
         await emitContextEvents({
           silent,
@@ -1945,6 +1918,35 @@ export abstract class ContextEngine<
           ],
         })
 
+        // Callback for observability/integration
+        for (const r of actionResults as any[]) {
+          await story.opts.onActionExecuted?.({
+            actionRequest: r.actionRequest,
+            success: r.success,
+            output: r.output,
+            errorText: r.errorText,
+            eventId: reactionEventId,
+            executionId,
+          })
+        }
+
+        // Stop/continue boundary: allow the Context to decide if the loop should continue.
+        // Tool results are already persisted in the completed reaction step here.
+        const continueLoop = await measureBenchmark(
+          params.__benchmark,
+          `${stagePrefix}.shouldContinueMs`,
+          async () =>
+            await story.shouldContinue({
+              env,
+              runtime: runtimeHandle,
+              context: updatedContext,
+              reactionEvent,
+              assistantEvent: assistantEventEffective,
+              actionRequests,
+              actionResults: actionResults as any,
+            }),
+        )
+
         if (continueLoop !== false) {
           await emitContextEvents({
             silent,
@@ -1963,6 +1965,10 @@ export abstract class ContextEngine<
         }
 
         if (continueLoop === false) {
+          reactionEvent = {
+            ...reactionEvent,
+            status: "completed",
+          }
           await emitContextEvents({
             silent,
             writable,
@@ -1980,7 +1986,12 @@ export abstract class ContextEngine<
           await measureBenchmark(
             params.__benchmark,
             `${stagePrefix}.completeExecutionMs`,
-            async () => await ops.completeExecution(activeContextSelector, executionId, "completed"),
+            async () =>
+              await ops.completeExecution(activeContextSelector, executionId, "completed", {
+                contextId: String(currentContext.id),
+                reactionEventId,
+                reactionEvent,
+              }),
           )
           execution = { ...execution, status: "completed" }
           updatedContext = { ...updatedContext, status: "closed" }

@@ -57,7 +57,8 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
     .context(async (stored: any, _env: Env, runtime: any) => {
       const previous = (stored?.content as any) ?? {}
       const sandboxState: SandboxState =
-        previous?.sandboxState ?? { initialized: false, filePath: "" }
+        previous?.sandboxState ??
+        params.sandboxState ?? { initialized: false, filePath: "" }
       const datasetId: string = previous?.datasetId ?? fallbackDatasetId ?? ""
       const fileId: string = previous?.fileId ?? params.fileId ?? ""
       const instructions: string =
@@ -73,28 +74,34 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
         throw new Error("dataset_sandbox_required")
       }
 
-      const initialized = await initializeFileParseSandboxStep({
-        runtime,
-        sandboxId,
-        datasetId,
-        fileId,
-        state: sandboxState,
-      })
+      const initialized =
+        sandboxState.initialized && sandboxState.filePath
+          ? { filePath: sandboxState.filePath, state: sandboxState }
+          : await initializeFileParseSandboxStep({
+              runtime,
+              sandboxId,
+              datasetId,
+              fileId,
+              state: sandboxState,
+            })
       const sandboxFilePath = initialized.filePath
 
-      let filePreview: FileParseContext["filePreview"] = undefined
-      try {
-        filePreview = await generateFileParsePreviewStep({
-          runtime,
-          sandboxId,
-          sandboxFilePath,
-          datasetId,
-        })
-      } catch {
-        // Preview is optional; parsing can still proceed from the file path.
+      let filePreview: FileParseContext["filePreview"] =
+        previous?.filePreview ?? previous?.ctx?.filePreview ?? params.filePreview
+      if (!filePreview) {
+        try {
+          filePreview = await generateFileParsePreviewStep({
+            runtime,
+            sandboxId,
+            sandboxFilePath,
+            datasetId,
+          })
+        } catch {
+          // Preview is optional; parsing can still proceed from the file path.
+        }
       }
 
-      let schema: any | null = null
+      let schema: any | null = previous?.ctx?.schema ?? previous?.schema ?? params.schema ?? null
       const datasetResult = await datasetGetByIdStep({ runtime, datasetId })
       if (datasetResult.ok && datasetResult.data.schema) {
         schema = datasetResult.data.schema
@@ -121,6 +128,7 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
         instructions,
         sandboxId,
         sandboxState: initialized.state,
+        filePreview,
         ctx,
       }
     })
@@ -203,6 +211,9 @@ export function createFileParseContext<Env extends { orgId: string }>(
     datasetId?: string
     model?: string
     reactor?: ContextReactor<any, any>
+    sandboxState?: SandboxState
+    filePreview?: FileParseContext["filePreview"]
+    schema?: any | null
   },
 ) {
   const datasetId = opts?.datasetId ?? createDatasetId()
@@ -213,6 +224,9 @@ export function createFileParseContext<Env extends { orgId: string }>(
     datasetId,
     model: opts?.model,
     reactor: opts?.reactor,
+    sandboxState: opts?.sandboxState,
+    filePreview: opts?.filePreview,
+    schema: opts?.schema,
   }
   const { context } = createFileParseContextDefinition<Env>(params)
 
@@ -249,11 +263,14 @@ export function createFileParseContext<Env extends { orgId: string }>(
           maxModelSteps: 5,
         },
         __initialContent: {
+          ...(options.initialContent ?? {}),
           datasetId,
           fileId,
           instructions: opts?.instructions ?? "",
           sandboxId: opts?.sandboxId ?? "",
-          sandboxState: { initialized: false, filePath: "" },
+          sandboxState: opts?.sandboxState ?? { initialized: false, filePath: "" },
+          filePreview: opts?.filePreview,
+          schema: opts?.schema,
         },
       })
       await awaitContextRun(shell.run)

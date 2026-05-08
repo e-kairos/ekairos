@@ -1,4 +1,4 @@
-import { getDatasetWorkstation } from "../datasetFiles.js"
+import { getDatasetScriptsDir } from "../datasetFiles.js"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
 
 export type TransformSourcePreviewContext = {
@@ -40,8 +40,7 @@ async function runPythonSnippet(
     stdout: string
     stderr: string
 }> {
-    const workstation = getDatasetWorkstation(datasetId)
-    const scriptPath = `${workstation}/${scriptName}.py`
+    const scriptPath = `${getDatasetScriptsDir(datasetId)}/${scriptName}.py`
 
     await writeDatasetSandboxFilesStep({
         runtime,

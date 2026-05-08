@@ -1,7 +1,7 @@
 import { tool } from "ai"
 import { z } from "zod"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxTextFilesStep } from "./sandbox/steps.js"
-import { getDatasetWorkstation } from "./datasetFiles.js"
+import { getDatasetScriptsDir } from "./datasetFiles.js"
 
 // To keep responses predictable for big data scenarios, we cap stdout/stderr.
 // The tool's return payload exposes stdout (capped) plus the on-disk script path.
@@ -40,10 +40,9 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
             scriptName: z.string().describe("Name for the script file in snake_case (e.g., 'inspect_file', 'parse_csv', 'generate_dataset'). A deterministic suffix will be appended automatically."),
         }),
         execute: async ({ pythonCode, scriptName }: { pythonCode: string; scriptName: string }) => {
-            const workstation = getDatasetWorkstation(datasetId)
             const normalizedScriptName = normalizeScriptName(scriptName)
             const scriptHash = stableScriptHash(`${normalizedScriptName}\0${pythonCode}`)
-            const scriptFile = `${workstation}/${normalizedScriptName}-${scriptHash}.py`
+            const scriptFile = `${getDatasetScriptsDir(datasetId)}/${normalizedScriptName}-${scriptHash}.py`
 
             console.log(`[Dataset ${datasetId}] ========================================`)
             console.log(`[Dataset ${datasetId}] Tool: executeCommand`)

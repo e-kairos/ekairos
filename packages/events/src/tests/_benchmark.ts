@@ -91,7 +91,7 @@ export function summarizeContextBenchmarkComponents(stageTimingsMs: Record<strin
     instantDbQueryMs: readMs(stageTimingsMs, "react.network.queryMs"),
     instantDbTransactMs: readMs(stageTimingsMs, "react.network.transactMs"),
     contextPersistenceMs: sumWallStages(stageTimingsMs, (name) =>
-      /(^react\.initializeContextMs$|^react\.bootstrapShellMs$|^react\.bootstrapContextLookupMs$|\.createStepMs$|\.openReactionStepMs$|\.persistContextMs$|\.loadEventsMs$|\.saveStepPartsMs$|\.appendReactorOutputMs$|\.persistAssistantReactionMs$|\.markStepRunningMs$|\.saveFinalStepPartsMs$|\.completeStepMs$|\.finalizeReactionStepMs$|\.completeReactionMs$|\.completeExecutionMs$|^react\.durable\.persistWorkflowRunIdMs$)/.test(
+      /(^react\.initializeContextMs$|^react\.openExecutionMs$|^react\.bootstrapContextLookupMs$|\.createStepMs$|\.openExecutionStepMs$|\.persistContextMs$|\.loadEventsMs$|\.saveStepPartsMs$|\.saveExecutionStepOutputMs$|\.persistAssistantReactionMs$|\.markStepRunningMs$|\.completeStepMs$|\.completeExecutionStepMs$|\.completeExecutionMs$|^react\.durable\.persistWorkflowRunIdMs$)/.test(
         name,
       ),
     ),

@@ -1,4 +1,8 @@
-import { getDatasetWorkstation } from "../datasetFiles.js"
+import {
+  getDatasetSourcesDir,
+  getDatasetStandardDirs,
+  getDatasetWorkstation,
+} from "../datasetFiles.js"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
 import { buildFileDatasetPrompt } from "./prompts.js"
 import { generateFilePreview, ensurePreviewScriptsAvailable } from "./filepreview.js"
@@ -47,12 +51,12 @@ export async function initializeFileParseSandboxStep(params: {
     runtime: params.runtime,
     sandboxId: params.sandboxId,
     cmd: "mkdir",
-    args: ["-p", workstation],
+    args: ["-p", ...getDatasetStandardDirs(params.datasetId)],
   })
 
   const fileName = file.contentDisposition ?? ""
   const fileExtension = fileName.includes(".") ? fileName.substring(fileName.lastIndexOf(".")) : ""
-  const sandboxFilePath = `${workstation}/${params.fileId}${fileExtension}`
+  const sandboxFilePath = `${getDatasetSourcesDir(params.datasetId)}/${params.fileId}${fileExtension}`
 
   await writeDatasetSandboxFilesStep({
     runtime: params.runtime,

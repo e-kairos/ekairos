@@ -9,7 +9,7 @@ import { configureRuntime, EkairosRuntime } from "@ekairos/domain/runtime"
 import { createScriptedReactor, eventsDomain } from "@ekairos/events"
 import { sandboxDomain, SandboxService } from "@ekairos/sandbox"
 import { dataset } from "../dataset"
-import { getDatasetOutputPath, getDatasetWorkstation } from "../datasetFiles"
+import { getDatasetOutputPath, getDatasetSourcesDir } from "../datasetFiles"
 import { datasetDomain } from "../schema"
 import { describeInstant, hasInstantAdmin, setupInstantTestEnv } from "./_env"
 import { attachMockInstantStreams } from "./_streams"
@@ -258,7 +258,7 @@ describeInstant("dataset() builder direct API", () => {
               scriptName: "summarize_query_source",
               pythonCode: [
                 "import json",
-                `source_path = ${JSON.stringify(`${getDatasetWorkstation("query_summary_v1")}/source_query_summary_v1__query_0.jsonl`)}`,
+                `source_path = ${JSON.stringify(`${getDatasetSourcesDir("query_summary_v1")}/source_query_summary_v1__query_0.jsonl`)}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("query_summary_v1"))}`,
                 "count = 0",
                 "total = 0.0",
@@ -339,9 +339,9 @@ describeInstant("dataset() builder direct API", () => {
               scriptName: "parse_csv_rows",
               pythonCode: [
                 "import csv, glob, json",
-                `workstation = ${JSON.stringify(getDatasetWorkstation("file_products_v1"))}`,
+                `sources_dir = ${JSON.stringify(getDatasetSourcesDir("file_products_v1"))}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("file_products_v1"))}`,
-                "csv_path = glob.glob(workstation + '/*.csv')[0]",
+                "csv_path = glob.glob(sources_dir + '/*.csv')[0]",
                 "with open(csv_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
                 "  reader = csv.DictReader(src)",
                 "  for row in reader:",
@@ -414,9 +414,9 @@ describeInstant("dataset() builder direct API", () => {
             scriptName: "parse_text_csv",
             pythonCode: [
               "import csv, glob, json",
-              `workstation = ${JSON.stringify(getDatasetWorkstation("text_products_v1"))}`,
+              `sources_dir = ${JSON.stringify(getDatasetSourcesDir("text_products_v1"))}`,
               `output_path = ${JSON.stringify(getDatasetOutputPath("text_products_v1"))}`,
-              "source_path = glob.glob(workstation + '/*')[0]",
+              "source_path = glob.glob(sources_dir + '/*')[0]",
               "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
               "  reader = csv.DictReader(src)",
               "  for row in reader:",
@@ -468,7 +468,7 @@ describeInstant("dataset() builder direct API", () => {
               scriptName: "derive_dataset",
               pythonCode: [
                 "import json",
-                `source_path = ${JSON.stringify(`${getDatasetWorkstation("derived_dataset_v1")}/source_${source.datasetId}.jsonl`)}`,
+                `source_path = ${JSON.stringify(`${getDatasetSourcesDir("derived_dataset_v1")}/source_${source.datasetId}.jsonl`)}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("derived_dataset_v1"))}`,
                 "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
                 "  for line in src:",
@@ -526,8 +526,8 @@ describeInstant("dataset() builder direct API", () => {
             scriptName: "combine_text_sources",
             pythonCode: [
               "import json",
-              `items_path = ${JSON.stringify(`${getDatasetWorkstation("combined_text_sources_v1")}/source_combined_text_sources_v1__text_0.jsonl`)}`,
-              `criteria_path = ${JSON.stringify(`${getDatasetWorkstation("combined_text_sources_v1")}/source_combined_text_sources_v1__text_1.jsonl`)}`,
+              `items_path = ${JSON.stringify(`${getDatasetSourcesDir("combined_text_sources_v1")}/source_combined_text_sources_v1__text_0.jsonl`)}`,
+              `criteria_path = ${JSON.stringify(`${getDatasetSourcesDir("combined_text_sources_v1")}/source_combined_text_sources_v1__text_1.jsonl`)}`,
               `output_path = ${JSON.stringify(getDatasetOutputPath("combined_text_sources_v1"))}`,
               "def read_rows(path):",
               "  rows = []",
@@ -614,8 +614,8 @@ describeInstant("dataset() builder direct API", () => {
               scriptName: "combine_dataset_query",
               pythonCode: [
                 "import json",
-                `items_path = ${JSON.stringify(`${getDatasetWorkstation("combined_target_v1")}/source_${sourceDataset.datasetId}.jsonl`)}`,
-                `rates_path = ${JSON.stringify(`${getDatasetWorkstation("combined_target_v1")}/source_combined_target_v1__query_1.jsonl`)}`,
+                `items_path = ${JSON.stringify(`${getDatasetSourcesDir("combined_target_v1")}/source_${sourceDataset.datasetId}.jsonl`)}`,
+                `rates_path = ${JSON.stringify(`${getDatasetSourcesDir("combined_target_v1")}/source_combined_target_v1__query_1.jsonl`)}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("combined_target_v1"))}`,
                 "rates = {}",
                 "with open(rates_path, 'r', encoding='utf-8') as src:",
@@ -825,7 +825,7 @@ describeInstant("dataset() builder direct API", () => {
               scriptName: "copy_source_dataset",
               pythonCode: [
                 "import json",
-                `source_path = ${JSON.stringify(`${getDatasetWorkstation("target_output_v1")}/source_${source.datasetId}.jsonl`)}`,
+                `source_path = ${JSON.stringify(`${getDatasetSourcesDir("target_output_v1")}/source_${source.datasetId}.jsonl`)}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("target_output_v1"))}`,
                 "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
                 "  out.write(src.read())",

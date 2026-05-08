@@ -185,3 +185,36 @@ export async function finalizeBuildResult<Runtime extends AnyDatasetRuntime>(
     firstRow: firstResult.row,
   }
 }
+
+export function createDatasetBuildResult<Runtime extends AnyDatasetRuntime>(
+  runtime: Runtime,
+  params: {
+    datasetId: string
+    dataset: any
+    previewRows: any[]
+    firstRow?: any | null
+  },
+): DatasetBuildResult {
+  const reader: DatasetReader = {
+    async read(cursorOrParams?: number | { cursor?: number; limit?: number }, limit?: number) {
+      const readParams =
+        typeof cursorOrParams === "object" && cursorOrParams !== null
+          ? cursorOrParams
+          : { cursor: cursorOrParams as number | undefined, limit }
+      return await datasetReadRowsStep({
+        runtime,
+        datasetId: params.datasetId,
+        cursor: readParams.cursor,
+        limit: readParams.limit,
+      })
+    },
+  }
+
+  return {
+    datasetId: params.datasetId,
+    dataset: params.dataset,
+    previewRows: params.previewRows,
+    reader,
+    ...(params.firstRow !== undefined ? { firstRow: params.firstRow } : {}),
+  }
+}

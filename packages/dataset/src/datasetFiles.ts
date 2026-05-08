@@ -23,6 +23,32 @@ export function getDatasetWorkstation(datasetId: string): string {
   return `${getDatasetWorkdirBase()}/${datasetId}`
 }
 
+export function getDatasetSourcesDir(datasetId: string): string {
+  return `${getDatasetWorkstation(datasetId)}/sources`
+}
+
+export function getDatasetScriptsDir(datasetId: string): string {
+  return `${getDatasetWorkstation(datasetId)}/scripts`
+}
+
+export function getDatasetArtifactsDir(datasetId: string): string {
+  return `${getDatasetWorkstation(datasetId)}/artifacts`
+}
+
+export function getDatasetLogsDir(datasetId: string): string {
+  return `${getDatasetWorkstation(datasetId)}/logs`
+}
+
+export function getDatasetStandardDirs(datasetId: string): string[] {
+  return [
+    getDatasetWorkstation(datasetId),
+    getDatasetSourcesDir(datasetId),
+    getDatasetScriptsDir(datasetId),
+    getDatasetArtifactsDir(datasetId),
+    getDatasetLogsDir(datasetId),
+  ]
+}
+
 export function getDatasetOutputPath(datasetId: string): string {
   return `${getDatasetWorkstation(datasetId)}/${DATASET_OUTPUT_FILE_NAME}`
 }

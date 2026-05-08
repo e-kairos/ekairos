@@ -5,11 +5,15 @@ import type { ValidQuery } from "@instantdb/core"
 import { buildObjectOutputInstructions } from "./builder/instructions.js"
 import { createDatasetId } from "./id.js"
 import {
+  completeDatasetStep,
   materializeDerivedDataset,
   materializeSingleFileLikeSource,
 } from "./builder/materialize.js"
 import { materializeQuerySource } from "./builder/materializeQuery.js"
-import { finalizeBuildResult } from "./builder/persistence.js"
+import {
+  createDatasetBuildResult,
+  finalizeBuildResult,
+} from "./builder/persistence.js"
 import type {
   AnyDatasetRuntime,
   CompatibleSourceDomain,
@@ -220,8 +224,14 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
           onlySource as any,
           targetDatasetId,
         )
+        const completed = await completeDatasetStep({
+          runtime: effectiveState.runtime,
+          datasetId: targetDatasetId,
+          schema: effectiveState.outputSchema,
+          first: effectiveState.first,
+        })
         return finalizeOutputResult(
-          await finalizeBuildResult(effectiveState.runtime, targetDatasetId, effectiveState.first),
+          createDatasetBuildResult(effectiveState.runtime, completed),
           effectiveState.output,
         )
       }
@@ -230,8 +240,14 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
         throw new Error("dataset_reactor_required")
       }
       await materializeDerivedDataset(effectiveState, targetDatasetId)
+      const completed = await completeDatasetStep({
+        runtime: effectiveState.runtime,
+        datasetId: targetDatasetId,
+        schema: effectiveState.outputSchema,
+        first: effectiveState.first,
+      })
       return finalizeOutputResult(
-        await finalizeBuildResult(effectiveState.runtime, targetDatasetId, effectiveState.first),
+        createDatasetBuildResult(effectiveState.runtime, completed),
         effectiveState.output,
       )
     },

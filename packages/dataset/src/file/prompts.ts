@@ -123,6 +123,7 @@ function buildErrorsSection(errors: string[]): any | null {
 
     let xml = create()
         .ele("PreviousErrors")
+        .ele("Instruction").txt("Treat these as repair feedback from the previous validation attempt. Rewrite output.jsonl from the schema contract; do not patch source column names into schema keys piecemeal.").up()
 
     for (const error of errors) {
         xml = xml.ele("Error").txt(error).up()
@@ -156,17 +157,140 @@ function buildContextSection(context: FileParseContext): string {
     return xml.end({ prettyPrint: true, headless: true })
 }
 
+type SchemaContract = {
+    requiredPaths: string[]
+    propertyPaths: string[]
+    enumConstraints: Array<{ path: string; values: string[] }>
+    closedObjectPaths: string[]
+}
+
+function asRecord(value: unknown): Record<string, any> | null {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, any>
+        : null
+}
+
+function getSchemaObject(context: FileParseContext): Record<string, any> | null {
+    return asRecord(context.schema?.schema)
+}
+
+function joinSchemaPath(basePath: string, key: string): string {
+    return basePath === "$" ? `$.${key}` : `${basePath}.${key}`
+}
+
+function collectSchemaContract(schema: unknown, path = "$", contract: SchemaContract = {
+    requiredPaths: [],
+    propertyPaths: [],
+    enumConstraints: [],
+    closedObjectPaths: [],
+}): SchemaContract {
+    const record = asRecord(schema)
+    if (!record) {
+        return contract
+    }
+
+    if (Array.isArray(record.enum)) {
+        contract.enumConstraints.push({
+            path,
+            values: record.enum.map((value) => JSON.stringify(value)),
+        })
+    }
+
+    const properties = asRecord(record.properties)
+    if (properties) {
+        if (record.additionalProperties === false) {
+            contract.closedObjectPaths.push(path)
+        }
+
+        const required = Array.isArray(record.required)
+            ? record.required.filter((value): value is string => typeof value === "string")
+            : []
+        for (const key of required) {
+            contract.requiredPaths.push(joinSchemaPath(path, key))
+        }
+
+        for (const [key, childSchema] of Object.entries(properties)) {
+            const childPath = joinSchemaPath(path, key)
+            contract.propertyPaths.push(childPath)
+            collectSchemaContract(childSchema, childPath, contract)
+        }
+    }
+
+    if (record.items) {
+        collectSchemaContract(record.items, `${path}[]`, contract)
+    }
+
+    for (const keyword of ["oneOf", "anyOf", "allOf"] as const) {
+        if (Array.isArray(record[keyword])) {
+            for (const childSchema of record[keyword]) {
+                collectSchemaContract(childSchema, path, contract)
+            }
+        }
+    }
+
+    return contract
+}
+
+function appendLimitedList(
+    xml: any,
+    elementName: string,
+    itemName: string,
+    values: string[],
+    maxItems: number,
+): any {
+    let node = xml.ele(elementName)
+    for (const value of values.slice(0, maxItems)) {
+        node = node.ele(itemName).txt(value).up()
+    }
+    if (values.length > maxItems) {
+        node = node.ele("Truncated").txt(String(values.length - maxItems)).up()
+    }
+    return node.up()
+}
+
 function buildSchemaSection(context: FileParseContext): string {
-    if (!context.schema) {
+    const schema = getSchemaObject(context)
+    if (!context.schema || !schema) {
         return ""
     }
 
+    const contract = collectSchemaContract(schema)
     let xml = create()
         .com("Schema section: This defines the structure of ONE RECORD (row). Each line in the JSONL output must conform to this schema.")
         .ele("Schema")
         .ele("Title").txt(context.schema.title || "").up()
         .ele("Description").txt(context.schema.description || "").up()
-        .ele("JsonSchema").txt(JSON.stringify(context.schema.schema, null, 2)).up()
+
+    xml = xml
+        .ele("SchemaContract")
+        .ele("Purpose").txt("Compact output contract derived from JSON Schema. Use this before writing output.jsonl.").up()
+        .ele("Rule").txt("Use only schema property keys in data objects. Source headers are input labels, not output keys.").up()
+        .ele("Rule").txt("Required paths are required everywhere, including nested objects and array items.").up()
+        .ele("Rule").txt("Enum fields must use exactly one of the listed literal values. Normalize source labels to the closest valid enum literal; never emit a value outside the enum.").up()
+
+    xml = appendLimitedList(xml, "RequiredPaths", "Path", contract.requiredPaths, 120)
+    xml = appendLimitedList(xml, "PropertyPaths", "Path", contract.propertyPaths, 160)
+
+    let enumsXml = xml.ele("EnumConstraints")
+    for (const constraint of contract.enumConstraints.slice(0, 80)) {
+        let enumXml = enumsXml.ele("Enum", { path: constraint.path })
+        for (const value of constraint.values.slice(0, 80)) {
+            enumXml = enumXml.ele("Value").txt(value).up()
+        }
+        if (constraint.values.length > 80) {
+            enumXml = enumXml.ele("Truncated").txt(String(constraint.values.length - 80)).up()
+        }
+        enumsXml = enumXml.up()
+    }
+    if (contract.enumConstraints.length > 80) {
+        enumsXml = enumsXml.ele("Truncated").txt(String(contract.enumConstraints.length - 80)).up()
+    }
+    xml = enumsXml.up()
+    xml = appendLimitedList(xml, "ClosedObjectPaths", "Path", contract.closedObjectPaths, 80)
+
+    xml = xml
+        .up()
+        .ele("JsonSchema").txt(JSON.stringify(schema, null, 2)).up()
         .up()
 
     return xml.end({ prettyPrint: true, headless: true })
@@ -194,6 +318,9 @@ function buildInstructions(context: FileParseContext): string {
             .ele("Requirements")
             .ele("Requirement").txt("Every output row must conform exactly to the provided schema").up()
             .ele("Requirement").txt("Every data object MUST use the exact property names from the provided JSON Schema required/properties keys").up()
+            .ele("Requirement").txt("Build a schema-first mapping from source columns to schema fields before writing output.jsonl. Do not use raw source headers as JSON keys unless they are exactly schema keys").up()
+            .ele("Requirement").txt("For nested required fields, populate the required child keys inside each nested object or array item; top-level validity is not enough").up()
+            .ele("Requirement").txt("For enum fields, emit exactly one allowed enum literal from SchemaContract; normalize labels or abbreviations into allowed literals").up()
             .ele("Requirement").txt("Do not translate, localize, rename, camelize differently, or infer alternative field names. Field names are a technical contract; only field values may preserve the source language").up()
             .ele("Requirement").txt("Do not call generateSchema when a schema is already provided").up()
             .up()
@@ -219,6 +346,7 @@ function buildInstructions(context: FileParseContext): string {
         .ele("Requirement").txt("Parse ALL data rows/records from the file (exclude header sections and metadata)").up()
         .ele("Requirement").txt("Output JSONL format: each line is {\"type\": \"row\", \"data\": {...record...}}").up()
         .ele("Requirement").txt("When a schema is provided, each data object must contain the exact required schema keys and must not use translated or synonymous keys").up()
+        .ele("Requirement").txt("When validation returns zero valid rows, treat the previous output as structurally wrong and rewrite output.jsonl from the SchemaContract, not by applying small patches").up()
         .ele("Requirement").txt("Extract ONLY data records; skip any header lines, summary sections, or file metadata").up()
         .ele("Requirement").txt(`Save output to: ${outputPath}`).up()
         .ele("Requirement").txt("Use descriptive scriptName in snake_case (e.g., 'parse_csv_to_jsonl')").up()
@@ -256,6 +384,11 @@ export function buildFileDatasetPrompt(context: FileParseContext): string {
     sections.push("")
     sections.push(buildContextSection(context))
     sections.push("")
+    const schemaSection = buildSchemaSection(context)
+    if (schemaSection) {
+        sections.push(schemaSection)
+        sections.push("")
+    }
     sections.push(buildInstructions(context))
 
     return sections.join("\n")
