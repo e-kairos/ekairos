@@ -1,21 +1,9 @@
-import { existsSync } from "node:fs"
-
 import { describe, expect, it } from "vitest"
 
-import {
-  getEmbeddedFilePreviewScriptBase64,
-  resolveFilePreviewScriptPath,
-} from "../file/filepreview"
+import { getEmbeddedFilePreviewScriptBase64 } from "../file/filepreview"
 
-describe("file preview script resolution", () => {
-  it("resolves packaged Python preview scripts without CommonJS require", () => {
-    const scriptPath = resolveFilePreviewScriptPath("file_metadata.py")
-
-    expect(scriptPath).toContain("file_metadata.py")
-    expect(existsSync(scriptPath)).toBe(true)
-  })
-
-  it("embeds Python preview scripts for traced serverless bundles", () => {
+describe("file preview scripts", () => {
+  it("embeds Python preview scripts for inline sandbox execution", () => {
     const content = Buffer.from(
       getEmbeddedFilePreviewScriptBase64("file_metadata.py"),
       "base64",

@@ -5,7 +5,7 @@ import {
 } from "../datasetFiles.js"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
 import { buildFileDatasetPrompt } from "./prompts.js"
-import { generateFilePreview, ensurePreviewScriptsAvailable } from "./filepreview.js"
+import { generateFilePreview } from "./filepreview.js"
 import { readInstantFileStep } from "./steps.js"
 import type { FileParseContext, SandboxState } from "./file-dataset.types.js"
 import type { FilePreviewContext } from "./filepreview.types.js"
@@ -23,23 +23,7 @@ export async function initializeFileParseSandboxStep(params: {
     return { filePath: params.state.filePath, state: params.state }
   }
 
-  console.log(`[FileParseContext ${params.datasetId}] Initializing sandbox...`)
-
-  await ensurePreviewScriptsAvailable(params.runtime, params.sandboxId)
-
-  console.log(`[FileParseContext ${params.datasetId}] Installing Python dependencies...`)
-
-  const pipInstall = await runDatasetSandboxCommandStep({
-    runtime: params.runtime,
-    sandboxId: params.sandboxId,
-    cmd: "python",
-    args: ["-m", "pip", "install", "pandas", "openpyxl", "--quiet", "--upgrade"],
-  })
-  const installStderr = pipInstall.stderr
-
-  if (installStderr && (installStderr.includes("ERROR") || installStderr.includes("FAILED"))) {
-    throw new Error(`pip install failed: ${installStderr.substring(0, 300)}`)
-  }
+  console.log(`[FileParseContext ${params.datasetId}] Preparing source file in sandbox...`)
 
   console.log(`[FileParseContext ${params.datasetId}] Fetching file from InstantDB...`)
   const file = await readInstantFileStep({ runtime: params.runtime, fileId: params.fileId })

@@ -1,5 +1,4 @@
-import { getDatasetScriptsDir } from "../datasetFiles.js"
-import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
+import { runDatasetSandboxCommandStep } from "../sandbox/steps.js"
 
 export type TransformSourcePreviewContext = {
     totalRows: number
@@ -40,24 +39,11 @@ async function runPythonSnippet(
     stdout: string
     stderr: string
 }> {
-    const scriptPath = `${getDatasetScriptsDir(datasetId)}/${scriptName}.py`
-
-    await writeDatasetSandboxFilesStep({
-        runtime,
-        sandboxId,
-        files: [
-            {
-                path: scriptPath,
-                contentBase64: Buffer.from(code, "utf-8").toString("base64"),
-            },
-        ],
-    })
-
     const result = await runDatasetSandboxCommandStep({
         runtime,
         sandboxId,
         cmd: "python",
-        args: [scriptPath, ...args],
+        args: ["-c", code, ...args],
     })
 
     const stdout = result.stdout || ""
@@ -66,7 +52,7 @@ async function runPythonSnippet(
     return {
         description,
         script: code,
-        command: `python ${scriptPath} ${args.join(" ")}`,
+        command: `python -c <${scriptName}.py> ${args.join(" ")}`,
         stdout,
         stderr,
     }

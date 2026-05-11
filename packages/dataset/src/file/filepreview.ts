@@ -1,7 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
-import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
+import { runDatasetSandboxCommandStep } from "../sandbox/steps.js"
 import type { FilePreviewContext } from "./filepreview.types.js"
 import { PYTHON_SCRIPT_BASE64_BY_NAME } from "./scripts.generated.js"
 
@@ -17,42 +14,6 @@ const DEFAULT_HEAD_LINES = 50
 const DEFAULT_TAIL_LINES = 20
 const DEFAULT_MID_LINES = 20
 
-const SANDBOX_SCRIPT_DIRECTORY = "/tmp/ekairos/dataset/file/scripts"
-
-const PYTHON_SCRIPT_FILES = [
-    "file_metadata.py",
-    "preview_head_csv.py",
-    "preview_head_excel.py",
-    "preview_mid_csv.py",
-    "preview_mid_excel.py",
-    "preview_tail_csv.py",
-    "preview_tail_excel.py",
-]
-
-export function resolveFilePreviewScriptPath(scriptName: string): string {
-    const currentDir = dirname(fileURLToPath(import.meta.url))
-    const taskRoot = String(process.env.LAMBDA_TASK_ROOT ?? "").trim()
-    const candidates = [
-        join(currentDir, "scripts", scriptName),
-        join(process.cwd(), "node_modules", "@ekairos", "dataset", "dist", "file", "scripts", scriptName),
-        taskRoot
-            ? join(taskRoot, "node_modules", "@ekairos", "dataset", "dist", "file", "scripts", scriptName)
-            : "",
-        join(process.cwd(), "packages", "dataset", "dist", "file", "scripts", scriptName),
-        join(process.cwd(), "packages", "dataset", "src", "file", "scripts", scriptName),
-    ].filter(Boolean)
-
-    for (const candidate of candidates) {
-        if (existsSync(candidate)) {
-            return candidate
-        }
-    }
-
-    throw new Error(
-        `dataset_preview_script_not_found:${scriptName}; searched=${candidates.join(",")}`,
-    )
-}
-
 export function getEmbeddedFilePreviewScriptBase64(scriptName: string): string {
     const embedded = PYTHON_SCRIPT_BASE64_BY_NAME[scriptName]
 
@@ -63,33 +24,9 @@ export function getEmbeddedFilePreviewScriptBase64(scriptName: string): string {
     return embedded
 }
 
-function readFilePreviewScriptBase64(scriptName: string): string {
-    try {
-        const scriptPath = resolveFilePreviewScriptPath(scriptName)
-        return Buffer.from(readFileSync(scriptPath)).toString("base64")
-    }
-    catch (error) {
-        try {
-            return getEmbeddedFilePreviewScriptBase64(scriptName)
-        }
-        catch {
-            throw error
-        }
-    }
-}
-
 function readFilePreviewScriptText(scriptName: string): string {
-    try {
-        const scriptPath = resolveFilePreviewScriptPath(scriptName)
-        return readFileSync(scriptPath, "utf-8")
-    }
-    catch {
-        return Buffer.from(getEmbeddedFilePreviewScriptBase64(scriptName), "base64").toString("utf-8")
-    }
+    return Buffer.from(getEmbeddedFilePreviewScriptBase64(scriptName), "base64").toString("utf-8")
 }
-
-const preparedSandboxIds = new Set<string>()
-const sandboxSetupPromises = new Map<string, Promise<void>>()
 
 type PreviewKind = "excel" | "text"
 
@@ -135,64 +72,8 @@ function validateScriptResult(result: { stderr: string; stdout: string }, contex
     }
 }
 
-export async function ensurePreviewScriptsAvailable(runtime: any, sandboxId: string): Promise<void> {
-    if (preparedSandboxIds.has(sandboxId)) {
-        return
-    }
-
-    const inFlight = sandboxSetupPromises.get(sandboxId)
-    if (inFlight) {
-        await inFlight
-        return
-    }
-
-    const setupPromise = (async () => {
-        try {
-            await runDatasetSandboxCommandStep({
-                runtime,
-                sandboxId,
-                cmd: "mkdir",
-                args: ["-p", SANDBOX_SCRIPT_DIRECTORY],
-            })
-        }
-        catch (error) {
-            console.warn("[Dataset Scripts] Failed to create sandbox scripts directory", error)
-        }
-
-        const filesToWrite = [] as { path: string; contentBase64: string }[]
-
-        for (const scriptName of PYTHON_SCRIPT_FILES) {
-            try {
-                filesToWrite.push({
-                    path: `${SANDBOX_SCRIPT_DIRECTORY}/${scriptName}`,
-                    contentBase64: readFilePreviewScriptBase64(scriptName),
-                })
-            }
-            catch (error) {
-                console.error(`[Dataset Scripts] Failed to read script ${scriptName}`, error)
-                throw error
-            }
-        }
-
-        if (filesToWrite.length > 0) {
-            await writeDatasetSandboxFilesStep({
-                runtime,
-                sandboxId,
-                files: filesToWrite,
-            })
-        }
-    })()
-
-    sandboxSetupPromises.set(sandboxId, setupPromise)
-
-    try {
-        await setupPromise
-        preparedSandboxIds.add(sandboxId)
-    }
-    catch (error) {
-        sandboxSetupPromises.delete(sandboxId)
-        throw error
-    }
+export async function ensurePreviewScriptsAvailable(_runtime: any, _sandboxId: string): Promise<void> {
+    return
 }
 
 export async function generateFilePreview(
@@ -207,8 +88,6 @@ export async function generateFilePreview(
     }
 
     try {
-        await ensurePreviewScriptsAvailable(runtime, sandboxId)
-
         const metadataResult = await runScript(
             runtime,
             sandboxId,
@@ -216,6 +95,7 @@ export async function generateFilePreview(
             [sandboxFilePath],
             "Extracts file metadata: name, extension, size, row count estimate, column count, and header preview"
         )
+        validateScriptResult(metadataResult, `preview_metadata for ${datasetId}`)
         context.metadata = metadataResult
 
         let previewKind: PreviewKind | null = null
@@ -319,6 +199,7 @@ export async function generateFilePreview(
     }
     catch (error) {
         console.error(`[Dataset ${datasetId}] Error generating file preview:`, error)
+        throw error
     }
 
     return context
@@ -337,24 +218,15 @@ async function runScript(
     stdout: string
     stderr: string
 }> {
-    const scriptPath = `${SANDBOX_SCRIPT_DIRECTORY}/${scriptName}`
-    const command = `python ${scriptPath} ${args.join(" ")}`
-
-    let scriptContent = ""
-
-    try {
-        scriptContent = readFilePreviewScriptText(scriptName)
-    }
-    catch (error) {
-        console.warn(`Failed to read script ${scriptName}:`, error)
-    }
+    const scriptContent = readFilePreviewScriptText(scriptName)
+    const command = `python -c <${scriptName}> ${args.join(" ")}`
 
     try {
         const result = await runDatasetSandboxCommandStep({
             runtime,
             sandboxId,
             cmd: "python",
-            args: [scriptPath, ...args],
+            args: ["-c", scriptContent, ...args],
         })
 
         return {
