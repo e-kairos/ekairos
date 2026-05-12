@@ -82,7 +82,7 @@ const TEMPLATE_REACT_VERSION = "19.2.1"
 const TEMPLATE_TYPESCRIPT_VERSION = "^5.9.2"
 const TEMPLATE_INSTANT_VERSION = "0.22.126"
 const TEMPLATE_INSTANT_REACT_VERSION = "0.22.126"
-const TEMPLATE_WORKFLOW_VERSION = "^5.0.0-beta.1"
+const TEMPLATE_WORKFLOW_VERSION = "^5.0.0-beta.5"
 
 function trimOrEmpty(value: unknown) {
   return typeof value === "string" ? value.trim() : ""

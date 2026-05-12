@@ -61,7 +61,7 @@
     "@instantdb/core": "*",
     "@playwright/test": "*",
     "vitest": "*",
-    "workflow": "5.0.0-beta.1"
+    "workflow": "5.0.0-beta.5"
   },
   "dependencies": {
     "@instantdb/core": "0.22.126",

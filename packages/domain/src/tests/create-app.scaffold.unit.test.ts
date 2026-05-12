@@ -59,7 +59,7 @@ describe("create-app scaffold generation", () => {
     expect(events.some((event) => event.stage === "complete" && event.status === "completed" && event.progress === 100)).toBe(true);
     expect(packageJson).toContain('"next"');
     expect(packageJson).toContain('"@instantdb/react"');
-    expect(packageJson).toContain('"workflow": "^5.0.0-beta.1"');
+    expect(packageJson).toContain('"workflow": "^5.0.0-beta.5"');
     expect(packageJson).not.toContain("@workflow/world-local");
     expect(domainFile).toContain('domain("app")');
     expect(domainFile).toContain(".withSchema({");

@@ -84,14 +84,14 @@
     "@instantdb/admin": "0.22.158",
     "@instantdb/core": "0.22.158",
     "@vercel/sandbox": "2.0.0-beta.13",
-    "@workflow/serde": "5.0.0-beta.0",
-    "workflow": "5.0.0-beta.1",
+    "@workflow/serde": "5.0.0-beta.1",
+    "workflow": "5.0.0-beta.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@ekairos/tsconfig": "workspace:*",
     "@types/node": "^24.5.0",
-    "@workflow/vitest": "5.0.0-beta.1",
+    "@workflow/vitest": "5.0.0-beta.5",
     "typescript": "^5.9.2"
   }
 }
