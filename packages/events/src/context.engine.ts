@@ -1412,6 +1412,13 @@ export abstract class ContextEngine<
     try {
       for (let iter = 0; iter < maxIterations; iter++) {
         const stagePrefix = `react.iteration.${iter}`
+        ;(runtimeHandle as any).__ekairosContextRun = {
+          contextId: currentContext.id,
+          executionId,
+          triggerEventId,
+          reactionEventId,
+          iteration: iter,
+        }
 
         // Hook: Context DSL `context()` (implemented by subclasses via `initialize()`)
         const nextContent = await measureBenchmark(

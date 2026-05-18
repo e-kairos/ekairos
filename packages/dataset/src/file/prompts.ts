@@ -297,8 +297,10 @@ function buildSchemaSection(context: FileParseContext): string {
 }
 
 function buildInstructions(context: FileParseContext): string {
-    const datasetWorkstation = getDatasetWorkstation(context.datasetId)
-    const outputPath = getDatasetOutputPath(context.datasetId)
+    const datasetWorkstation = context.sandboxConfig.scriptsDir
+        ? context.sandboxConfig.scriptsDir.replace(/\/scripts$/, "")
+        : getDatasetWorkstation(context.datasetId)
+    const outputPath = context.sandboxConfig.outputPath ?? getDatasetOutputPath(context.datasetId)
     const hasProvidedSchema = Boolean(context.schema?.schema)
     const currentTask = hasProvidedSchema
         ? "Review FilePreview section, use the provided schema as the output contract, then parse the file and generate the dataset"

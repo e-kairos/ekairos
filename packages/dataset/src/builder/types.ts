@@ -15,6 +15,8 @@ export type DatasetQuerySourceInput<D extends DomainSchemaResult = DomainSchemaR
 export type DatasetFileSourceInput = {
   fileId: string
   description?: string
+  filename?: string
+  mediaType?: string
 }
 
 export type DatasetTextSourceInput = {

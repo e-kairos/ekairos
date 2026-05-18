@@ -2,6 +2,7 @@ import { tool } from "ai"
 import { z } from "zod"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxTextFilesStep } from "./sandbox/steps.js"
 import { getDatasetScriptsDir } from "./datasetFiles.js"
+import { getContextExecutionWorkspaceDirs } from "./contextWorkspace.js"
 
 // To keep responses predictable for big data scenarios, we cap stdout/stderr.
 // The tool's return payload exposes stdout (capped) plus the on-disk script path.
@@ -39,10 +40,19 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
             pythonCode: z.string().describe("Python code to execute. Saved to a file before running. MANDATORY: Use print() to report progress and final results. Keep prints concise; avoid dumping rows/JSON. For large outputs, write to files in the workstation directory and print only file paths and brief summaries."),
             scriptName: z.string().describe("Name for the script file in snake_case (e.g., 'inspect_file', 'parse_csv', 'generate_dataset'). A deterministic suffix will be appended automatically."),
         }),
-        execute: async ({ pythonCode, scriptName }: { pythonCode: string; scriptName: string }) => {
+        execute: (async (
+            { pythonCode, scriptName }: { pythonCode: string; scriptName: string },
+            actionContext?: { contextId?: string; executionId?: string },
+        ) => {
             const normalizedScriptName = normalizeScriptName(scriptName)
             const scriptHash = stableScriptHash(`${normalizedScriptName}\0${pythonCode}`)
-            const scriptFile = `${getDatasetScriptsDir(datasetId)}/${normalizedScriptName}-${scriptHash}.py`
+            const scriptsDir = actionContext?.contextId && actionContext.executionId
+                ? getContextExecutionWorkspaceDirs({
+                    contextId: actionContext.contextId,
+                    executionId: actionContext.executionId,
+                }).scriptsDir
+                : getDatasetScriptsDir(datasetId)
+            const scriptFile = `${scriptsDir}/${normalizedScriptName}-${scriptHash}.py`
 
             console.log(`[Dataset ${datasetId}] ========================================`)
             console.log(`[Dataset ${datasetId}] Tool: executeCommand`)
@@ -193,7 +203,7 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
                     stderrOriginalLength: 0,
                 }
             }
-        },
+        }) as any,
     })
 }
 

@@ -16,7 +16,6 @@ import { createExecuteCommandTool } from "../executeCommand.tool.js"
 import { createGenerateSchemaTool } from "./generateSchema.tool.js"
 import {
   buildFileDatasetPromptStep,
-  generateFileParsePreviewStep,
   initializeFileParseSandboxStep,
 } from "./file-dataset.steps.js"
 import { createDatasetId } from "../id.js"
@@ -64,6 +63,18 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
       const instructions: string =
         previous?.instructions ?? params.instructions ?? ""
       const sandboxId: string = previous?.sandboxId ?? params.sandboxId ?? ""
+      const contextRun = (runtime as any)?.__ekairosContextRun ?? {}
+      const contextId: string = String(contextRun.contextId ?? stored?.id ?? "").trim()
+      const executionId: string = String(contextRun.executionId ?? previous?.executionId ?? "").trim()
+      const sourceEventId: string = String(
+        previous?.sourceEventId ?? params.sourceEventId ?? "",
+      ).trim()
+      const sourcePartIndex: number =
+        typeof previous?.sourcePartIndex === "number"
+          ? previous.sourcePartIndex
+          : typeof params.sourcePartIndex === "number"
+            ? params.sourcePartIndex
+            : 0
       if (!datasetId) {
         throw new Error("dataset_id_required")
       }
@@ -73,6 +84,12 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
       if (!sandboxId) {
         throw new Error("dataset_sandbox_required")
       }
+      if (!contextId) {
+        throw new Error("dataset_context_id_required")
+      }
+      if (!executionId) {
+        throw new Error("dataset_execution_id_required")
+      }
 
       const initialized =
         sandboxState.initialized && sandboxState.filePath
@@ -80,26 +97,20 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
           : await initializeFileParseSandboxStep({
               runtime,
               sandboxId,
+              contextId,
+              executionId,
               datasetId,
               fileId,
+              sourceEventId,
+              sourcePartIndex,
+              filename: previous?.filename ?? params.filename,
+              mediaType: previous?.mediaType ?? params.mediaType,
               state: sandboxState,
             })
       const sandboxFilePath = initialized.filePath
 
       let filePreview: FileParseContext["filePreview"] =
         previous?.filePreview ?? previous?.ctx?.filePreview ?? params.filePreview
-      if (!filePreview) {
-        try {
-          filePreview = await generateFileParsePreviewStep({
-            runtime,
-            sandboxId,
-            sandboxFilePath,
-            datasetId,
-          })
-        } catch {
-          // Preview is optional; parsing can still proceed from the file path.
-        }
-      }
 
       let schema: any | null = previous?.ctx?.schema ?? previous?.schema ?? params.schema ?? null
       const datasetResult = await datasetGetByIdStep({ runtime, datasetId })
@@ -111,7 +122,12 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
         datasetId,
         fileId,
         instructions,
-        sandboxConfig: { filePath: sandboxFilePath },
+        sandboxConfig: {
+          filePath: sandboxFilePath,
+          outputPath: initialized.state.outputPath,
+          scriptsDir: initialized.state.scriptsDir,
+          manifestPath: initialized.state.manifestPath,
+        },
         analysis: [],
         schema,
         plan: null,
@@ -127,6 +143,11 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
         fileId,
         instructions,
         sandboxId,
+        executionId,
+        sourceEventId,
+        sourcePartIndex,
+        filename: previous?.filename ?? params.filename,
+        mediaType: previous?.mediaType ?? params.mediaType,
         sandboxState: initialized.state,
         filePreview,
         ctx,
@@ -153,6 +174,7 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
       const fileId: string = _stored?.content?.fileId ?? params.fileId ?? ""
       const sandboxId: string =
         (_stored?.content?.sandboxId as string) ?? params.sandboxId ?? ""
+      const outputPath: string | undefined = _stored?.content?.ctx?.sandboxConfig?.outputPath
       if (!datasetId) throw new Error("dataset_id_required")
       if (!fileId) throw new Error("dataset_file_id_required")
       if (!sandboxId) throw new Error("dataset_sandbox_required")
@@ -166,6 +188,7 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
           datasetId,
           sandboxId,
           runtime,
+          outputPath,
         }),
         clearDataset: createClearDatasetTool({
           datasetId,
@@ -214,6 +237,8 @@ export function createFileParseContext<Env extends { orgId: string }>(
     sandboxState?: SandboxState
     filePreview?: FileParseContext["filePreview"]
     schema?: any | null
+    filename?: string
+    mediaType?: string
   },
 ) {
   const datasetId = opts?.datasetId ?? createDatasetId()
@@ -227,6 +252,8 @@ export function createFileParseContext<Env extends { orgId: string }>(
     sandboxState: opts?.sandboxState,
     filePreview: opts?.filePreview,
     schema: opts?.schema,
+    filename: opts?.filename,
+    mediaType: opts?.mediaType,
   }
   const { context } = createFileParseContextDefinition<Env>(params)
 
@@ -247,9 +274,19 @@ export function createFileParseContext<Env extends { orgId: string }>(
               type: "text",
               text: options.prompt ?? "generate a dataset for this file",
             },
+            {
+              type: "file",
+              fileId,
+              filename: opts?.filename ?? "source-file",
+              mediaType: opts?.mediaType ?? "application/octet-stream",
+            },
           ],
         },
       } as any
+      params.sourceEventId = triggerEvent.id
+      params.sourcePartIndex = 1
+      params.filename = opts?.filename ?? "source-file"
+      params.mediaType = opts?.mediaType ?? "application/octet-stream"
 
       const shell = await context.react(triggerEvent, {
         runtime: runtime as any,
@@ -266,6 +303,10 @@ export function createFileParseContext<Env extends { orgId: string }>(
           ...(options.initialContent ?? {}),
           datasetId,
           fileId,
+          sourceEventId: triggerEvent.id,
+          sourcePartIndex: 1,
+          filename: opts?.filename ?? "source-file",
+          mediaType: opts?.mediaType ?? "application/octet-stream",
           instructions: opts?.instructions ?? "",
           sandboxId: opts?.sandboxId ?? "",
           sandboxState: opts?.sandboxState ?? { initialized: false, filePath: "" },

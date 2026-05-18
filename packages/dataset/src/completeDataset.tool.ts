@@ -6,9 +6,10 @@ interface CompleteDatasetToolParams {
     datasetId: string
     sandboxId: string
     runtime: any
+    outputPath?: string
 }
 
-export function createCompleteDatasetTool({ datasetId, sandboxId, runtime }: CompleteDatasetToolParams) {
+export function createCompleteDatasetTool({ datasetId, sandboxId, runtime, outputPath }: CompleteDatasetToolParams) {
     return tool({
         description: "Mark the dataset as completed. Use only when output.jsonl has been successfully generated and is ready for validation.",
         inputSchema: z.object({
@@ -25,6 +26,7 @@ export function createCompleteDatasetTool({ datasetId, sandboxId, runtime }: Com
                 datasetId,
                 sandboxId,
                 summary,
+                outputPath,
             })
         },
     })

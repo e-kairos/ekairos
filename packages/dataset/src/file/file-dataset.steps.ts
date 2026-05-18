@@ -1,20 +1,21 @@
-import {
-  getDatasetSourcesDir,
-  getDatasetStandardDirs,
-  getDatasetWorkstation,
-} from "../datasetFiles.js"
-import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
+import { DATASET_OUTPUT_FILE_NAME } from "../datasetFiles.js"
+import { prepareContextExecutionWorkspaceStep } from "../contextWorkspace.js"
 import { buildFileDatasetPrompt } from "./prompts.js"
 import { generateFilePreview } from "./filepreview.js"
-import { readInstantFileStep } from "./steps.js"
 import type { FileParseContext, SandboxState } from "./file-dataset.types.js"
 import type { FilePreviewContext } from "./filepreview.types.js"
 
 export async function initializeFileParseSandboxStep(params: {
   runtime: any
   sandboxId: string
+  contextId: string
+  executionId: string
   datasetId: string
   fileId: string
+  sourceEventId?: string
+  sourcePartIndex?: number
+  filename?: string
+  mediaType?: string
   state: SandboxState
 }): Promise<{ filePath: string; state: SandboxState }> {
   "use step"
@@ -23,42 +24,35 @@ export async function initializeFileParseSandboxStep(params: {
     return { filePath: params.state.filePath, state: params.state }
   }
 
-  console.log(`[FileParseContext ${params.datasetId}] Preparing source file in sandbox...`)
+  console.log(`[FileParseContext ${params.datasetId}] Preparing context execution workspace...`)
 
-  console.log(`[FileParseContext ${params.datasetId}] Fetching file from InstantDB...`)
-  const file = await readInstantFileStep({ runtime: params.runtime, fileId: params.fileId })
-
-  console.log(`[FileParseContext ${params.datasetId}] Creating dataset workstation...`)
-
-  const workstation = getDatasetWorkstation(params.datasetId)
-  await runDatasetSandboxCommandStep({
+  const workspace = await prepareContextExecutionWorkspaceStep({
     runtime: params.runtime,
     sandboxId: params.sandboxId,
-    cmd: "mkdir",
-    args: ["-p", ...getDatasetStandardDirs(params.datasetId)],
-  })
-
-  const fileName = file.contentDisposition ?? ""
-  const fileExtension = fileName.includes(".") ? fileName.substring(fileName.lastIndexOf(".")) : ""
-  const sandboxFilePath = `${getDatasetSourcesDir(params.datasetId)}/${params.fileId}${fileExtension}`
-
-  await writeDatasetSandboxFilesStep({
-    runtime: params.runtime,
-    sandboxId: params.sandboxId,
+    contextId: params.contextId,
+    executionId: params.executionId,
     files: [
       {
-        path: sandboxFilePath,
-        contentBase64: file.contentBase64,
+        fileId: params.fileId,
+        filename: params.filename,
+        mediaType: params.mediaType,
+        sourceEventId: params.sourceEventId,
+        sourcePartIndex: params.sourcePartIndex,
       },
     ],
   })
+  const sandboxFilePath = workspace.files[0]?.path ?? ""
+  if (!sandboxFilePath) throw new Error("dataset_workspace_file_missing")
 
-  console.log(`[FileParseContext ${params.datasetId}] Workstation created: ${workstation}`)
+  console.log(`[FileParseContext ${params.datasetId}] Context workspace created: ${workspace.root}`)
   console.log(`[FileParseContext ${params.datasetId}] File saved: ${sandboxFilePath}`)
 
   const state = {
     initialized: true,
     filePath: sandboxFilePath,
+    outputPath: `${workspace.outputDir}/${DATASET_OUTPUT_FILE_NAME}`,
+    scriptsDir: workspace.scriptsDir,
+    manifestPath: workspace.manifestPath,
   }
 
   return { filePath: sandboxFilePath, state }

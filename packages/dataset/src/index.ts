@@ -1,4 +1,5 @@
 export * from "./dataset.js"
+export * from "./contextWorkspace.js"
 export * from "./domain.js"
 export * from "./materializeDataset.tool.js"
 export * from "./schema.js"

@@ -4,6 +4,9 @@ import type { FilePreviewContext } from "./filepreview.types.js"
 export type SandboxState = {
   initialized: boolean
   filePath: string
+  outputPath?: string
+  scriptsDir?: string
+  manifestPath?: string
 }
 
 export type FileParseContext = {
@@ -12,6 +15,9 @@ export type FileParseContext = {
   instructions: string
   sandboxConfig: {
     filePath: string
+    outputPath?: string
+    scriptsDir?: string
+    manifestPath?: string
   }
   analysis: any[]
   schema: any | null
@@ -32,6 +38,10 @@ export type FileParseContextParams = {
   sandboxState?: SandboxState
   filePreview?: FilePreviewContext
   schema?: any | null
+  sourceEventId?: string
+  sourcePartIndex?: number
+  filename?: string
+  mediaType?: string
 }
 
 export type FileParseRunOptions = {

@@ -390,9 +390,10 @@ export class DatasetService {
     async uploadDatasetOutputFile(params: {
         datasetId: string
         fileBuffer: Buffer
+        storagePath?: string
     }): Promise<ServiceResult<{ fileId: string; storagePath: string }>> {
         try {
-            const storagePath = `/dataset/${params.datasetId}/output.jsonl`
+            const storagePath = params.storagePath ?? `/dataset/${params.datasetId}/output.jsonl`
 
             const uploadResult = await this.db.storage.uploadFile(storagePath, params.fileBuffer, {
                 contentType: "application/x-ndjson",

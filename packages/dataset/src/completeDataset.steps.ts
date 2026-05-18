@@ -26,18 +26,20 @@ export interface PersistDatasetStepParams {
     sandboxId: string
     runtime: any
     summary?: string
+    outputPath?: string
 }
 
-export async function persistDatasetStep({ runtime, datasetId, sandboxId, summary }: PersistDatasetStepParams) {
+export async function persistDatasetStep({ runtime, datasetId, sandboxId, summary, outputPath }: PersistDatasetStepParams) {
     "use step"
 
-    const outputPath = getDatasetOutputPath(datasetId)
+    const resolvedOutputPath = outputPath ?? getDatasetOutputPath(datasetId)
+    const storagePath = resolveExecutionStoragePath(resolvedOutputPath, datasetId)
     if (summary) {
         console.log(`[Dataset ${datasetId}] Persisting completed dataset: ${summary}`)
     }
 
     try {
-        await ensureFileExists(runtime, sandboxId, outputPath)
+        await ensureFileExists(runtime, sandboxId, resolvedOutputPath)
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -108,7 +110,7 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     const validationResult = await validateJsonlRows({
         runtime,
         sandboxId,
-        outputPath,
+        outputPath: resolvedOutputPath,
         validator,
         schema: schemaJson,
         datasetId,
@@ -122,7 +124,7 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     const rowRecordCount = validationResult.rowRecordCount ?? totalValidRows
 
     console.log(`[Dataset ${datasetId}] Reading file content for upload`)
-    const fileRead = await readDatasetSandboxFileStep({ runtime, sandboxId, path: outputPath })
+    const fileRead = await readDatasetSandboxFileStep({ runtime, sandboxId, path: resolvedOutputPath })
     if (!fileRead.contentBase64) {
         console.error(`[Dataset ${datasetId}] Empty file content`)
         return {
@@ -141,6 +143,7 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     const uploadResult = await service.uploadDatasetOutputFile({
         datasetId,
         fileBuffer: Buffer.from(fileRead.contentBase64, "base64"),
+        storagePath,
     })
 
     if (!uploadResult.ok) {
@@ -184,12 +187,18 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     return {
         success: true,
         status: "completed",
-        validRows: totalValidRows,
-        rowRecordCount,
-        fileId: uploadResult.data.fileId,
-        storagePath: uploadResult.data.storagePath,
-        message: "Dataset creation completed and uploaded to storage",
+        records: totalValidRows,
+        summary: summary ?? `Dataset completed with ${totalValidRows} records.`,
     }
+}
+
+function resolveExecutionStoragePath(outputPath: string, datasetId: string): string {
+    const normalized = String(outputPath ?? "").replace(/\\/g, "/")
+    const marker = "/tmp/ekairos/contexts/"
+    if (normalized.startsWith(marker)) {
+        return normalized.slice("/tmp/ekairos".length)
+    }
+    return `/dataset/${datasetId}/output.jsonl`
 }
 
 async function ensureFileExists(runtime: any, sandboxId: string, path: string): Promise<void> {

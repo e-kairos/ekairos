@@ -1,9 +1,5 @@
 import { createFileParseContext } from "../file/file-dataset.agent.js"
 import { readInstantFileStep } from "../file/steps.js"
-import {
-  generateFileParsePreviewStep,
-  initializeFileParseSandboxStep,
-} from "../file/file-dataset.steps.js"
 import { createTransformDatasetContext } from "../transform/transform-dataset.agent.js"
 import {
   ensureTransformSourcesInSandboxStep,
@@ -324,10 +320,12 @@ type PreparedFileDatasetContext = {
   datasetId: string
   sandboxId: string
   fileId: string
-  sandboxState: SandboxState
-  filePreview?: FilePreviewContext
-  schema?: DatasetSchemaInput | null
-}
+    sandboxState: SandboxState
+    filePreview?: FilePreviewContext
+    schema?: DatasetSchemaInput | null
+    filename?: string
+    mediaType?: string
+  }
 
 type PreparedTransformDatasetContext = {
   kind: "transform"
@@ -404,29 +402,16 @@ export async function prepareDatasetSourcesStep<Runtime extends AnyDatasetRuntim
         ? params.source.fileId
         : await uploadInlineTextSource(params.runtime, params.datasetId, params.source)
 
-    const initialized = await initializeFileParseSandboxStep({
-      runtime: params.runtime,
-      sandboxId: params.sandboxId,
-      datasetId: params.datasetId,
-      fileId,
-      state: { initialized: false, filePath: "" },
-    })
-
-    const filePreview = await generateFileParsePreviewStep({
-      runtime: params.runtime,
-      sandboxId: params.sandboxId,
-      sandboxFilePath: initialized.filePath,
-      datasetId: params.datasetId,
-    })
-
     return {
       kind: "file",
       datasetId: params.datasetId,
       sandboxId: params.sandboxId,
       fileId,
-      sandboxState: initialized.state,
-      filePreview,
+      sandboxState: { initialized: false, filePath: "" },
+      filePreview: undefined,
       schema: params.schema ?? null,
+      filename: params.source.kind === "file" ? params.source.filename : params.source.name,
+      mediaType: params.source.kind === "file" ? params.source.mediaType : params.source.mimeType,
     }
   }
 
@@ -562,7 +547,13 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
     instructions: state.instructions,
     sources: [
       source.kind === "file"
-        ? { kind: "file", fileId: source.fileId, description: source.description }
+        ? {
+            kind: "file",
+            fileId: source.fileId,
+            description: source.description,
+            filename: source.filename,
+            mediaType: source.mediaType,
+          }
         : {
             kind: "text",
             mimeType: source.mimeType,
@@ -600,6 +591,8 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
     sandboxState: context.sandboxState,
     filePreview: context.filePreview,
     schema: context.schema,
+    filename: context.filename,
+    mediaType: context.mediaType,
   })
 
   await parseContext.parse(state.runtime as any, {
@@ -613,6 +606,8 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
       sandboxState: context.sandboxState,
       filePreview: context.filePreview,
       schema: context.schema,
+      filename: context.filename,
+      mediaType: context.mediaType,
     },
   })
 
