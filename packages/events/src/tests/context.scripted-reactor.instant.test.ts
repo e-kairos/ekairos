@@ -248,6 +248,141 @@ describeInstant("context scripted reactor + Instant runtime", () => {
     })
   }, 5 * 60 * 1000)
 
+  itInstant("executes explicit orchestration against one event_execution", async () => {
+    const contextKey = `context-explicit-orchestration:${Date.now()}`
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      orgId: "org_context_tests",
+      actorId: "user_context_tests",
+    })
+
+    const explicitContext = createContext<ContextTestEnv>("context.tests.explicit.orchestration")
+      .context((stored) => ({ ...(stored.content ?? {}) }))
+      .narrative(() => "")
+      .actions(() => ({}))
+      .reactor(
+        createScriptedReactor({
+          steps: [
+            {
+              assistantEvent: {
+                content: {
+                  parts: [
+                    { type: "text", text: "Explicit prompt requested an action." },
+                    {
+                      type: "tool-record_result",
+                      toolCallId: "tc_explicit_record_result",
+                      input: { value: "accepted" },
+                    },
+                  ],
+                },
+              },
+              actionRequests: [
+                {
+                  actionRef: "tc_explicit_record_result",
+                  actionName: "record_result",
+                  input: { value: "accepted" },
+                },
+              ],
+              messagesForModel: [],
+            },
+          ],
+        }),
+      )
+      .build()
+
+    const shell = await explicitContext.react(
+      createTriggerEvent("inspect this explicit trigger"),
+      {
+        runtime,
+        context: { key: contextKey },
+        options: {
+          silent: true,
+          maxModelSteps: 1,
+        },
+      },
+      async (execution) => {
+        await execution.context({
+          orgId: "org_context_tests",
+          actorId: "user_context_tests",
+        })
+
+        await execution.prompt("inspect-input", {
+          instructions: "Inspect the trigger and record the result.",
+          actions: {
+            record_result: tool({
+              description: "Record the deterministic explicit result.",
+              inputSchema: z.object({ value: z.string() }),
+              execute: async ({ value }) => ({ ok: true, value }),
+            }),
+          },
+        })
+
+        return await execution.end({ message: "Explicit orchestration completed." })
+      },
+    )
+
+    expect(shell.execution.status).toBe("executing")
+    const result = await shell.run!
+    expect(result.context.status).toBe("closed")
+    expect(result.reaction.status).toBe("completed")
+    expect(result.execution.status).toBe("completed")
+
+    const snapshot = await currentDb().query({
+      event_contexts: {
+        $: { where: { key: contextKey }, limit: 1 },
+      },
+      event_executions: {
+        $: { where: { id: result.execution.id }, limit: 1 },
+      },
+      event_steps: {
+        $: { where: { "execution.id": result.execution.id }, limit: 10 },
+      },
+      event_items: {
+        $: { where: { "context.id": result.context.id }, limit: 20 },
+      },
+    })
+
+    const contextRow = readRows(snapshot, "event_contexts")[0]
+    const executionRow = readRows(snapshot, "event_executions")[0]
+    const stepRows = readRows(snapshot, "event_steps")
+    const itemRows = readRows(snapshot, "event_items")
+    expect(readString(contextRow, "status")).toBe("closed")
+    expect(readString(executionRow, "status")).toBe("completed")
+    expect(stepRows).toHaveLength(1)
+
+    const stepId = readString(stepRows[0], "id")
+    expect(stepId).toBeTruthy()
+    const partsSnapshot = await currentDb().query({
+      event_parts: {
+        $: {
+          where: { stepId: stepId as any },
+          limit: 50,
+          order: { idx: "asc" },
+        },
+      },
+    })
+    const partRows = readRows(partsSnapshot, "event_parts")
+    const parts = partRows.map((row) => asRecord(row.part)).filter(Boolean)
+    expect(parts.length).toBeGreaterThan(0)
+    expect(
+      parts.some((part) => asRecord(part?.reactorMetadata)?.eventName === "inspect-input"),
+    ).toBe(true)
+    expect(
+      parts.some((part) => {
+        const content = asRecord(part?.content)
+        return (
+          part?.type === "action" &&
+          content?.status === "completed" &&
+          content?.actionName === "record_result"
+        )
+      }),
+    ).toBe(true)
+
+    const reactionItem = itemRows.find((row) => readString(row, "id") === result.reaction.id)
+    expect(readString(reactionItem, "status")).toBe("completed")
+  }, 5 * 60 * 1000)
+
   itInstant("marks execution as failed when scripted steps are exhausted in non-durable mode", async () => {
     const timer = createStageTimer()
     const contextKey = `context-scripted-fail-context:${Date.now()}`

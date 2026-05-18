@@ -12,6 +12,7 @@ import {
   type ContextDirectReactParams,
   type ContextDurableReactParams,
   type ContextReactResult,
+  type ContextExecutionHandler,
   type ContextDirectRun,
   type ContextWorkflowRun,
 } from "./context.engine.js"
@@ -296,6 +297,11 @@ type FluentContextBuilder<
   ): ReturnType<
     ContextEngine<Context, Env, RequiredDomain>["react"]
   >
+  react<Runtime extends ContextRuntime<Env>>(
+    triggerEvent: ContextItem,
+    params: ContextReactParams<Env, RequiredDomain, Runtime>,
+    handler: ContextExecutionHandler<Context, Env, RequiredDomain>,
+  ): Promise<ContextReactResult<Context, ContextDirectRun<Context>>>
   stream<Runtime extends ContextRuntime<Env>>(
     triggerEvent: ContextItem,
     params: ContextDurableReactParams<Env, RequiredDomain, Runtime>,
@@ -439,8 +445,14 @@ export function createContext<
         fluentState.opts = options
         return builder
       },
-      react: ((triggerEvent: ContextItem, params: ContextReactParams<Env, RequiredDomain>) =>
-        getOrBuild().react(triggerEvent, params as any)) as FluentContextBuilder<
+      react: ((
+        triggerEvent: ContextItem,
+        params: ContextReactParams<Env, RequiredDomain>,
+        handler?: ContextExecutionHandler<Context, Env, RequiredDomain>,
+      ) =>
+        handler
+          ? getOrBuild().react(triggerEvent, params as any, handler as any)
+          : getOrBuild().react(triggerEvent, params as any)) as FluentContextBuilder<
         Context,
         Env,
         RequiredDomain

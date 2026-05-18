@@ -253,6 +253,78 @@ export type ContextReactResult<
   run?: Run
 }
 
+export type ContextExecutionActionResult = {
+  actionRequest: {
+    actionRef: string
+    actionName: string
+    input: unknown
+  }
+  success: boolean
+  output: unknown
+  errorText?: string
+}
+
+export type ContextExecutionPromptOptions<
+  Context = any,
+  Env extends ContextEnvironment = ContextEnvironment,
+  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+> = {
+  instructions?: string
+  actions?: Record<string, ContextTool<Context, Env, RequiredDomain>>
+  skills?: ContextSkillPackage[]
+  model?: ContextModelInit
+  reactor?: ContextReactor<Context, Env, RequiredDomain>
+  maxModelSteps?: number
+}
+
+export type ContextExecutionPromptResult = {
+  stepId: string
+  parts: any[]
+  actionRequests: Array<{
+    actionRef: string
+    actionName: string
+    input: unknown
+  }>
+  actionResults: ContextExecutionActionResult[]
+  reaction: ContextItem
+}
+
+export type ContextExecutionEndInput =
+  | void
+  | null
+  | string
+  | {
+      message?: string
+      parts?: any[]
+      status?: "completed" | "failed"
+    }
+
+export type ContextExecutionHandle<
+  Context = any,
+  Env extends ContextEnvironment = ContextEnvironment,
+  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+> = {
+  readonly contextId: string
+  readonly executionId: string
+  readonly triggerEventId: string
+  readonly reactionEventId: string
+  readonly state: StoredContext<Context>
+  context(content: Context): Promise<StoredContext<Context>>
+  prompt(
+    name: string,
+    options?: ContextExecutionPromptOptions<Context, Env, RequiredDomain>,
+  ): Promise<ContextExecutionPromptResult>
+  end(input?: ContextExecutionEndInput): Promise<ContextReactFinalResult<Context>>
+}
+
+export type ContextExecutionHandler<
+  Context = any,
+  Env extends ContextEnvironment = ContextEnvironment,
+  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+> = (
+  execution: ContextExecutionHandle<Context, Env, RequiredDomain>,
+) => Promise<unknown> | unknown
+
 export type ContextDurableWorkflowPayload<
   Env extends ContextEnvironment = ContextEnvironment,
   RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
@@ -459,14 +531,36 @@ async function measureBenchmark<T>(
   return await benchmark.measure(name, run)
 }
 
-async function readActiveWorkflowRunId() {
+async function readActiveWorkflowExecutionContext() {
+  let workflowRunId: string | null = null
+  let stepId: string | null = null
+
   try {
     const { getWorkflowMetadata } = await import("workflow")
     const runId = getWorkflowMetadata?.()?.workflowRunId
-    return runId ? String(runId) : null
+    workflowRunId = runId ? String(runId) : null
   } catch {
-    return null
+    workflowRunId = null
   }
+
+  try {
+    const { getStepMetadata } = await import("workflow")
+    const currentStepId = getStepMetadata?.()?.stepId
+    stepId = currentStepId ? String(currentStepId) : null
+  } catch {
+    stepId = null
+  }
+
+  return {
+    workflowRunId,
+    stepId,
+    durable: Boolean(workflowRunId || stepId),
+  }
+}
+
+async function readActiveWorkflowRunId() {
+  const context = await readActiveWorkflowExecutionContext()
+  return context.workflowRunId
 }
 
 function serializeContextReturnValueError(error: unknown) {
@@ -925,9 +1019,8 @@ async function getContextEngineOps<Context>(
   runtime: ContextRuntime<any>,
   benchmark?: ContextBenchmarkRecorder,
 ) {
-  const env = runtime.env
-  const workflowRunId = await readActiveWorkflowRunId()
-  if (workflowRunId) {
+  const executionContext = await readActiveWorkflowExecutionContext()
+  if (executionContext.durable) {
     return await createWorkflowOps<Context>(runtime)
   }
 
@@ -1047,7 +1140,16 @@ export abstract class ContextEngine<
   public async react<Runtime extends ContextRuntime<Env>>(
     triggerEvent: ContextItem,
     params: ContextReactParams<Env, RequiredDomain, Runtime>,
+    handler: ContextExecutionHandler<Context, Env, RequiredDomain>,
+  ): Promise<ContextReactResult<Context, ContextDirectRun<Context>>>
+  public async react<Runtime extends ContextRuntime<Env>>(
+    triggerEvent: ContextItem,
+    params: ContextReactParams<Env, RequiredDomain, Runtime>,
+    handler?: ContextExecutionHandler<Context, Env, RequiredDomain>,
   ): Promise<ContextReactResult<Context>> {
+    if (handler) {
+      return await ContextEngine.runExplicit(this, triggerEvent, params, handler)
+    }
     if (params.durable === false) {
       return await ContextEngine.runDirect(this, triggerEvent, params)
     }
@@ -1280,6 +1382,586 @@ export abstract class ContextEngine<
       reaction: shell.reaction,
       execution: shell.execution,
       run,
+    }
+  }
+
+  private static async runExplicit<
+    Context,
+    Env extends ContextEnvironment,
+    RequiredDomain extends DomainSchemaResult,
+    Runtime extends ContextRuntime<Env>,
+  >(
+    story: ContextEngine<Context, Env, RequiredDomain>,
+    triggerEvent: ContextItem,
+    params: ContextReactParams<Env, RequiredDomain, Runtime>,
+    handler: ContextExecutionHandler<Context, Env, RequiredDomain>,
+  ): Promise<ContextReactResult<Context, ContextDirectRun<Context>>> {
+    if (!params.__bootstrap) {
+      const shell = await ContextEngine.prepareExecutionShell(story, triggerEvent, params)
+      const run: ContextDirectRun<Context> = ContextEngine.runExplicit(
+        story,
+        triggerEvent,
+        {
+          ...params,
+          runtime: shell.runtimeHandle,
+          __bootstrap: {
+            contextId: shell.currentContext.id,
+            trigger: shell.trigger,
+            reaction: shell.reaction,
+            execution: shell.execution,
+          },
+        },
+        handler,
+      )
+
+      return {
+        context: shell.currentContext,
+        trigger: shell.trigger,
+        reaction: shell.reaction,
+        execution: shell.execution,
+        run,
+      }
+    }
+
+    const runtimeHandle = await resolveReactRuntime(params)
+    const env = (runtimeHandle as Runtime).env
+    const ops = await measureBenchmark(
+      params.__benchmark,
+      "react.explicit.resolveOpsMs",
+      async () =>
+        await getContextEngineOps<Context>(runtimeHandle as Runtime, params.__benchmark),
+    )
+
+    const preventClose = params.options?.preventClose ?? false
+    const sendFinish = params.options?.sendFinish ?? true
+    const silent = params.options?.silent ?? false
+    const writable = params.options?.writable
+
+    const bootstrapped = params.__bootstrap
+    const activeContextSelector = {
+      id: String(bootstrapped.contextId),
+    } as ContextIdentifier
+    let currentContext = (await measureBenchmark(
+      params.__benchmark,
+      "react.explicit.bootstrapContextLookupMs",
+      async () =>
+        await ops.initializeContext(activeContextSelector, {
+          silent,
+        }),
+    )).context
+    let trigger = bootstrapped.trigger
+    let reactionEvent: ContextItem = bootstrapped.reaction
+    let execution: ContextExecution = bootstrapped.execution
+
+    const triggerEventId = trigger.id
+    const reactionEventId = reactionEvent.id
+    const executionId = execution.id
+
+    let updatedContext: StoredContext<Context> = {
+      ...currentContext,
+      status: "open_streaming",
+    }
+    let iteration = 0
+    let ended = false
+    let currentStepId: string | null = null
+    let currentStepStream: PersistedContextStepStreamSession | null = null
+
+    const failExecution = async () => {
+      try {
+        if (currentStepId) {
+          await ops.updateContextStep({
+            stepId: currentStepId,
+            executionId,
+            contextId: String(currentContext.id),
+            iteration: Math.max(0, iteration - 1),
+            patch: { status: "failed" },
+          })
+        }
+      } catch {
+        // noop
+      }
+      try {
+        if (currentStepStream) {
+          await abortPersistedContextStepStream({
+            runtime: runtimeHandle as any,
+            session: currentStepStream,
+          })
+          currentStepStream = null
+        }
+      } catch {
+        // noop
+      }
+      try {
+        await ops.completeExecution(activeContextSelector, executionId, "failed")
+        execution = { ...execution, status: "failed" }
+        updatedContext = { ...updatedContext, status: "closed" }
+      } catch {
+        // noop
+      }
+      try {
+        if (!silent) {
+          await closeContextStream({ preventClose, sendFinish, writable })
+        }
+      } catch {
+        // noop
+      }
+    }
+
+    const appendPromptMetadata = (parts: any[], name: string) =>
+      parts.map((part) => {
+        if (!part || typeof part !== "object") return part
+        return {
+          ...part,
+          reactorMetadata: {
+            reactorKind: "explicit",
+            ...((part as any).reactorMetadata ?? {}),
+            eventName: name,
+            executionId,
+            itemId: reactionEventId,
+          },
+        }
+      })
+
+    const executeActionRequests = async (
+      actionRequests: any[],
+      actions: Record<string, ContextTool<Context, Env, RequiredDomain>>,
+      messagesForModel: ModelMessage[],
+      stepId: string,
+      stepIteration: number,
+    ): Promise<ContextExecutionActionResult[]> =>
+      await Promise.all(
+        actionRequests.map(async (actionRequest: any) => {
+          const actionDef = (actions as any)[actionRequest.actionName] as any
+          if (!actionDef || typeof actionDef.execute !== "function") {
+            return {
+              actionRequest,
+              success: false,
+              output: null,
+              errorText: `Action "${actionRequest.actionName}" not found or has no execute().`,
+            }
+          }
+
+          try {
+            let actionInput = actionRequest.input
+            if ((actionDef as any)?.auto === false) {
+              const { createHook, createWebhook } = await import("workflow")
+              const actionCallId = String(actionRequest.actionRef)
+              const hookToken = toolApprovalHookToken({
+                executionId,
+                toolCallId: actionCallId,
+              })
+              const hook = createHook<ContextToolApprovalPayload>({ token: hookToken })
+              const webhook = createWebhook()
+
+              const approvalOrRequest = await Promise.race([
+                hook.then((approval) => ({ source: "hook" as const, approval })),
+                webhook.then((request) => ({ source: "webhook" as const, request })),
+              ])
+
+              const approval: ContextToolApprovalPayload | null =
+                approvalOrRequest.source === "hook"
+                  ? approvalOrRequest.approval
+                  : await (approvalOrRequest.request as any).json().catch(() => null)
+
+              if (!approval || approval.approved !== true) {
+                return {
+                  actionRequest,
+                  success: false,
+                  output: null,
+                  errorText:
+                    approval && "comment" in approval && approval.comment
+                      ? `Action execution not approved: ${approval.comment}`
+                      : "Action execution not approved",
+                }
+              }
+
+              if ("args" in approval && approval.args !== undefined) {
+                actionInput = approval.args
+              }
+            }
+
+            const output = await Reflect.apply(actionDef.execute, undefined, [
+              actionInput,
+              {
+                runtime: runtimeHandle,
+                context: updatedContext,
+                contextIdentifier: activeContextSelector,
+                toolCallId: actionRequest.actionRef,
+                messages: messagesForModel,
+                eventId: reactionEventId,
+                executionId,
+                triggerEventId,
+                contextId: currentContext.id,
+                stepId,
+                iteration: stepIteration,
+                contextStepStream: currentStepStream?.stream,
+              },
+            ])
+            return { actionRequest, success: true, output }
+          } catch (error: any) {
+            return {
+              actionRequest,
+              success: false,
+              output: null,
+              errorText: error instanceof Error ? error.message : String(error),
+            }
+          }
+        }),
+      )
+
+    const completePromptStep = async (params: {
+      session: PersistedContextStepStreamSession | null
+      stepId: string
+      stepIteration: number
+      stepParts: any[]
+      reactionParts: any[]
+      actionResults: ContextExecutionActionResult[]
+      status?: "completed" | "failed"
+      errorText?: string
+    }) => {
+      const nextReactionEvent: ContextItem = {
+        ...reactionEvent,
+        content: {
+          ...reactionEvent.content,
+          parts: params.reactionParts,
+        },
+        status: "pending",
+      }
+      const completed = await ops.completeExecutionStep({
+        session: params.session,
+        stepId: params.stepId,
+        parts: params.stepParts,
+        actionResults: params.actionResults as any,
+        stepStatus: params.status ?? "completed",
+        errorText: params.errorText,
+        reactionEventId,
+        reactionEvent: nextReactionEvent,
+        executionId,
+        contextId: String(currentContext.id),
+        iteration: params.stepIteration,
+      })
+      reactionEvent = completed.reactionEvent ?? nextReactionEvent
+      await emitContextEvents({
+        silent,
+        writable,
+        events: completed.actionResultChunkEvents,
+      })
+      currentStepStream = null
+      currentStepId = null
+    }
+
+    const handle: ContextExecutionHandle<Context, Env, RequiredDomain> = {
+      get contextId() {
+        return String(currentContext.id)
+      },
+      get executionId() {
+        return executionId
+      },
+      get triggerEventId() {
+        return String(triggerEventId)
+      },
+      get reactionEventId() {
+        return String(reactionEventId)
+      },
+      get state() {
+        return updatedContext
+      },
+      async context(content: Context) {
+        updatedContext = await measureBenchmark(
+          params.__benchmark,
+          "react.explicit.contextMs",
+          async () => await ops.updateContextContent(activeContextSelector, content),
+        )
+        await story.opts.onContextUpdated?.({
+          env,
+          runtime: runtimeHandle,
+          context: updatedContext,
+        })
+        return updatedContext
+      },
+      async prompt(name, promptOptions = {}) {
+        const stepIteration = iteration++
+        const openedStep = await measureBenchmark(
+          params.__benchmark,
+          `react.explicit.step.${stepIteration}.openExecutionStepMs`,
+          async () =>
+            await ops.openExecutionStep({
+              contextIdentifier: activeContextSelector,
+              content: (updatedContext.content ?? ({} as Context)) as Context,
+              executionId,
+              iteration: stepIteration,
+            }),
+        )
+        currentStepId = openedStep.stepId
+        currentStepStream = openedStep.stream
+        updatedContext = openedStep.context
+
+        const rawEvents = openedStep.events
+        const expandedEvents = await measureBenchmark(
+          params.__benchmark,
+          `react.explicit.step.${stepIteration}.expandEventsMs`,
+          async () =>
+            await story.expandEvents(rawEvents, updatedContext, env, runtimeHandle),
+        )
+        let actions = promptOptions.actions
+        if (!actions) {
+          try {
+            actions = await story.buildTools(updatedContext, env, runtimeHandle)
+          } catch {
+            actions = {}
+          }
+        }
+        let skills = promptOptions.skills
+        if (!skills) {
+          try {
+            skills = await story.buildSkills(updatedContext, env, runtimeHandle)
+          } catch {
+            skills = []
+          }
+        }
+        const systemPrompt = promptOptions.instructions ?? name
+        const reactor =
+          promptOptions.reactor ?? story.getReactor(updatedContext, env, runtimeHandle)
+        const model =
+          promptOptions.model ?? story.getModel(updatedContext, env, runtimeHandle)
+        const reactionPartsBeforeStep = Array.isArray(reactionEvent.content?.parts)
+          ? [...reactionEvent.content.parts]
+          : []
+        let persistedReactionPartsSignature = ""
+        const persistReactionParts = async (nextParts: any[]) => {
+          const normalizedParts = appendPromptMetadata(
+            normalizePartsForPersistence(Array.isArray(nextParts) ? nextParts : []),
+            name,
+          )
+          const nextSignature = JSON.stringify(normalizedParts)
+          if (nextSignature === persistedReactionPartsSignature) return
+          persistedReactionPartsSignature = nextSignature
+
+          const saved = await ops.saveExecutionStepOutput({
+            stepId: openedStep.stepId,
+            parts: normalizedParts,
+            reactionEventId,
+            reactionEvent: {
+              ...reactionEvent,
+              content: {
+                ...reactionEvent.content,
+                parts: [...reactionPartsBeforeStep, ...normalizedParts],
+              },
+              status: "pending",
+            },
+            executionId,
+            contextId: String(currentContext.id),
+            iteration: stepIteration,
+          })
+          reactionEvent = saved.reactionEvent
+        }
+
+        try {
+          const reactionResult = await measureBenchmark(
+            params.__benchmark,
+            `react.explicit.step.${stepIteration}.reactorMs`,
+            async () =>
+              await reactor({
+                runtime: runtimeHandle,
+                context: updatedContext,
+                contextIdentifier: activeContextSelector,
+                events: expandedEvents,
+                triggerEvent,
+                model,
+                systemPrompt,
+                actions,
+                skills,
+                eventId: reactionEventId,
+                executionId,
+                contextId: String(currentContext.id),
+                stepId: String(openedStep.stepId),
+                iteration: stepIteration,
+                maxModelSteps:
+                  promptOptions.maxModelSteps ??
+                  params.options?.maxModelSteps ??
+                  1,
+                sendStart: !silent && stepIteration === 0,
+                silent,
+                contextStepStream: currentStepStream?.stream,
+                writable,
+                persistReactionParts,
+              }),
+          )
+
+          const stepParts = appendPromptMetadata(
+            normalizePartsForPersistence(
+              ((((reactionResult.assistantEvent as any)?.content?.parts ?? []) as any[]) as any[]),
+            ),
+            name,
+          )
+          const nextAssistantParts = Array.isArray(stepParts) ? stepParts : []
+          let finalizedStepParts = [...nextAssistantParts]
+          const actionResults = reactionResult.actionRequests.length
+            ? await measureBenchmark(
+                params.__benchmark,
+                `react.explicit.step.${stepIteration}.actionExecutionMs`,
+                async () =>
+                  await executeActionRequests(
+                    reactionResult.actionRequests as any[],
+                    actions,
+                    reactionResult.messagesForModel,
+                    openedStep.stepId,
+                    stepIteration,
+                  ),
+              )
+            : []
+
+          for (const result of actionResults) {
+            finalizedStepParts = applyToolExecutionResultToParts(
+              finalizedStepParts,
+              {
+                toolCallId: result.actionRequest.actionRef,
+                toolName: result.actionRequest.actionName,
+              },
+              {
+                success: Boolean(result.success),
+                result: result.output,
+                message: result.errorText,
+              },
+            )
+          }
+          finalizedStepParts = appendPromptMetadata(
+            normalizePartsForPersistence(finalizedStepParts),
+            name,
+          )
+
+          await completePromptStep({
+            session: currentStepStream,
+            stepId: openedStep.stepId,
+            stepIteration,
+            stepParts: finalizedStepParts,
+            reactionParts: [...reactionPartsBeforeStep, ...finalizedStepParts],
+            actionResults,
+          })
+
+          for (const result of actionResults) {
+            await story.opts.onActionExecuted?.({
+              actionRequest: result.actionRequest,
+              success: result.success,
+              output: result.output,
+              errorText: result.errorText,
+              eventId: reactionEventId,
+              executionId,
+            })
+          }
+
+          return {
+            stepId: openedStep.stepId,
+            parts: finalizedStepParts,
+            actionRequests: reactionResult.actionRequests,
+            actionResults,
+            reaction: reactionEvent,
+          }
+        } catch (error: any) {
+          await completePromptStep({
+            session: currentStepStream,
+            stepId: openedStep.stepId,
+            stepIteration,
+            stepParts: [],
+            reactionParts: Array.isArray(reactionEvent.content?.parts)
+              ? [...reactionEvent.content.parts]
+              : [],
+            actionResults: [],
+            status: "failed",
+            errorText: error instanceof Error ? error.message : String(error),
+          }).catch(() => null)
+          throw error
+        }
+      },
+      async end(input?: ContextExecutionEndInput) {
+        if (ended) {
+          return {
+            context: updatedContext,
+            trigger,
+            reaction: reactionEvent,
+            execution,
+          }
+        }
+
+        const normalizedInput =
+          typeof input === "string" ? { message: input } : input ?? {}
+        const outputParts = Array.isArray((normalizedInput as any).parts)
+          ? normalizePartsForPersistence((normalizedInput as any).parts)
+          : []
+        const message =
+          typeof (normalizedInput as any).message === "string"
+            ? String((normalizedInput as any).message)
+            : ""
+        const messageParts = message
+          ? [
+              {
+                type: "message",
+                content: { text: message },
+                reactorMetadata: {
+                  reactorKind: "explicit",
+                  eventName: "end",
+                  executionId,
+                  itemId: reactionEventId,
+                },
+              },
+            ]
+          : []
+        const existingParts = Array.isArray(reactionEvent.content?.parts)
+          ? [...reactionEvent.content.parts]
+          : []
+        const completedReactionEvent: ContextItem = {
+          ...reactionEvent,
+          content: {
+            ...reactionEvent.content,
+            parts: [...existingParts, ...messageParts, ...outputParts],
+          },
+          status: "completed",
+        }
+        const status = (normalizedInput as any).status === "failed" ? "failed" : "completed"
+        const completed = await ops.completeExecution(
+          activeContextSelector,
+          executionId,
+          status,
+          {
+            contextId: String(currentContext.id),
+            reactionEventId,
+            reactionEvent: completedReactionEvent,
+          },
+        )
+        reactionEvent = completed.reactionEvent ?? completedReactionEvent
+        execution = { ...execution, status }
+        updatedContext = { ...updatedContext, status: "closed" }
+        ended = true
+        if (!silent) {
+          await closeContextStream({ preventClose, sendFinish, writable })
+        }
+        return {
+          context: updatedContext,
+          trigger,
+          reaction: reactionEvent,
+          execution,
+        }
+      },
+    }
+
+    try {
+      const handlerResult = await handler(handle)
+      if (!ended) {
+        return await handle.end(
+          handlerResult === undefined || handlerResult === null
+            ? undefined
+            : (handlerResult as any),
+        )
+      }
+      return {
+        context: updatedContext,
+        trigger,
+        reaction: reactionEvent,
+        execution,
+      }
+    } catch (error) {
+      await failExecution()
+      throw error
     }
   }
 
