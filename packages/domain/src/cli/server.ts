@@ -57,7 +57,7 @@ function buildContextString(config: any, source: RuntimeDomainSource | null) {
   return source.contextString({ meta: config?.meta })
 }
 
-function serializeActionInputSchema(value: unknown) {
+function serializeActionSchema(value: unknown) {
   if (value === undefined) return undefined
   try {
     return JSON.parse(JSON.stringify(value))
@@ -92,7 +92,8 @@ function listActions() {
           : resolveDomainActionKeyByName(source, String(action.name ?? "").trim()),
       description:
         typeof action.description === "string" ? action.description : null,
-      inputSchema: serializeActionInputSchema((action as any).inputSchema),
+      inputSchema: serializeActionSchema((action as any).inputSchema),
+      outputSchema: serializeActionSchema((action as any).outputSchema),
     }
   })
 }
@@ -383,7 +384,7 @@ function createRouteRuntime(env: Record<string, unknown>, resolved: any, db: any
   }
 }
 
-function resolveActionByAlias(name: string): RuntimeDomainAction<any, any, any, any> | null {
+function resolveActionByAlias(name: string): RuntimeDomainAction<any, any, any> | null {
   const normalized = String(name ?? "").trim()
   if (!normalized) return null
   const actions = getRuntimeActions()

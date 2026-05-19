@@ -3,6 +3,7 @@ export type DomainCliManifestAction = {
   key?: string | null
   description?: string | null
   inputSchema?: unknown
+  outputSchema?: unknown
 }
 
 export type DomainCliManifest = {

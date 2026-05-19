@@ -1,8 +1,8 @@
 import {
   defineDomainAction,
-  type DomainActionExecuteParams,
   type DomainActionSerializedOutput,
 } from "../index";
+import { z } from "zod";
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends
@@ -12,23 +12,12 @@ type Equal<A, B> =
 
 type Expect<T extends true> = T;
 
-type Env = {
-  orgId: string;
-};
-
-type Runtime = {
-  runtimeId: string;
-};
-
-type CreateSandboxInput = {
-  sandboxId: string;
-};
-
-// given: a normal domain action with no workflow output contract.
+// given: a normal domain action with explicit zod input and output schemas.
 const normalAction = defineDomainAction({
   description: "Return normal JSON-like data.",
-  inputSchema: {} as unknown,
-  execute(_params: DomainActionExecuteParams<Env, CreateSandboxInput, Runtime>) {
+  input: z.object({ sandboxId: z.string() }),
+  output: z.object({ ok: z.literal(true) }),
+  execute() {
     return { ok: true as const };
   },
 });
@@ -36,8 +25,7 @@ const normalAction = defineDomainAction({
 // when: serialized output is extracted from that normal action.
 type NormalSerializedOutput = DomainActionSerializedOutput<typeof normalAction>;
 
-// then: the serialized output is just the runtime output because no serde
-// boundary is declared.
+// then: the serialized output is inferred from the zod output schema.
 type NormalSerializedOutputIsRuntimeOutput = Expect<
   Equal<NormalSerializedOutput, { ok: true }>
 >;

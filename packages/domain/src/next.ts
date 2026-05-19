@@ -53,7 +53,7 @@ async function readBody(req: Request) {
   }
 }
 
-function serializeActionInputSchema(value: unknown) {
+function serializeActionSchema(value: unknown) {
   if (value === undefined) return undefined
   try {
     return JSON.parse(JSON.stringify(value))
@@ -90,7 +90,8 @@ function listRuntimeActions(domain: RuntimeDomainSource | null) {
     name: String(action.name ?? "").trim(),
     key: resolveActionKey(domain, action),
     description: typeof action.description === "string" ? action.description : null,
-    inputSchema: serializeActionInputSchema((action as any).inputSchema),
+    inputSchema: serializeActionSchema((action as any).inputSchema),
+    outputSchema: serializeActionSchema((action as any).outputSchema),
   }))
 }
 

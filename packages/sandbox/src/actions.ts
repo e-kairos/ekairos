@@ -1,4 +1,5 @@
 import { defineAction } from "@ekairos/domain"
+import { z } from "zod"
 import type { CommandResult } from "./commands.js"
 import type { SandboxConfig } from "./types.js"
 import { sandboxSchemaDomain } from "./schema.js"
@@ -59,6 +60,125 @@ type SandboxCreateEkairosAppInput = {
   packageManager?: string
   instantTokenEnvName?: string
 }
+
+const commandResultSchema: z.ZodType<CommandResult> = z.object({
+  success: z.boolean(),
+  exitCode: z.number().optional(),
+  output: z.string().optional(),
+  error: z.string().optional(),
+  streamingLogs: z.array(z.unknown()).optional(),
+  command: z.string().optional(),
+}).passthrough() as z.ZodType<CommandResult>
+
+const serviceErrorSchema = z.object({
+  ok: z.literal(false),
+  error: z.string(),
+})
+
+const serviceResultSchema = <Schema extends z.ZodType>(data: Schema) =>
+  z.discriminatedUnion("ok", [
+    z.object({
+      ok: z.literal(true),
+      data,
+    }),
+    serviceErrorSchema,
+  ])
+
+const serviceVoidResultSchema = z.discriminatedUnion("ok", [
+  z.object({
+    ok: z.literal(true),
+    data: z.unknown().optional(),
+  }),
+  serviceErrorSchema,
+])
+
+const sandboxConfigSchema: z.ZodType<SandboxConfig> = z.object({
+  provider: z.enum(["vercel", "daytona", "sprites"]).optional(),
+  runtime: z.string().optional(),
+  timeoutMs: z.number().optional(),
+  ports: z.array(z.number()).optional(),
+  resources: z.object({ vcpus: z.number().optional() }).passthrough().optional(),
+  purpose: z.string().optional(),
+  params: z.record(z.string(), z.unknown()).optional(),
+  env: z.record(z.string(), z.unknown()).optional(),
+  domain: z.unknown().optional(),
+  dataset: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
+  skills: z.array(z.object({
+    name: z.string(),
+    description: z.string().optional(),
+    files: z.array(z.object({
+      path: z.string(),
+      contentBase64: z.string(),
+    })),
+  })).optional(),
+  vercel: z.record(z.string(), z.unknown()).optional(),
+  daytona: z.record(z.string(), z.unknown()).optional(),
+  sprites: z.record(z.string(), z.unknown()).optional(),
+}).passthrough() as z.ZodType<SandboxConfig>
+
+const sandboxRunCommandInputSchema = z.object({
+  sandboxId: z.string(),
+  command: z.string(),
+  args: z.array(z.string()).optional(),
+})
+
+const sandboxRunCommandProcessInputSchema = sandboxRunCommandInputSchema.extend({
+  cwd: z.string().optional(),
+  env: z.record(z.string(), z.unknown()).optional(),
+  kind: z.enum(["command", "service", "codex-app-server", "dev-server", "test-runner", "watcher"]).optional(),
+  mode: z.enum(["foreground", "background"]).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+})
+
+const sandboxObservedProcessStartInputSchema = sandboxRunCommandProcessInputSchema.extend({
+  externalProcessId: z.string().optional(),
+})
+
+const sandboxObservedProcessAppendInputSchema = z.object({
+  processId: z.string(),
+  type: z.enum(["stdout", "stderr", "status", "exit", "error", "heartbeat", "metadata"]),
+  data: z.record(z.string(), z.unknown()).optional(),
+})
+
+const sandboxObservedProcessFinishInputSchema = z.object({
+  processId: z.string(),
+  status: z.enum(["exited", "failed", "killed", "lost"]).optional(),
+  exitCode: z.number().optional(),
+  errorText: z.string().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+})
+
+const sandboxProcessStreamChunkSchema: z.ZodType<SandboxProcessStreamChunk> = z.object({
+  type: z.enum(["stdout", "stderr", "status", "exit", "error", "heartbeat", "metadata"]),
+  data: z.record(z.string(), z.unknown()).optional(),
+}).passthrough() as z.ZodType<SandboxProcessStreamChunk>
+
+const sandboxProcessRunResultSchema: z.ZodType<SandboxProcessRunResult> = z.object({
+  processId: z.string(),
+  streamId: z.string(),
+  streamClientId: z.string(),
+  result: commandResultSchema.optional(),
+}).passthrough() as z.ZodType<SandboxProcessRunResult>
+
+const sandboxFileInputSchema = z.object({
+  path: z.string(),
+  contentBase64: z.string(),
+})
+
+const sandboxAuthInstallInputSchema = z.object({
+  sandboxId: z.string(),
+  codexHome: z.string().optional(),
+  authJsonPath: z.string().optional(),
+  credentialsJsonPath: z.string().optional(),
+  configTomlPath: z.string().optional(),
+})
+
+const sandboxCreateEkairosAppInputSchema = z.object({
+  sandboxId: z.string(),
+  appDir: z.string(),
+  packageManager: z.string().optional(),
+  instantTokenEnvName: z.string().optional(),
+})
 
 function shSingleQuote(value: string): string {
   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`
@@ -350,124 +470,113 @@ export async function createEkairosAppExecute({
 
 export const sandboxDomain = sandboxSchemaDomain
   .withActions({
-    createSandbox: defineAction<Record<string, unknown>, SandboxConfig, ServiceResult<{ sandboxId: string }>, SandboxRuntime>({
+    createSandbox: defineAction({
       name: "sandbox.createSandbox",
+      input: sandboxConfigSchema,
+      output: serviceResultSchema(z.object({ sandboxId: z.string() })),
       execute: createSandboxExecute,
     }),
-    stopSandbox: defineAction<Record<string, unknown>, { sandboxId: string }, ServiceResult<void>, SandboxRuntime>({
+    stopSandbox: defineAction({
       name: "sandbox.stopSandbox",
+      input: z.object({ sandboxId: z.string() }),
+      output: serviceVoidResultSchema,
       execute: stopSandboxExecute,
     }),
-    runCommand: defineAction<Record<string, unknown>, SandboxRunCommandInput, ServiceResult<CommandResult>, SandboxRuntime>({
+    runCommand: defineAction({
       name: "sandbox.runCommand",
+      input: sandboxRunCommandInputSchema,
+      output: serviceResultSchema(commandResultSchema),
       execute: runCommandExecute,
     }),
-    runCommandProcess: defineAction<
-      Record<string, unknown>,
-      SandboxRunCommandProcessInput,
-      ServiceResult<SandboxProcessRunResult>,
-      SandboxRuntime
-    >({
+    runCommandProcess: defineAction({
       name: "sandbox.runCommandProcess",
+      input: sandboxRunCommandProcessInputSchema,
+      output: serviceResultSchema(sandboxProcessRunResultSchema),
       execute: runCommandProcessExecute,
     }),
-    readProcessStream: defineAction<
-      Record<string, unknown>,
-      { processId: string },
-      ServiceResult<{ chunks: SandboxProcessStreamChunk[]; byteOffset: number }>,
-      SandboxRuntime
-    >({
+    readProcessStream: defineAction({
       name: "sandbox.readProcessStream",
+      input: z.object({ processId: z.string() }),
+      output: serviceResultSchema(z.object({
+        chunks: z.array(sandboxProcessStreamChunkSchema),
+        byteOffset: z.number(),
+      })),
       execute: readProcessStreamExecute,
     }),
-    startObservedProcess: defineAction<
-      Record<string, unknown>,
-      SandboxObservedProcessStartInput,
-      ServiceResult<SandboxProcessRunResult>,
-      SandboxRuntime
-    >({
+    startObservedProcess: defineAction({
       name: "sandbox.startObservedProcess",
+      input: sandboxObservedProcessStartInputSchema,
+      output: serviceResultSchema(sandboxProcessRunResultSchema),
       execute: startObservedProcessExecute,
     }),
-    appendObservedProcessChunk: defineAction<
-      Record<string, unknown>,
-      SandboxObservedProcessAppendInput,
-      ServiceResult<void>,
-      SandboxRuntime
-    >({
+    appendObservedProcessChunk: defineAction({
       name: "sandbox.appendObservedProcessChunk",
+      input: sandboxObservedProcessAppendInputSchema,
+      output: serviceVoidResultSchema,
       execute: appendObservedProcessChunkExecute,
     }),
-    finishObservedProcess: defineAction<
-      Record<string, unknown>,
-      SandboxObservedProcessFinishInput,
-      ServiceResult<void>,
-      SandboxRuntime
-    >({
+    finishObservedProcess: defineAction({
       name: "sandbox.finishObservedProcess",
+      input: sandboxObservedProcessFinishInputSchema,
+      output: serviceVoidResultSchema,
       execute: finishObservedProcessExecute,
     }),
-    writeFiles: defineAction<
-      Record<string, unknown>,
-      { sandboxId: string; files: SandboxFileInput[] },
-      ServiceResult<void>,
-      SandboxRuntime
-    >({
+    writeFiles: defineAction({
       name: "sandbox.writeFiles",
+      input: z.object({
+        sandboxId: z.string(),
+        files: z.array(sandboxFileInputSchema),
+      }),
+      output: serviceVoidResultSchema,
       execute: writeFilesExecute,
     }),
-    readFile: defineAction<
-      Record<string, unknown>,
-      { sandboxId: string; path: string },
-      ServiceResult<{ contentBase64: string }>,
-      SandboxRuntime
-    >({
+    readFile: defineAction({
       name: "sandbox.readFile",
+      input: z.object({
+        sandboxId: z.string(),
+        path: z.string(),
+      }),
+      output: serviceResultSchema(z.object({ contentBase64: z.string() })),
       execute: readFileExecute,
     }),
-    installCodexAuth: defineAction<
-      Record<string, unknown>,
-      SandboxAuthInstallInput,
-      ServiceResult<{ authJson: boolean; credentialsJson: boolean; configToml: boolean }>,
-      SandboxRuntime
-    >({
+    installCodexAuth: defineAction({
       name: "sandbox.installCodexAuth",
+      input: sandboxAuthInstallInputSchema,
+      output: serviceResultSchema(z.object({
+        authJson: z.boolean(),
+        credentialsJson: z.boolean(),
+        configToml: z.boolean(),
+      })),
       execute: installCodexAuthExecute,
     }),
-    getSandbox: defineAction<
-      Record<string, unknown>,
-      { sandboxId: string },
-      ServiceResult<Record<string, unknown>>,
-      SandboxRuntime
-    >({
+    getSandbox: defineAction({
       name: "sandbox.getSandbox",
+      input: z.object({ sandboxId: z.string() }),
+      output: serviceResultSchema(z.record(z.string(), z.unknown())),
       execute: getSandboxExecute,
     }),
-    createCheckpoint: defineAction<
-      Record<string, unknown>,
-      { sandboxId: string; comment?: string },
-      ServiceResult<{ checkpointId: string }>,
-      SandboxRuntime
-    >({
+    createCheckpoint: defineAction({
       name: "sandbox.createCheckpoint",
+      input: z.object({
+        sandboxId: z.string(),
+        comment: z.string().optional(),
+      }),
+      output: serviceResultSchema(z.object({ checkpointId: z.string() })),
       execute: createCheckpointExecute,
     }),
-    getPortUrl: defineAction<
-      Record<string, unknown>,
-      { sandboxId: string; port: number },
-      ServiceResult<{ url: string }>,
-      SandboxRuntime
-    >({
+    getPortUrl: defineAction({
       name: "sandbox.getPortUrl",
+      input: z.object({
+        sandboxId: z.string(),
+        port: z.number(),
+      }),
+      output: serviceResultSchema(z.object({ url: z.string() })),
       execute: getPortUrlExecute,
     }),
-    createEkairosApp: defineAction<
-      Record<string, unknown>,
-      SandboxCreateEkairosAppInput,
-      ServiceResult<SandboxProcessRunResult>,
-      SandboxRuntime
-    >({
+    createEkairosApp: defineAction({
       name: "sandbox.createEkairosApp",
+      input: sandboxCreateEkairosAppInputSchema,
+      output: serviceResultSchema(sandboxProcessRunResultSchema),
       execute: createEkairosAppExecute,
     }),
   })

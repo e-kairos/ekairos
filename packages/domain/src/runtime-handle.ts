@@ -46,7 +46,7 @@ type SubdomainForRoot<
   Subdomain extends DomainSchemaResult,
 > = RootIncludesDomain<RootDomain, Subdomain> extends true ? Subdomain : never
 
-type RuntimeUseForDomain<
+export type RuntimeUseForDomain<
   Env,
   RequiredDomain extends DomainSchemaResult,
 > = {

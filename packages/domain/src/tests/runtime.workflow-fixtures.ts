@@ -2,10 +2,19 @@ import { EkairosRuntime } from "../runtime-handle.js"
 import { id, init } from "@instantdb/admin"
 import { i } from "@instantdb/core"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
+import { z } from "zod"
 
 import { defineDomainAction, domain } from "../index.js"
 import { executeRuntimeAction } from "../runtime.js"
 import { readActionExecutionContext } from "./workflow.metadata.js"
+
+const actionExecutionContextSchema = z.object({
+  workflowRunId: z.string().nullable(),
+  stepId: z.string().nullable(),
+  attempt: z.number().nullable(),
+  inWorkflow: z.boolean(),
+  inStep: z.boolean(),
+})
 
 export type RuntimeWorkflowEnv = {
   appId: string
@@ -15,7 +24,6 @@ export type RuntimeWorkflowEnv = {
 
 export async function normalizeProbeLabelExecute(
   { input }: {
-    env: RuntimeWorkflowEnv
     input: { label: string }
     runtime: RuntimeWorkflowTestRuntime
     domain?: any
@@ -31,23 +39,18 @@ export async function normalizeProbeLabelExecute(
   }
 }
 
-export const normalizeProbeLabelAction = defineDomainAction<
-  RuntimeWorkflowEnv,
-  { label: string },
-  {
-    label: string
-    execution: Awaited<ReturnType<typeof readActionExecutionContext>>
-  },
-  RuntimeWorkflowTestRuntime,
-  any
->({
+export const normalizeProbeLabelAction = defineDomainAction({
   name: "runtime.probe.normalizeLabel",
+  input: z.object({ label: z.string() }),
+  output: z.object({
+    label: z.string(),
+    execution: actionExecutionContextSchema,
+  }),
   execute: normalizeProbeLabelExecute,
 })
 
 export async function createProbeExecute(
-  { env, input, runtime }: {
-    env: RuntimeWorkflowEnv
+  { input, runtime }: {
     input: { probeId: string; label: string }
     runtime: RuntimeWorkflowTestRuntime
     domain?: any
@@ -75,7 +78,7 @@ export async function createProbeExecute(
     rowId,
     probeId: input.probeId,
     label: normalized.label,
-    marker: env.marker,
+    marker: runtime.env.marker,
     runtimeKey: runtime.key(),
     isRuntimeInstance: runtime instanceof RuntimeWorkflowTestRuntime,
     execution,
@@ -83,29 +86,24 @@ export async function createProbeExecute(
   }
 }
 
-export const createProbeAction = defineDomainAction<
-  RuntimeWorkflowEnv,
-  { probeId: string; label: string },
-  {
-    rowId: string
-    probeId: string
-    label: string
-    marker: string
-    runtimeKey: string
-    isRuntimeInstance: boolean
-    execution: Awaited<ReturnType<typeof readActionExecutionContext>>
-    normalizedExecution: Awaited<ReturnType<typeof readActionExecutionContext>>
-  },
-  RuntimeWorkflowTestRuntime,
-  any
->({
+export const createProbeAction = defineDomainAction({
   name: "runtime.probe.create",
+  input: z.object({ probeId: z.string(), label: z.string() }),
+  output: z.object({
+    rowId: z.string(),
+    probeId: z.string(),
+    label: z.string(),
+    marker: z.string(),
+    runtimeKey: z.string(),
+    isRuntimeInstance: z.boolean(),
+    execution: actionExecutionContextSchema,
+    normalizedExecution: actionExecutionContextSchema,
+  }),
   execute: createProbeExecute,
 })
 
 export async function readProbeExecute(
-  { env, input, runtime }: {
-    env: RuntimeWorkflowEnv
+  { input, runtime }: {
     input: { probeId: string }
     runtime: RuntimeWorkflowTestRuntime
     domain?: any
@@ -126,28 +124,24 @@ export async function readProbeExecute(
   return {
     probeId: row?.probeId ?? null,
     label: row?.label ?? null,
-    marker: env.marker,
+    marker: runtime.env.marker,
     runtimeKey: runtime.key(),
     isRuntimeInstance: runtime instanceof RuntimeWorkflowTestRuntime,
     execution,
   }
 }
 
-export const readProbeAction = defineDomainAction<
-  RuntimeWorkflowEnv,
-  { probeId: string },
-  {
-    probeId: string | null
-    label: string | null
-    marker: string
-    runtimeKey: string
-    isRuntimeInstance: boolean
-    execution: Awaited<ReturnType<typeof readActionExecutionContext>>
-  },
-  RuntimeWorkflowTestRuntime,
-  any
->({
+export const readProbeAction = defineDomainAction({
   name: "runtime.probe.read",
+  input: z.object({ probeId: z.string() }),
+  output: z.object({
+    probeId: z.string().nullable(),
+    label: z.string().nullable(),
+    marker: z.string(),
+    runtimeKey: z.string(),
+    isRuntimeInstance: z.boolean(),
+    execution: actionExecutionContextSchema,
+  }),
   execute: readProbeExecute,
 })
 

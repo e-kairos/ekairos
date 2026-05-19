@@ -1,12 +1,12 @@
 /* @vitest-environment node */
 
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { defineDomainAction, domain } from "../index.ts";
 import { readActionExecutionContext } from "./workflow.metadata.ts";
 import {
   DomainRuntime,
-  type RuntimeActionEnv,
 } from "./runtime-actions.test-fixtures.ts";
 
 describe("runtime action step-safe execution outside workflows", () => {
@@ -21,21 +21,17 @@ describe("runtime action step-safe execution outside workflows", () => {
 
     let stepSafeDomain: any;
     stepSafeDomain = baseStepSafeDomain.withActions({
-      inspectExecution: defineDomainAction<
-        RuntimeActionEnv,
-        { title: string },
-        {
-          title: string;
-          runtimeCall: number;
-          inWorkflow: boolean;
-          inStep: boolean;
-          workflowRunId: string | null;
-          stepId: string | null;
-        },
-        DomainRuntime<any>,
-        any
-      >({
+      inspectExecution: defineDomainAction({
         name: "step.safe.inspect",
+        input: z.object({ title: z.string() }),
+        output: z.object({
+          title: z.string(),
+          runtimeCall: z.number(),
+          inWorkflow: z.boolean(),
+          inStep: z.boolean(),
+          workflowRunId: z.string().nullable(),
+          stepId: z.string().nullable(),
+        }),
         async execute({ input, runtime }) {
           "use step";
           const execution = await readActionExecutionContext();

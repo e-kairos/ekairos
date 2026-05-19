@@ -1,10 +1,11 @@
 import { i } from "@instantdb/core";
 import type { InstantAdminDatabase } from "@instantdb/admin";
 import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef } from "@instantdb/core";
-import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";
+import { z } from "zod";
 export {
   EkairosRuntime,
   type RuntimeForDomain,
+  type RuntimeUseForDomain,
   type RuntimeLike,
   type ExplicitRuntimeLike,
 } from "./runtime-handle.js";
@@ -53,88 +54,28 @@ export type DomainInclude =
   | (() => DomainInstance<any, any, any> | DomainSchemaResult<any, any, any> | InstantSchemaDef<any, any, any> | undefined)
   | undefined;
 
+export type DomainActionSchema = z.ZodType;
+
 export type DomainActionExecuteParams<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
+  InputSchema extends DomainActionSchema = DomainActionSchema,
   Runtime = unknown,
   Domain = unknown,
 > = {
-  env: Env;
-  input: Input;
+  input: z.output<InputSchema>;
   runtime: Runtime;
 };
 
-declare const DOMAIN_ACTION_RUNTIME_OUTPUT: unique symbol;
-declare const DOMAIN_ACTION_SERIALIZED_OUTPUT: unique symbol;
-
-export type DomainActionOutputContract<
-  RuntimeOutput,
-  SerializedOutput = RuntimeOutput,
-> = {
-  readonly kind: string;
-  readonly [DOMAIN_ACTION_RUNTIME_OUTPUT]?: RuntimeOutput;
-  readonly [DOMAIN_ACTION_SERIALIZED_OUTPUT]?: SerializedOutput;
-};
-
-export type WorkflowSerializableConstructor<
-  Instance = unknown,
-  Serialized = unknown,
-> = {
-  [WORKFLOW_SERIALIZE](instance: Instance): Serialized;
-  [WORKFLOW_DESERIALIZE](data: Serialized): Instance;
-};
-
-export type WorkflowOutputInstance<Ctor> =
-  Ctor extends { [WORKFLOW_DESERIALIZE](data: any): infer Instance }
-    ? Instance
-    : never;
-
-export type WorkflowOutputSerialized<Ctor> =
-  Ctor extends { [WORKFLOW_SERIALIZE](instance: any): infer Serialized }
-    ? Serialized
-    : never;
-
-export type DomainWorkflowOutput<
-  Ctor extends WorkflowSerializableConstructor<any, any>,
-> = DomainActionOutputContract<
-  WorkflowOutputInstance<Ctor>,
-  WorkflowOutputSerialized<Ctor>
-> & {
-  readonly kind: "workflow";
-  readonly ctor: Ctor;
-};
-
-export type DomainActionRuntimeOutput<Output> =
-  Output extends DomainActionOutputContract<infer RuntimeOutput, any>
-    ? RuntimeOutput
-    : Output;
-
-export type DomainActionSerializedOutputValue<Output> =
-  Output extends DomainActionOutputContract<any, infer SerializedOutput>
-    ? SerializedOutput
-    : Output;
-
-export function workflow<Ctor extends WorkflowSerializableConstructor<any, any>>(
-  ctor: Ctor,
-): DomainWorkflowOutput<Ctor> {
-  return {
-    kind: "workflow",
-    ctor,
-  } as DomainWorkflowOutput<Ctor>;
-}
-
 export type DomainActionDefinition<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Output = unknown,
+  InputSchema extends DomainActionSchema = DomainActionSchema,
+  OutputSchema extends DomainActionSchema = DomainActionSchema,
   Runtime = unknown,
   Domain = unknown,
-  OutputContract = unknown,
 > = {
   name?: string;
   description?: string;
+  input: InputSchema;
+  output: OutputSchema;
   inputSchema?: unknown;
-  output?: OutputContract;
   outputSchema?: unknown;
   requiredScopes?: string[];
   /**
@@ -144,30 +85,26 @@ export type DomainActionDefinition<
    *
    * `async execute({ runtime, input }) { "use step"; const domain = await runtime.use(myDomain); ... }`
    *
-   * Action execution receives `env`, `input`, and `runtime`. If action logic
-   * needs a scoped domain handle, reconstruct it locally with
+   * Action execution receives `input` and `runtime`. If action logic needs a scoped domain handle, reconstruct it locally with
    * `await runtime.use(exportedDomain)`. `"use workflow"` inside `execute(...)`
    * is intentionally out of scope.
    */
   execute: (
-    params: DomainActionExecuteParams<Env, Input, Runtime, Domain>,
-  ) => Promise<Output> | Output;
+    params: DomainActionExecuteParams<InputSchema, Runtime, Domain>,
+  ) => Promise<z.output<OutputSchema>> | z.output<OutputSchema>;
 };
 
 export type DomainActionRegistration<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Output = unknown,
+  InputSchema extends DomainActionSchema = DomainActionSchema,
+  OutputSchema extends DomainActionSchema = DomainActionSchema,
   Runtime = unknown,
   Domain = unknown,
-  OutputContract = unknown,
-> = DomainActionDefinition<Env, Input, Output, Runtime, Domain, OutputContract> & {
+> = DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain> & {
   name: string;
 };
 
 export type DomainActionLike =
-  | DomainActionDefinition<any, any, any, any, any, any>
-  | ((params: DomainActionExecuteParams<any, any, any, any>) => unknown);
+  DomainActionDefinition<any, any, any, any>;
 
 export type DomainActionCollection =
   | Record<string, DomainActionLike>
@@ -348,7 +285,7 @@ type ExtractRooms<T> = T extends { rooms: infer R } ? R extends RoomsDef ? R : n
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
-export type DomainActionMap = Record<string, DomainActionRegistration<any, any, any, any, any, any>>;
+export type DomainActionMap = Record<string, DomainActionRegistration<any, any, any, any>>;
 
 export type DomainDefinitionOf<D> =
   D extends DomainSchemaResult<
@@ -371,22 +308,13 @@ export type DomainDefinitionOf<D> =
 
 type InferActionRegistrationFromLike<Value, Key extends string> =
   Value extends DomainActionDefinition<
-    infer Env,
-    infer Input,
-    infer Output,
+    infer InputSchema,
+    infer OutputSchema,
     infer Runtime,
-    infer Domain,
-    infer OutputContract
+    infer Domain
   >
-    ? DomainActionRegistration<Env, Input, Output, Runtime, Domain, OutputContract>
-    : Value extends (params: DomainActionExecuteParams<
-        infer Env,
-        infer Input,
-        infer Runtime,
-        infer Domain
-      >) => infer Output
-      ? DomainActionRegistration<Env, Input, Awaited<Output>, Runtime, Domain>
-      : DomainActionRegistration;
+    ? DomainActionRegistration<InputSchema, OutputSchema, Runtime, Domain>
+    : DomainActionRegistration;
 
 type ActionMapFromCollection<Input> =
   Input extends Record<string, any>
@@ -408,25 +336,23 @@ export type ActionMapOf<D> =
 export type DomainActionsOf<D> = ActionMapOf<D>;
 
 type ActionInputOf<Action> =
-  Action extends DomainActionDefinition<any, infer Input, any, any, any, any> ? Input : never;
+  Action extends DomainActionDefinition<infer InputSchema, any, any, any>
+    ? z.output<InputSchema>
+    : never;
 
 type ActionOutputOf<Action> =
-  Action extends DomainActionDefinition<any, any, infer Output, any, any, any>
-    ? Awaited<Output>
+  Action extends DomainActionDefinition<any, infer OutputSchema, any, any>
+    ? z.output<OutputSchema>
     : never;
 
 export type DomainActionOutput<Action> =
-  Action extends DomainActionDefinition<any, any, infer Output, any, any, any>
-    ? Awaited<Output>
+  Action extends DomainActionDefinition<any, infer OutputSchema, any, any>
+    ? z.output<OutputSchema>
     : never;
 
 export type DomainActionSerializedOutput<Action> =
-  Action extends DomainActionDefinition<any, any, infer Output, any, any, infer OutputContract>
-    ? [OutputContract] extends [never]
-      ? Awaited<Output>
-      : unknown extends OutputContract
-      ? Awaited<Output>
-      : DomainActionSerializedOutputValue<OutputContract>
+  Action extends DomainActionDefinition<any, infer OutputSchema, any, any>
+    ? z.output<OutputSchema>
     : never;
 
 type DomainActionMethods<Actions extends DomainActionMap> = {
@@ -681,7 +607,7 @@ function getActionBinding(source: unknown): { name: string; domain: unknown; key
 }
 
 function bindAction(
-  action: DomainActionDefinition<any, any, any, any, any, any>,
+  action: DomainActionDefinition<any, any, any, any>,
   params: { name: string; domain: unknown; key?: string },
 ): DomainActionRegistration {
   const registration: DomainActionRegistration = {
@@ -767,12 +693,15 @@ function normalizeActionLike(
   value: DomainActionLike,
   params: { fallbackName: string; domain: unknown; key?: string },
 ): DomainActionRegistration {
-  const action: DomainActionDefinition<any, any, any, any> =
-    typeof value === "function"
-      ? ({ execute: value } as DomainActionDefinition<any, any, any, any>)
-      : value;
+  const action: DomainActionDefinition<any, any, any, any> = value;
 
-  if (!action || typeof action !== "object" || typeof action.execute !== "function") {
+  if (
+    !action ||
+    typeof action !== "object" ||
+    typeof action.execute !== "function" ||
+    !action.input ||
+    !action.output
+  ) {
     throw new Error(`Invalid domain action definition: ${params.fallbackName}`);
   }
 
@@ -1012,7 +941,7 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
     context: (options?: DomainContextOptions) => domainInstance.context(options),
     contextString: (options?: DomainContextOptions) => domainInstance.contextString(options),
   };
-  if (bindings?.env !== undefined && bindings?.runtime !== undefined) {
+  if (bindings?.runtime !== undefined) {
     const inheritedStack = readRuntimeActionStack(bindings.runtime);
 
     const buildActions = (stack: string[]) =>
@@ -1034,18 +963,21 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
               nextStack,
             );
 
-            const params: DomainActionExecuteParams<any, unknown, unknown> = {
-              env: bindings.env,
-              input,
+            const parsedInput = (action as any).input.parse(input);
+            const params: DomainActionExecuteParams<any, unknown> = {
+              input: parsedInput,
               runtime: scopedRuntime,
             }
 
-            return await execute(params);
+            const output = await execute(params);
+            return (action as any).output.parse(output);
           },
         ]),
       );
 
-    ;(concrete as any).env = bindings.env;
+    if (bindings.env !== undefined) {
+      ;(concrete as any).env = bindings.env;
+    }
     ;(concrete as any).actions = buildActions(inheritedStack);
   }
   return concrete;
@@ -1751,52 +1683,30 @@ export function composeDomain(
  * Actions remain callable directly, from nested `runtime.use(domain).actions.*`
  * composition, and from higher-level workflows that orchestrate them.
  */
+function toJsonSchema(schema: DomainActionSchema): unknown {
+  try {
+    return z.toJSONSchema(schema as never, { target: "draft-7" });
+  } catch {
+    return undefined;
+  }
+}
+
 export function defineDomainAction<
-  OutputContract extends DomainActionOutputContract<any, any>,
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
+  InputSchema extends DomainActionSchema,
+  OutputSchema extends DomainActionSchema,
   Runtime = unknown,
   Domain = unknown,
 >(
-  action: Omit<
-    DomainActionDefinition<
-      Env,
-      Input,
-      DomainActionRuntimeOutput<OutputContract>,
-      Runtime,
-      Domain,
-      OutputContract
-    >,
-    "output"
-  > & {
-    output: OutputContract;
-  },
-): DomainActionDefinition<
-  Env,
-  Input,
-  DomainActionRuntimeOutput<OutputContract>,
-  Runtime,
-  Domain,
-  OutputContract
->;
-export function defineDomainAction<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Output = unknown,
-  Runtime = unknown,
-  Domain = unknown,
->(
-  action: Omit<
-    DomainActionDefinition<Env, Input, Output, Runtime, Domain, never>,
-    "output"
-  > & {
-    output?: never;
-  },
-): DomainActionDefinition<Env, Input, Output, Runtime, Domain, never>;
+  action: DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain>,
+): DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain>;
 export function defineDomainAction(
-  action: DomainActionDefinition<any, any, any, any, any, any>,
-): DomainActionDefinition<any, any, any, any, any, any> {
-  return action;
+  action: DomainActionDefinition<any, any, any, any>,
+): DomainActionDefinition<any, any, any, any> {
+  return Object.freeze({
+    ...action,
+    inputSchema: toJsonSchema(action.input),
+    outputSchema: toJsonSchema(action.output),
+  });
 }
 
 export const defineAction = defineDomainAction;

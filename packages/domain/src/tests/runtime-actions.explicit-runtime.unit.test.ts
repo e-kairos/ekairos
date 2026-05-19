@@ -1,12 +1,10 @@
 /* @vitest-environment node */
 
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { defineDomainAction, domain } from "../index.ts";
-import {
-  DomainRuntime,
-  type RuntimeActionEnv,
-} from "./runtime-actions.test-fixtures.ts";
+import { DomainRuntime } from "./runtime-actions.test-fixtures.ts";
 
 describe("runtime action explicit runtime instance", () => {
   it("lets internal clients use an explicit runtime instance directly", async () => {
@@ -20,14 +18,10 @@ describe("runtime action explicit runtime instance", () => {
 
     let explicitDomain: any;
     explicitDomain = baseExplicitDomain.withActions({
-      normalizeTitle: defineDomainAction<
-        RuntimeActionEnv,
-        { title: string },
-        { title: string; runtimeCall: number },
-        DomainRuntime<any>,
-        any
-      >({
+      normalizeTitle: defineDomainAction({
         name: "explicit.task.normalizeTitle",
+        input: z.object({ title: z.string() }),
+        output: z.object({ title: z.string(), runtimeCall: z.number() }),
         async execute({ input, runtime }) {
           "use step";
           const scoped = await runtime.use(explicitDomain);
@@ -37,14 +31,15 @@ describe("runtime action explicit runtime instance", () => {
           };
         },
       }),
-      createTask: defineDomainAction<
-        RuntimeActionEnv,
-        { title: string },
-        { title: string; orgId: string; parentRuntimeCall: number; nestedRuntimeCall: number },
-        DomainRuntime<any>,
-        any
-      >({
+      createTask: defineDomainAction({
         name: "explicit.task.create",
+        input: z.object({ title: z.string() }),
+        output: z.object({
+          title: z.string(),
+          orgId: z.string(),
+          parentRuntimeCall: z.number(),
+          nestedRuntimeCall: z.number(),
+        }),
         async execute({ runtime, input }) {
           "use step";
           const scoped = await runtime.use(explicitDomain);

@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { i } from "@instantdb/core";
+import { z } from "zod";
 
 import { defineDomainAction, domain } from "../index.ts";
 
@@ -21,10 +22,14 @@ describe("domain action registration immutability", () => {
 
     const createTask = defineDomainAction({
       name: "management.task.create",
+      input: z.object({}),
+      output: z.object({ ok: z.literal(true) }),
       execute: async () => ({ ok: true }),
     });
     const updateTask = defineDomainAction({
       name: "management.task.update",
+      input: z.object({}),
+      output: z.object({ ok: z.literal(true) }),
       execute: async () => ({ ok: true }),
     });
 

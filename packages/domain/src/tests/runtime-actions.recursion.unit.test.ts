@@ -2,13 +2,10 @@
 
 import { describe, expect, it } from "vitest";
 import { i } from "@instantdb/core";
+import { z } from "zod";
 
 import { defineDomainAction, domain } from "../index.ts";
-import {
-  DomainRuntime,
-  type RuntimeActionEnv,
-  type RuntimeActionShape,
-} from "./runtime-actions.test-fixtures.ts";
+import { DomainRuntime } from "./runtime-actions.test-fixtures.ts";
 
 describe("runtime action recursion guard", () => {
   it("detects action recursion cycles", async () => {
@@ -27,16 +24,20 @@ describe("runtime action recursion guard", () => {
 
     let cycleDomain: any;
     cycleDomain = baseCycleDomain.withActions({
-      actionA: defineDomainAction<RuntimeActionEnv, { value: number }, number, RuntimeActionShape, any>({
+      actionA: defineDomainAction({
         name: "cycle.a",
+        input: z.object({ value: z.number() }),
+        output: z.number(),
         async execute({ runtime, input }) {
           "use step";
           const scoped = await runtime.use(cycleDomain);
           return scoped.actions.actionB(input);
         },
       }),
-      actionB: defineDomainAction<RuntimeActionEnv, { value: number }, number, RuntimeActionShape, any>({
+      actionB: defineDomainAction({
         name: "cycle.b",
+        input: z.object({ value: z.number() }),
+        output: z.number(),
         async execute({ runtime, input }) {
           "use step";
           const scoped = await runtime.use(cycleDomain);

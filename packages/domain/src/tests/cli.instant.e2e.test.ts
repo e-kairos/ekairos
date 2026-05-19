@@ -8,6 +8,7 @@ import { rm } from "node:fs/promises"
 import { resolve } from "node:path"
 import { init, id as newId } from "@instantdb/admin"
 import { i } from "@instantdb/core"
+import { z } from "zod"
 
 import { createTestApp, destroyTestApp } from "@ekairos/testing/provision"
 
@@ -57,13 +58,19 @@ describeCliE2E("domain cli", () => {
 
   let appDomain: any
   appDomain = baseDomain.withActions({
-    createTask: defineDomainAction<CliEnv, { title: string }, { taskId: string; title: string; actorId: string | null }, any, any>({
+    createTask: defineDomainAction({
       name: "cli.task.create",
-      async execute({ runtime, input, env }) {
+      input: z.object({ title: z.string() }),
+      output: z.object({
+        taskId: z.string(),
+        title: z.string(),
+        actorId: z.string().nullable(),
+      }),
+      async execute({ runtime, input }) {
         "use step"
         const domain = await runtime.use(appDomain)
         const taskId = newId()
-        const actorId = String(env.actorId ?? "").trim() || null
+        const actorId = String(runtime.env.actorId ?? "").trim() || null
         const mutations: any[] = [
           domain.db.tx.cli_tasks[taskId].update({
             title: String(input.title ?? "").trim(),

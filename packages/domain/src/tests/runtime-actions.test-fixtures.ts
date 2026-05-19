@@ -1,7 +1,8 @@
 import { i } from "@instantdb/core";
+import { z } from "zod";
 
 import { EkairosRuntime } from "../runtime.ts";
-import { domain } from "../index.ts";
+import { defineDomainAction, domain } from "../index.ts";
 
 export type RuntimeActionEnv = {
   orgId: string;
@@ -51,9 +52,15 @@ export function createManagementDomain() {
 
   let appDomain: any;
   appDomain = baseDomain.withActions({
-    normalizeTitle: {
+    normalizeTitle: defineDomainAction({
       name: "management.task.normalizeTitle",
       description: "Normalize task titles.",
+      input: z.object({ title: z.string() }),
+      output: z.object({
+        title: z.string(),
+        status: z.literal("draft"),
+        runtimeCall: z.number(),
+      }),
       execute: async ({ input, runtime }) => {
         "use step";
         const scoped = await runtime.use(appDomain);
@@ -63,23 +70,31 @@ export function createManagementDomain() {
           runtimeCall: scoped.db.runtimeCall,
         };
       },
-    },
-    createTask: {
+    }),
+    createTask: defineDomainAction({
       name: "management.task.create",
       description: "Create a draft task.",
-      execute: async ({ env, input, runtime }) => {
+      input: z.object({ title: z.string() }),
+      output: z.object({
+        title: z.string(),
+        status: z.literal("draft"),
+        orgId: z.string(),
+        parentRuntimeCall: z.number(),
+        nestedRuntimeCall: z.number(),
+      }),
+      execute: async ({ input, runtime }) => {
         "use step";
         const scoped = await runtime.use(appDomain);
         const normalized = await scoped.actions.normalizeTitle({ title: input.title });
         return {
           title: normalized.title,
           status: normalized.status,
-          orgId: env.orgId,
+          orgId: runtime.env.orgId,
           parentRuntimeCall: scoped.db.runtimeCall,
           nestedRuntimeCall: normalized.runtimeCall,
         };
       },
-    },
+    }),
   });
 
   return { appDomain };
