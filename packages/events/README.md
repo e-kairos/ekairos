@@ -192,12 +192,14 @@ await session.prompt("Write a summary.")
 Ekairos exposes the same continuity through event primitives:
 
 ```ts
-await context.react(trigger, params, async (execution) => {
+const shell = await context.react(triggerEvent, params, async (execution) => {
   await execution.prompt("inspect")
   await execution.prompt("act", { actions })
   await execution.prompt("summarize")
   return await execution.end()
 })
+
+const result = await shell.run
 ```
 
 | Flue concept | Ekairos concept |
@@ -228,7 +230,7 @@ that the engine uses to stream and replay.
 ## Dataset Flow Example
 
 ```ts
-await datasetContext.react(trigger, params, async (execution) => {
+const shell = await datasetContext.react(triggerEvent, params, async (execution) => {
   await execution.prompt("inspect-file", {
     instructions: "Inspect the current context files.",
   })
@@ -250,6 +252,8 @@ await datasetContext.react(trigger, params, async (execution) => {
     message: "Dataset is ready.",
   })
 })
+
+const result = await shell.run
 ```
 
 Expected persisted shape:
@@ -269,7 +273,7 @@ event_execution
 
 Implemented:
 
-- explicit `context.react(trigger, params, async execution => ...)`
+- explicit `const shell = await context.react(triggerEvent, params, async execution => ...)`
 - `execution.context(...)`
 - `execution.prompt(...)`
 - `execution.end(...)`
