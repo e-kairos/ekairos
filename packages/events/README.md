@@ -23,9 +23,15 @@ event_context
 ## The Shape
 
 ```ts
-import { createContext, type ContextItem } from "@ekairos/events"
+import {
+  createAiSdkReactor,
+  createContext,
+  type ContextItem,
+} from "@ekairos/events"
 import { tool } from "ai"
 import { z } from "zod"
+
+const reactor = createAiSdkReactor()
 
 const datasetContext = createContext<{ orgId: string; actorId: string }>(
   "dataset.generate",
@@ -37,6 +43,8 @@ const datasetContext = createContext<{ orgId: string; actorId: string }>(
   }))
   .narrative(() => "Generate datasets from context files.")
   .actions(() => ({}))
+  .model("openai/gpt-5")
+  .reactor(reactor)
   .build()
 
 export async function reactToDatasetUpload(trigger, runtime) {
@@ -95,6 +103,22 @@ export async function reactToDatasetUpload(trigger, runtime) {
 
 The callback is the orchestration lane. Every operation on `execution` writes to
 the same `event_execution`.
+
+The context definition is still the base API:
+
+- `createContext(name)` registers the context identity.
+- `.context(...)` hydrates durable context state.
+- `.narrative(...)` builds the default system prompt.
+- `.actions(...)` exposes available actions.
+- `.skills(...)` can expose reusable skill packages.
+- `.model(...)` selects the default model.
+- `.reactor(...)` defines how prompts are actually executed.
+- `.build()` returns the runnable context.
+
+The explicit callback only replaces the old implicit loop shape. It does not
+remove the reactor. Each `execution.prompt(...)` opens one `event_step`, then
+calls the configured reactor with the current context, expanded events,
+instructions, actions, skills, stream, and execution metadata.
 
 ## Workflow Safety
 
@@ -204,7 +228,7 @@ const result = await shell.run
 
 | Flue concept | Ekairos concept |
 | --- | --- |
-| harness | configured context runtime |
+| harness | `createContext(...).context(...).reactor(...).build()` |
 | session | event_execution |
 | prompt | event_step with streamed event_parts |
 | skill | future reusable workflow step |
