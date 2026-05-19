@@ -7,8 +7,8 @@ import { randomUUID } from "node:crypto"
 import { z } from "zod"
 
 import {
+  createAiSdkReactor,
   createContext,
-  didToolExecute,
   eventsDomain,
   type ContextItem,
 } from "../index.ts"
@@ -107,7 +107,7 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
     }
   }, 10 * 60 * 1000)
 
-  itRealInstant("executes a real model directly in non-durable mode and persists final state", async () => {
+  itRealInstant("executes a real model directly in explicit mode and persists final state", async () => {
     const timer = createStageTimer()
     const contextKey = `context-ai-sdk-real-context:${Date.now()}`
     const { chunks, writable } = createChunkCollector()
@@ -122,34 +122,36 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
         ...(stored.content ?? {}),
         actorId: env.actorId,
       }))
-      .narrative(
-        () =>
-          "Call action set_status exactly once. Use value 'ready'. Do not call any other actions.",
-      )
-      .actions(() => ({
-        set_status: tool({
-          description: "Set deterministic status for integration validation.",
-          inputSchema: z.object({ value: z.string().min(1) }),
-          execute: async ({ value }) => ({ ok: true, value }),
-        }),
-      }))
-      .model(REAL_MODEL)
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "set_status"))
+      .reactor(createAiSdkReactor({ model: REAL_MODEL }))
       .build()
 
     const shell = await timer.measure("reactShellMs", async () =>
-      await realContext.react(createTriggerEvent("set status to ready"), {
-        runtime,
-        context: { key: contextKey },
-        durable: false,
-        __benchmark: timer,
-        options: {
-          silent: false,
-          maxIterations: 3,
-          maxModelSteps: 1,
-          writable,
+      await realContext.react(
+        createTriggerEvent("set status to ready"),
+        {
+          runtime,
+          context: { key: contextKey },
+          __benchmark: timer,
+          options: {
+            writable,
+          },
         },
-      }),
+        async (execution) => {
+          await execution.prompt("set-status", {
+            instructions:
+              "Call action set_status exactly once. Use value 'ready'. Do not call any other actions.",
+            maxModelSteps: 1,
+            actions: {
+              set_status: tool({
+                description: "Set deterministic status for integration validation.",
+                inputSchema: z.object({ value: z.string().min(1) }),
+                execute: async ({ value }) => ({ ok: true, value }),
+              }),
+            },
+          })
+          return execution.end()
+        },
+      ),
     )
     const result = await timer.measure("reactRunMs", async () => await shell.run!)
 
@@ -223,7 +225,7 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
 
     const timings = timer.snapshot()
     writeBenchmarkReport("context-ai-sdk-real-direct-report", {
-      test: "context ai sdk reactor + real AI Gateway model > executes a real model directly in non-durable mode and persists final state",
+      test: "context ai sdk reactor + real AI Gateway model > executes a real model directly in explicit mode and persists final state",
       mode: "direct",
       model: REAL_MODEL,
       totalMs: timings.totalMs,

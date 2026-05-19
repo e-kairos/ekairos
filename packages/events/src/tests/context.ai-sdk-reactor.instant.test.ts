@@ -8,8 +8,8 @@ import { randomUUID } from "node:crypto"
 import { z } from "zod"
 
 import {
+  createAiSdkReactor,
   createContext,
-  didToolExecute,
   eventsDomain,
   type ContextItem,
 } from "../index.ts"
@@ -157,7 +157,7 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
     }
   }, 5 * 60 * 1000)
 
-  itInstant("executes directly in non-durable mode and streams step chunks only", async () => {
+  itInstant("executes directly in explicit mode and streams step chunks only", async () => {
     const timer = createStageTimer()
     const contextKey = `context-ai-sdk-context:${Date.now()}`
     const { chunks, writable } = createChunkCollector()
@@ -172,31 +172,35 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
         ...(stored.content ?? {}),
         actorId: env.actorId,
       }))
-      .narrative(() => "AI SDK reactor mocked model test.")
-      .actions(() => ({
-        set_status: tool({
-          description: "Apply deterministic status update.",
-          inputSchema: z.object({ value: z.string() }),
-          execute: async ({ value }) => ({ ok: true, value }),
-        }),
-      }))
-      .model(() => createMockModel("set_status"))
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "set_status"))
+      .reactor(createAiSdkReactor({ model: () => createMockModel("set_status") }))
       .build()
 
     const shell = await timer.measure("reactShellMs", async () =>
-      await aiSdkContext.react(createTriggerEvent("set status to ready"), {
-        runtime,
-        context: { key: contextKey },
-        durable: false,
-        __benchmark: timer,
-        options: {
-          silent: false,
-          maxIterations: 3,
-          maxModelSteps: 1,
-          writable: writable as WritableStream<UIMessageChunk>,
+      await aiSdkContext.react(
+        createTriggerEvent("set status to ready"),
+        {
+          runtime,
+          context: { key: contextKey },
+          __benchmark: timer,
+          options: {
+            writable: writable as WritableStream<UIMessageChunk>,
+          },
         },
-      }),
+        async (execution) => {
+          await execution.prompt("set-status", {
+            instructions: "AI SDK reactor mocked model test.",
+            maxModelSteps: 1,
+            actions: {
+              set_status: tool({
+                description: "Apply deterministic status update.",
+                inputSchema: z.object({ value: z.string() }),
+                execute: async ({ value }) => ({ ok: true, value }),
+              }),
+            },
+          })
+          return execution.end()
+        },
+      ),
     )
 
     expect(shell.context.status).toBe("open_streaming")
@@ -239,7 +243,7 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
     expect(readString(executionRow, "workflowRunId")).toBe(null)
     expect(stepRows.length).toBeGreaterThan(0)
 
-    // Given a non-durable reaction that still creates a persisted step stream,
+    // Given a explicit reaction that still creates a persisted step stream,
     // when we replay the raw Instant stream, then reconstructable part chunks
     // must carry the same deterministic part identity that live clients receive.
     const streamStep = stepRows.find(
@@ -280,7 +284,7 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
 
     const timings = timer.snapshot()
     writeBenchmarkReport("context-ai-sdk-direct-report", {
-      test: "context ai sdk reactor + ai/test mock model > executes directly in non-durable mode and streams step chunks only",
+      test: "context ai sdk reactor + ai/test mock model > executes directly in explicit mode and streams step chunks only",
       mode: "direct",
       totalMs: timings.totalMs,
       stageTimingsMs: timings.stageTimingsMs,
@@ -290,7 +294,7 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
     })
   }, 5 * 60 * 1000)
 
-  itInstant("persists tool output errors in non-durable mode", async () => {
+  itInstant("persists tool output errors in explicit mode", async () => {
     const timer = createStageTimer()
     const contextKey = `context-ai-sdk-error-context:${Date.now()}`
     const runtime = new EventsTestRuntime({
@@ -304,32 +308,34 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
         ...(stored.content ?? {}),
         actorId: env.actorId,
       }))
-      .narrative(() => "AI SDK reactor mocked model tool-error test.")
-      .actions(() => ({
-        set_status: tool({
-          description: "Failing deterministic status update.",
-          inputSchema: z.object({ value: z.string() }),
-          execute: async () => {
-            throw new Error("set_status_failed")
-          },
-        }),
-      }))
-      .model(() => createMockModel("set_status"))
-      .shouldContinue(() => false)
+      .reactor(createAiSdkReactor({ model: () => createMockModel("set_status") }))
       .build()
 
     const shell = await timer.measure("reactShellMs", async () =>
-      await failingToolContext.react(createTriggerEvent("set status to ready"), {
-        runtime,
-        context: { key: contextKey },
-        durable: false,
-        __benchmark: timer,
-        options: {
-          silent: true,
-          maxIterations: 2,
-          maxModelSteps: 1,
+      await failingToolContext.react(
+        createTriggerEvent("set status to ready"),
+        {
+          runtime,
+          context: { key: contextKey },
+          __benchmark: timer,
         },
-      }),
+        async (execution) => {
+          await execution.prompt("set-status-error", {
+            instructions: "AI SDK reactor mocked model tool-error test.",
+            maxModelSteps: 1,
+            actions: {
+              set_status: tool({
+                description: "Failing deterministic status update.",
+                inputSchema: z.object({ value: z.string() }),
+                execute: async () => {
+                  throw new Error("set_status_failed")
+                },
+              }),
+            },
+          })
+          return execution.end()
+        },
+      ),
     )
     const result = await timer.measure("reactRunMs", async () => await shell.run!)
 
@@ -377,7 +383,7 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
 
     const timings = timer.snapshot()
     writeBenchmarkReport("context-ai-sdk-direct-error-report", {
-      test: "context ai sdk reactor + ai/test mock model > persists tool output errors in non-durable mode",
+      test: "context ai sdk reactor + ai/test mock model > persists tool output errors in explicit mode",
       mode: "direct",
       totalMs: timings.totalMs,
       stageTimingsMs: timings.stageTimingsMs,

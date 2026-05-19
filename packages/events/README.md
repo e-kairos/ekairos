@@ -5,7 +5,7 @@ Context-first execution runtime for Ekairos.
 Ekairos does not start from an agent session. It starts from a context. A
 context receives events, creates executions, opens steps, and persists parts.
 The API is designed so orchestration is explicit in TypeScript while streaming,
-durability, actions, and replay stay inside the event engine.
+actions, workflow safety, and replay stay inside the event engine.
 
 ```text
 event_context
@@ -31,7 +31,9 @@ import {
 import { tool } from "ai"
 import { z } from "zod"
 
-const reactor = createAiSdkReactor()
+const reactor = createAiSdkReactor({
+  model: "openai/gpt-5",
+})
 
 const datasetContext = createContext<{ orgId: string; actorId: string }>(
   "dataset.generate",
@@ -41,9 +43,6 @@ const datasetContext = createContext<{ orgId: string; actorId: string }>(
     orgId: env.orgId,
     actorId: env.actorId,
   }))
-  .narrative(() => "Generate datasets from context files.")
-  .actions(() => ({}))
-  .model("openai/gpt-5")
   .reactor(reactor)
   .build()
 
@@ -53,7 +52,6 @@ export async function reactToDatasetUpload(trigger, runtime) {
     {
       runtime,
       context: { key: `dataset:${trigger.id}` },
-      options: { maxModelSteps: 1 },
     },
     async (execution) => {
       await execution.context({
@@ -107,18 +105,17 @@ the same `event_execution`.
 The context definition is still the base API:
 
 - `createContext(name)` registers the context identity.
-- `.context(...)` hydrates durable context state.
-- `.narrative(...)` builds the default system prompt.
-- `.actions(...)` exposes available actions.
-- `.skills(...)` can expose reusable skill packages.
-- `.model(...)` selects the default model.
-- `.reactor(...)` defines how prompts are actually executed.
+- `.context(...)` hydrates persisted context state.
+- `.reactor(...)` defines how each prompt is actually executed.
 - `.build()` returns the runnable context.
 
-The explicit callback only replaces the old implicit loop shape. It does not
-remove the reactor. Each `execution.prompt(...)` opens one `event_step`, then
-calls the configured reactor with the current context, expanded events,
-instructions, actions, skills, stream, and execution metadata.
+There is no implicit loop in `react`. The callback is the reaction: if you need
+multiple model turns, write multiple `execution.prompt(...)` calls. Narrative
+becomes named prompts. Actions are declared on the prompt that can use them.
+Model selection belongs to the reactor. Each
+`execution.prompt(...)` opens one `event_step`, then calls the configured reactor
+with the current context, expanded events, instructions, actions, skills, stream,
+and execution metadata.
 
 ## Workflow Safety
 
@@ -148,13 +145,36 @@ The engine detects Workflow metadata internally. If a workflow run or step is
 active, context, execution, step, part, and stream persistence use workflow-safe
 operations. Callers do not pass a durability flag.
 
+Nested contexts are explicit. Pass the parent execution when one context reacts
+inside another:
+
+```ts
+const child = await childContext.react(
+  childTrigger,
+  {
+    runtime,
+    context: { key: `child:${trigger.id}` },
+    parent: execution,
+  },
+  async (childExecution) => {
+    await childExecution.prompt("inspect-child")
+    return await childExecution.end()
+  },
+)
+
+await child.run
+```
+
+The child `event_execution` stores the parent context, execution, trigger, and
+reaction references.
+
 ## Execution API
 
 ### `execution.context(content)`
 
-Updates the durable `event_context.content`.
+Updates `event_context.content`.
 
-Use it for business state the AI should see as context, not for transient loop
+Use it for business state the AI should see as context, not for transient flow
 control.
 
 ```ts
@@ -241,7 +261,7 @@ that the engine uses to stream and replay.
 
 ## Canonical Entities
 
-- `event_contexts`: durable state and lifecycle.
+- `event_contexts`: persisted state and lifecycle.
 - `event_items`: input and output events visible to the context.
 - `event_executions`: one orchestration lane for a reaction.
 - `event_steps`: named operations inside an execution.

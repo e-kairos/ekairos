@@ -1,7 +1,7 @@
 import {
+  createAiSdkReactor,
   createContext,
   createScriptedReactor,
-  didToolExecute,
 } from "@ekairos/events";
 import { tool } from "ai";
 import { z } from "zod";
@@ -14,6 +14,23 @@ export type SmokeContext = { lastMessage?: string };
 
 type StorySmokeMode = "success" | "tool-error" | "scripted";
 
+export function createStorySmokeActions(mode: StorySmokeMode) {
+  return {
+    echo: tool({
+      description: "Return the input payload as a simple echo response.",
+      inputSchema: z.object({
+        message: z.string(),
+      }),
+      execute: async ({ message }) => {
+        if (mode === "tool-error") {
+          throw new Error("echo_failed");
+        }
+        return { ok: true, message };
+      },
+    }),
+  };
+}
+
 function createStorySmoke(mode: StorySmokeMode) {
   if (mode === "scripted") {
     return createContext("story.smoke.scripted")
@@ -21,16 +38,6 @@ function createStorySmoke(mode: StorySmokeMode) {
         const existing = (ctx.content ?? {}) as Partial<SmokeContext>;
         return { ...existing };
       })
-      .narrative(() => "Story smoke deterministic workflow (scripted reactor).")
-      .actions(() => ({
-        echo: tool({
-          description: "Return the input payload as a simple echo response.",
-          inputSchema: z.object({
-            message: z.string(),
-          }),
-          execute: async ({ message }) => ({ ok: true, message }),
-        }),
-      }))
       .reactor(
         createScriptedReactor({
           steps: [
@@ -67,7 +74,6 @@ function createStorySmoke(mode: StorySmokeMode) {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "echo"))
       .build();
   }
 
@@ -78,23 +84,7 @@ function createStorySmoke(mode: StorySmokeMode) {
       const existing = (ctx.content ?? {}) as Partial<SmokeContext>;
       return { ...existing };
     })
-    .narrative(() => "Story smoke deterministic workflow.")
-    .actions(() => ({
-      echo: tool({
-        description: "Return the input payload as a simple echo response.",
-        inputSchema: z.object({
-          message: z.string(),
-        }),
-        execute: async ({ message }) => {
-          if (mode === "tool-error") {
-            throw new Error("echo_failed");
-          }
-          return { ok: true, message };
-        },
-      }),
-    }))
-    .model(model)
-    .shouldContinue(() => false)
+    .reactor(createAiSdkReactor({ model }))
     .build();
 }
 

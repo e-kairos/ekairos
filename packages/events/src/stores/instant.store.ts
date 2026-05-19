@@ -19,6 +19,7 @@ import type {
   ContextStatus,
   StoredContext,
   ContextStore,
+  ContextExecutionParent,
 } from "../context.store.js"
 export { parseAndStoreDocument } from "./instant.document-parser.js"
 import { expandEventsWithInstantDocuments } from "./instant.documents.js"
@@ -568,6 +569,7 @@ export class InstantStore implements ContextStore {
     contextIdentifier: ContextIdentifier,
     triggerEventId: string,
     reactionEventId: string,
+    opts?: { parent?: ContextExecutionParent },
   ): Promise<{ id: string }> {
     const normalizedTriggerEventId = ensureValidEntityId(triggerEventId, "triggerEventId")
     const normalizedReactionEventId = ensureValidEntityId(reactionEventId, "reactionEventId")
@@ -586,6 +588,21 @@ export class InstantStore implements ContextStore {
       this.db.tx.event_executions[executionId].create({
         createdAt: new Date(),
         status: "executing",
+        ...(opts?.parent?.contextId
+          ? { parentContextId: String(opts.parent.contextId) }
+          : {}),
+        ...(opts?.parent?.executionId
+          ? { parentExecutionId: String(opts.parent.executionId) }
+          : {}),
+        ...(opts?.parent?.stepId
+          ? { parentStepId: String(opts.parent.stepId) }
+          : {}),
+        ...(opts?.parent?.triggerEventId
+          ? { parentTriggerEventId: String(opts.parent.triggerEventId) }
+          : {}),
+        ...(opts?.parent?.reactionEventId
+          ? { parentReactionEventId: String(opts.parent.reactionEventId) }
+          : {}),
       }),
       this.db.tx.event_contexts[context.id].update({
         status: "open_streaming",
@@ -596,6 +613,13 @@ export class InstantStore implements ContextStore {
       this.db.tx.event_executions[executionId].link({ trigger: normalizedTriggerEventId }),
       this.db.tx.event_executions[executionId].link({ reaction: normalizedReactionEventId }),
     ]
+    if (opts?.parent?.executionId) {
+      txs.push(
+        this.db.tx.event_executions[executionId].link({
+          parentExecution: String(opts.parent.executionId),
+        }),
+      )
+    }
 
     try {
       await this.db.transact(txs)

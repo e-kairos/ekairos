@@ -24,6 +24,11 @@ export const eventsDomain = domain("events")
                 createdAt: i.date(),
                 updatedAt: i.date().optional(),
                 status: i.string().optional().indexed(), // executing | completed | failed
+                parentContextId: i.string().optional().indexed(),
+                parentExecutionId: i.string().optional().indexed(),
+                parentStepId: i.string().optional().indexed(),
+                parentTriggerEventId: i.string().optional().indexed(),
+                parentReactionEventId: i.string().optional().indexed(),
                 workflowRunId: i.string().optional().indexed(),
                 activeStreamId: i.string().optional().indexed(),
                 activeStreamClientId: i.string().optional().indexed(),
@@ -151,6 +156,10 @@ export const eventsDomain = domain("events")
             contextExecutionItems: {
                 forward: { on: "event_items", has: "one", label: "execution" },
                 reverse: { on: "event_executions", has: "many", label: "items" },
+            },
+            contextExecutionParent: {
+                forward: { on: "event_executions", has: "one", label: "parentExecution" },
+                reverse: { on: "event_executions", has: "many", label: "childExecutions" },
             },
             contextPartsStep: {
                 forward: { on: "event_parts", has: "one", label: "step" },

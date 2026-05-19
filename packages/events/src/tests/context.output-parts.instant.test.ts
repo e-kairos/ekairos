@@ -9,7 +9,6 @@ import { z } from "zod"
 import {
   createContext,
   createScriptedReactor,
-  didToolExecute,
   eventsDomain,
   type ContextToolExecuteContext,
   type ContextItem,
@@ -176,35 +175,6 @@ describeInstant("context output parts + Instant runtime", () => {
         ...(stored.content ?? {}),
         actorId: env.actorId,
       }))
-      .narrative(() => "Create one preview tool call and complete it.")
-      .actions(() => ({
-        inspect_region: tool({
-          description: "Return a text explanation plus an image crop artifact.",
-          inputSchema: z.object({
-            rect: z.object({
-              x: z.number(),
-              y: z.number(),
-              width: z.number(),
-              height: z.number(),
-            }),
-          }),
-          execute: async ({ rect }) => ({
-            type: "content" as const,
-            value: [
-              {
-                type: "text" as const,
-                text: `Zoomed crop for x:${rect.x} y:${rect.y} w:${rect.width} h:${rect.height}`,
-              },
-              {
-                type: "image-data" as const,
-                data: "QUFBQQ==",
-                mediaType: "image/png",
-                filename: "inspect-region.png",
-              },
-            ],
-          }),
-        }),
-      }))
       .reactor(
         createScriptedReactor({
           steps: [
@@ -238,19 +208,50 @@ describeInstant("context output parts + Instant runtime", () => {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "inspect_region"))
       .build()
 
-    const shell = await previewContext.react(createTriggerEvent("zoom here"), {
-      runtime,
-      context: { key: contextKey },
-      durable: false,
-      options: {
-        silent: true,
-        maxIterations: 2,
-        maxModelSteps: 1,
+    const shell = await previewContext.react(
+      createTriggerEvent("zoom here"),
+      {
+        runtime,
+        context: { key: contextKey },
       },
-    })
+      async (execution) => {
+        await execution.prompt("inspect-region", {
+          instructions: "Create one preview tool call and complete it.",
+          maxModelSteps: 1,
+          actions: {
+            inspect_region: tool({
+              description: "Return a text explanation plus an image crop artifact.",
+              inputSchema: z.object({
+                rect: z.object({
+                  x: z.number(),
+                  y: z.number(),
+                  width: z.number(),
+                  height: z.number(),
+                }),
+              }),
+              execute: async ({ rect }) => ({
+                type: "content" as const,
+                value: [
+                  {
+                    type: "text" as const,
+                    text: `Zoomed crop for x:${rect.x} y:${rect.y} w:${rect.width} h:${rect.height}`,
+                  },
+                  {
+                    type: "image-data" as const,
+                    data: "QUFBQQ==",
+                    mediaType: "image/png",
+                    filename: "inspect-region.png",
+                  },
+                ],
+              }),
+            }),
+          },
+        })
+        return execution.end()
+      },
+    )
     const result = await shell.run!
 
     const snapshot = await currentDb().query({
@@ -330,16 +331,6 @@ describeInstant("context output parts + Instant runtime", () => {
         ...(stored.content ?? {}),
         actorId: env.actorId,
       }))
-      .narrative(() => "Create one runtime-aware tool call and complete it.")
-      .actions(() => ({
-        inspect_runtime: tool({
-          description: "Return runtime/env metadata as structured JSON.",
-          inputSchema: z.object({
-            note: z.string(),
-          }),
-          execute: inspectRuntimeExecute,
-        }),
-      }))
       .reactor(
         createScriptedReactor({
           steps: [
@@ -373,19 +364,31 @@ describeInstant("context output parts + Instant runtime", () => {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "inspect_runtime"))
       .build()
 
-    const shell = await runtimeAwareContext.react(createTriggerEvent("inspect runtime"), {
-      runtime,
-      context: { key: contextKey },
-      durable: false,
-      options: {
-        silent: true,
-        maxIterations: 2,
-        maxModelSteps: 1,
+    const shell = await runtimeAwareContext.react(
+      createTriggerEvent("inspect runtime"),
+      {
+        runtime,
+        context: { key: contextKey },
       },
-    })
+      async (execution) => {
+        await execution.prompt("inspect-runtime", {
+          instructions: "Create one runtime-aware tool call and complete it.",
+          maxModelSteps: 1,
+          actions: {
+            inspect_runtime: tool({
+              description: "Return runtime/env metadata as structured JSON.",
+              inputSchema: z.object({
+                note: z.string(),
+              }),
+              execute: inspectRuntimeExecute,
+            }),
+          },
+        })
+        return execution.end()
+      },
+    )
     const result = await shell.run!
 
     const snapshot = await currentDb().query({

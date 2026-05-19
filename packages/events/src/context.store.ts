@@ -54,6 +54,14 @@ export type ContextExecution = {
   status: ExecutionStatus
 }
 
+export type ContextExecutionParent = {
+  contextId?: string
+  executionId?: string
+  stepId?: string
+  triggerEventId?: string
+  reactionEventId?: string
+} | null
+
 export interface ContextStore {
   getOrCreateContext<C>(contextIdentifier: ContextIdentifier | null): Promise<StoredContext<C>>
   getContext<C>(contextIdentifier: ContextIdentifier): Promise<StoredContext<C> | null>
@@ -73,6 +81,7 @@ export interface ContextStore {
     contextIdentifier: ContextIdentifier,
     triggerEventId: string,
     reactionEventId: string,
+    opts?: { parent?: ContextExecutionParent },
   ): Promise<{ id: string }>
 
   completeExecution(

@@ -1,13 +1,12 @@
 import { z } from "zod"
 
-import { createContext, defineAction } from "./context.js"
+import { createAiSdkReactor, createContext, defineAction } from "./context.js"
 import { didToolExecute } from "./context.toolcalls.js"
 import type { ContextEnvironment } from "./context.config.js"
 import type {
   ContextModelInit,
   ContextOptions,
   ContextReactParams,
-  ContextShouldContinueArgs,
 } from "./context.engine.js"
 import type { ContextTool } from "./context.action.js"
 import type { ContextKey } from "./context.registry.js"
@@ -103,24 +102,17 @@ export type CodexContextBuilderConfig<
   executeCodex: (
     args: CodexExecuteArgs<Context, Env>,
   ) => Promise<CodexToolOutput>
-  narrative?: (
+  instructions?: (
     context: StoredContext<Context>,
     env: Env,
   ) => Promise<string> | string
-  system?: (
-    context: StoredContext<Context>,
-    env: Env,
-  ) => Promise<string> | string
-  actions?: (
+  promptActions?: (
     context: StoredContext<Context>,
     env: Env,
   ) => Promise<Record<string, ContextTool<Context, Env>>> | Record<string, ContextTool<Context, Env>>
   model?:
     | ContextModelInit
     | ((context: StoredContext<Context>, env: Env) => ContextModelInit)
-  shouldContinue?: (
-    args: ContextShouldContinueArgs<Context, Env>,
-  ) => Promise<boolean> | boolean
   toolName?: string
   toolDescription?: string
   opts?: ContextOptions<Context, Env>
@@ -166,7 +158,7 @@ function toString(value: unknown): string {
   return value.trim()
 }
 
-export function buildDefaultCodexNarrative(content: unknown): string {
+export function buildDefaultCodexInstructions(content: unknown): string {
   const record = toRecord(content)
   const sessionId = toString(record.sessionId)
   const repoUrl = toString(record.repoUrl)
@@ -203,54 +195,95 @@ export function createCodexContextBuilder<
     config.toolDescription ??
     "Run the coding request using a Codex app server and stream output."
 
-  const narrative =
-    config.narrative ??
-    config.system ??
+  const instructions =
+    config.instructions ??
     ((ctx: StoredContext<Context>) =>
-      buildDefaultCodexNarrative((ctx as any)?.content))
+      buildDefaultCodexInstructions((ctx as any)?.content))
 
-  const model =
-    config.model ??
-    ((_ctx: StoredContext<Context>, env: Env) =>
-      (typeof env.model === "string" && env.model.trim()) || DEFAULT_CODEX_MODEL)
+  const resolveModel = async (ctx: StoredContext<Context>, env: Env) => {
+    if (typeof config.model === "function") {
+      return config.model(ctx, env)
+    }
+    return (
+      config.model ??
+      ((typeof env.model === "string" && env.model.trim()) || DEFAULT_CODEX_MODEL)
+    )
+  }
 
-  const shouldContinue =
-    config.shouldContinue ??
-    ((args: ContextShouldContinueArgs<Context, Env>) =>
-      !didToolExecute(args.reactionEvent, toolName))
+  const reactor = createAiSdkReactor<any, Env>({
+    model: async ({ context, runtime }) =>
+      resolveModel(context as StoredContext<Context>, (runtime as any).env as Env),
+  })
 
   let builder = createContext<Env>(config.key)
-    .context(config.context)
-    .narrative(narrative)
-    .actions(async (ctx, env) => {
-      const additional = config.actions ? await config.actions(ctx, env) : {}
-      if (Object.prototype.hasOwnProperty.call(additional, toolName)) {
-        throw new Error(
-          `createCodexContextBuilder: action "${toolName}" is reserved for Codex.`,
-        )
-      }
-      return {
-        ...additional,
-        [toolName]: defineAction({
-          description: toolDescription,
-          input: codexToolInputSchema,
-          output: codexToolOutputSchema,
-          execute: async ({ input }) =>
-            await config.executeCodex({
-              context: ctx,
-              env,
-              input,
-              toolName,
-            }),
-        }),
-      }
-    })
-    .model(model as any)
-    .shouldContinue(shouldContinue as any)
+    .context(config.context as any)
+    .reactor(reactor as any)
+
+  const buildActions = async (ctx: StoredContext<Context>, env: Env) => {
+    const additional = config.promptActions ? await config.promptActions(ctx, env) : {}
+    if (Object.prototype.hasOwnProperty.call(additional, toolName)) {
+      throw new Error(
+        `createCodexContextBuilder: action "${toolName}" is reserved for Codex.`,
+      )
+    }
+    return {
+      ...additional,
+      [toolName]: defineAction({
+        description: toolDescription,
+        input: codexToolInputSchema,
+        output: codexToolOutputSchema,
+        execute: async ({ input }) =>
+          await config.executeCodex({
+            context: ctx,
+            env,
+            input,
+            toolName,
+          }),
+      }),
+    }
+  }
 
   if (config.opts) {
     builder = builder.opts(config.opts)
   }
 
-  return builder as unknown as CodexContextBuilder<Context, Env>
+  const instance = builder.build() as unknown as ContextInstance<Context, Env>
+
+  const react = async (
+    triggerEvent: ContextItem,
+    params: ContextReactParams<Env>,
+  ) => {
+    const runtimeEnv = (params.runtime as any).env as Env
+    const shell = await instance.react(triggerEvent, params, async (execution) => {
+      await execution.prompt(toolName, {
+        instructions: await instructions(execution.state, runtimeEnv),
+        actions: (await buildActions(execution.state, runtimeEnv)) as any,
+        maxModelSteps: 5,
+      })
+      return execution.end()
+    })
+
+    return {
+      contextId: String(shell.context.id),
+      context: shell.context,
+      triggerEventId: String(shell.trigger.id),
+      reactionEventId: String(shell.reaction.id),
+      executionId: String(shell.execution.id),
+    }
+  }
+
+  return {
+    key: config.key,
+    react,
+    stream: react,
+    register() {
+      builder.register()
+    },
+    config() {
+      return config
+    },
+    build() {
+      return instance
+    },
+  } as CodexContextBuilder<Context, Env>
 }

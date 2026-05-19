@@ -1,8 +1,8 @@
 /**
  * Runtime-only entrypoint for @ekairos/events.
  *
- * This file intentionally exports the "wiring" pieces that connect durable steps to a concrete
- * store runtime (Instant/Postgres/etc).
+ * This file intentionally exports the workflow-safe "use step" pieces that connect event
+ * persistence to a concrete store runtime (Instant/Postgres/etc).
  *
  * IMPORTANT:
  * - Do NOT import this entrypoint from client/browser code.
@@ -24,10 +24,9 @@ if (typeof (globalThis as any).Event === "undefined") {
 
 // Workflow bundles only register `use step` functions that are reachable from a
 // workflow/runtime entrypoint. Keep the internal context steps reachable whenever
-// apps import `@ekairos/events/runtime` to configure durable context execution.
+// apps import `@ekairos/events/runtime`.
 import "./reactors/ai-sdk.step.js"
 import "./runtime.step.js"
-import "./steps/durable.steps.js"
 import "./steps/store.steps.js"
 import "./steps/stream.steps.js"
 import "./steps/trace.steps.js"
@@ -47,7 +46,6 @@ export {
 export type { ContextEnvironment, ContextRuntime } from "./context.config.js"
 
 export { registerContextEnv, getContextEnv } from "./env.js"
-export { configureContextDurableWorkflow } from "./context.durable.js"
 
 export type RegistrableContext = {
   key?: string

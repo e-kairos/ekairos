@@ -2,11 +2,7 @@ export {
   ContextEngine,
   type ContextOptions,
   type ContextStreamOptions,
-  type ShouldContinue,
-  type ContextShouldContinueArgs,
   type ContextReactParams,
-  type ContextDirectReactParams,
-  type ContextDurableReactParams,
   type ContextReactResult,
   type ContextReactBase,
   type ContextReactFinalResult,
@@ -18,12 +14,8 @@ export {
   type ContextExecutionPromptResult,
   type ContextDirectRun,
   type ContextReactRun,
-  type ContextWorkflowRun,
-  type ContextDurableWorkflowPayload,
-  type ContextDurableWorkflowFunction,
   type ContextModelInit,
   type ContextToolExecuteContext,
-  runContextReactionDirect,
 } from "./context.engine.js"
 
 export {

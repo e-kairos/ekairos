@@ -20,8 +20,6 @@ export {
   action,
   type RegistrableContextBuilder,
   type ContextReactParams,
-  type ContextDirectReactParams,
-  type ContextDurableReactParams,
   type ContextReactResult,
   type ContextReactBase,
   type ContextReactFinalResult,
@@ -33,9 +31,6 @@ export {
   type ContextExecutionPromptResult,
   type ContextDirectRun,
   type ContextReactRun,
-  type ContextWorkflowRun,
-  type ContextDurableWorkflowPayload,
-  type ContextDurableWorkflowFunction,
   type ContextModelInit,
   type ContextTool,
   type ContextAction,
@@ -53,7 +48,6 @@ export {
   type ContextProviderDefinedAction,
   type ContextActionSchema,
   type ContextToolExecuteContext,
-  runContextReactionDirect,
 } from "./context.js"
 
 export type {
@@ -62,6 +56,7 @@ export type {
   StoredContext,
   ContextItem,
   ContextExecution,
+  ContextExecutionParent,
 } from "./context.store.js"
 
 export type {
@@ -193,7 +188,7 @@ export {
   DEFAULT_CODEX_TOOL_NAME,
   DEFAULT_CODEX_MODEL,
   codexToolInputSchema,
-  buildDefaultCodexNarrative,
+  buildDefaultCodexInstructions,
   didCodexToolExecute,
   createCodexContextBuilder,
   type CodexContextRuntimeMode,

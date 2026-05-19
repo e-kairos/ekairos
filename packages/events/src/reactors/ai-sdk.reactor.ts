@@ -18,6 +18,15 @@ export type CreateAiSdkReactorOptions<
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
   Config = unknown,
 > = {
+  model?:
+    | ContextModelInit
+    | ((params: {
+        runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>
+        context: StoredContext<Context>
+        triggerEvent: ContextItem
+        baseModel: ContextModelInit
+        config: Config | undefined
+      }) => Promise<ContextModelInit> | ContextModelInit)
   resolveConfig?: (params: {
     runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>
     context: StoredContext<Context>
@@ -73,15 +82,25 @@ export function createAiSdkReactor<
     }
 
     const model =
-      options?.selectModel && config !== undefined
-        ? await options.selectModel({
+      typeof options?.model === "function" && options.model.length > 0
+        ? await options.model({
             runtime: params.runtime,
             context: params.context,
             triggerEvent: params.triggerEvent,
             baseModel: params.model,
             config,
           })
-        : params.model
+        : options?.model !== undefined
+          ? options.model
+          : options?.selectModel && config !== undefined
+            ? await options.selectModel({
+                runtime: params.runtime,
+                context: params.context,
+                triggerEvent: params.triggerEvent,
+                baseModel: params.model,
+                config,
+              })
+            : params.model
 
     const maxSteps =
       options?.selectMaxModelSteps && config !== undefined
@@ -105,7 +124,6 @@ export function createAiSdkReactor<
       iteration: params.iteration,
       maxSteps,
       sendStart: params.sendStart,
-      silent: params.silent,
       contextStepStream: params.contextStepStream,
       writable: params.writable,
       executionId: params.executionId,

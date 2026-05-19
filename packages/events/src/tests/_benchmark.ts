@@ -91,12 +91,12 @@ export function summarizeContextBenchmarkComponents(stageTimingsMs: Record<strin
     instantDbQueryMs: readMs(stageTimingsMs, "react.network.queryMs"),
     instantDbTransactMs: readMs(stageTimingsMs, "react.network.transactMs"),
     contextPersistenceMs: sumWallStages(stageTimingsMs, (name) =>
-      /(^react\.initializeContextMs$|^react\.openExecutionMs$|^react\.bootstrapContextLookupMs$|\.createStepMs$|\.openExecutionStepMs$|\.persistContextMs$|\.loadEventsMs$|\.saveStepPartsMs$|\.saveExecutionStepOutputMs$|\.persistAssistantReactionMs$|\.markStepRunningMs$|\.completeStepMs$|\.completeExecutionStepMs$|\.completeExecutionMs$|^react\.durable\.persistWorkflowRunIdMs$)/.test(
+      /(^react\.initializeContextMs$|^react\.openExecutionMs$|^react\.bootstrapContextLookupMs$|\.createStepMs$|\.openExecutionStepMs$|\.persistContextMs$|\.loadEventsMs$|\.saveStepPartsMs$|\.saveExecutionStepOutputMs$|\.persistAssistantReactionMs$|\.markStepRunningMs$|\.completeStepMs$|\.completeExecutionStepMs$|\.completeExecutionMs$)/.test(
         name,
       ),
     ),
     contextDslMs: sumWallStages(stageTimingsMs, (name) =>
-      /(\.contextMs$|\.narrativeMs$|\.actionsMs$|\.skillsMs$|\.expandEventsMs$|\.shouldContinueMs$)/.test(
+      /(\.contextMs$|\.promptMs$|\.skillsMs$|\.expandEventsMs$)/.test(
         name,
       ),
     ),
@@ -104,9 +104,9 @@ export function summarizeContextBenchmarkComponents(stageTimingsMs: Record<strin
     actionExecutionMs: sumWallStages(stageTimingsMs, (name) =>
       /\.actionExecutionMs$/.test(name),
     ),
-    workflowApiImportMs: readMs(stageTimingsMs, "react.durable.importWorkflowApiMs"),
-    workflowStartMs: readMs(stageTimingsMs, "react.durable.startWorkflowMs"),
-    workflowRunIdPersistMs: readMs(stageTimingsMs, "react.durable.persistWorkflowRunIdMs"),
+    workflowApiImportMs: 0,
+    workflowStartMs: 0,
+    workflowRunIdPersistMs: 0,
   }
 }
 

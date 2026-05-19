@@ -1,5 +1,3 @@
-import type { UIMessageChunk } from "ai"
-
 import type { ContextEnvironment } from "../context.config.js"
 import type { ContextRuntime } from "../context.runtime.js"
 import { getContextRuntimeServices } from "../context.runtime.js"
@@ -9,6 +7,7 @@ import type {
   ContextIdentifier,
   StoredContext,
   ContextStatus,
+  ContextExecutionParent,
 } from "../context.store.js"
 import type { ContextStreamEvent } from "../context.stream.js"
 import { OUTPUT_ITEM_TYPE, WEB_CHANNEL } from "../context.events.js"
@@ -160,7 +159,6 @@ function logStepDebug(message: string, payload: Record<string, unknown>) {
 export async function initializeContext<C>(
   params: RuntimeParams & {
     contextIdentifier: ContextIdentifier | null
-    opts?: { silent?: boolean; writable?: WritableStream<UIMessageChunk> }
   },
 ): Promise<{ context: StoredContext<C>; isNew: boolean }> {
   "use step"
@@ -252,6 +250,7 @@ export async function openExecution(params: {
   runtime: ContextRuntime<ContextEnvironment>
   contextIdentifier: ContextIdentifier
   triggerEvent: ContextItem
+  parent?: ContextExecutionParent
 }): Promise<{
   triggerEvent: ContextItem
   reactionEvent: ContextItem
@@ -322,6 +321,7 @@ export async function openExecution(params: {
       params.contextIdentifier,
       saved.id,
       savedReaction.id,
+      { parent: params.parent },
     )
   } catch (error) {
     logStepDebug("openExecution:createExecution:error", {
@@ -598,6 +598,7 @@ export async function createExecution(
     contextIdentifier: ContextIdentifier
     triggerEventId: string
     reactionEventId: string
+    parent?: ContextExecutionParent
   },
 ): Promise<{ id: string }> {
   "use step"
@@ -606,6 +607,7 @@ export async function createExecution(
     params.contextIdentifier,
     params.triggerEventId,
     params.reactionEventId,
+    { parent: params.parent },
   )
 }
 
@@ -613,6 +615,7 @@ export async function createReactionItem(params: {
   runtime: ContextRuntime<ContextEnvironment>
   contextIdentifier: ContextIdentifier
   triggerEventId: string
+  parent?: ContextExecutionParent
 }): Promise<{ reactionEventId: string; executionId: string }> {
   "use step"
   const { runtime } = await getRuntimeAndEnv(params)
@@ -629,6 +632,7 @@ export async function createReactionItem(params: {
     params.contextIdentifier,
     params.triggerEventId,
     reactionEventId,
+    { parent: params.parent },
   )
 
   return { reactionEventId, executionId: execution.id }

@@ -1,16 +1,12 @@
-﻿import { tool } from "ai"
+import { tool } from "ai"
 import { z } from "zod"
 
 import {
   createContext,
   createScriptedReactor,
-  didToolExecute,
-  runContextReactionDirect,
-  type ContextToolExecuteContext,
-  type ContextDurableWorkflowPayload,
   type ContextItem,
+  type ContextToolExecuteContext,
 } from "../../index.ts"
-import { configureContextDurableWorkflow } from "../../runtime.ts"
 import { EventsTestRuntime } from "./context.test-runtime.ts"
 
 export type WorkflowSmokeEnv = {
@@ -52,74 +48,12 @@ export function buildTriggerEvent(text = "ping"): ContextItem {
   }
 }
 
-async function createSmokeSuccessModel() {
-  "use step";
-  return createSmokeModelForTool("story-smoke-success")
-}
-
-async function createSmokeToolErrorModel() {
-  "use step";
-  return createSmokeModelForTool("story-smoke-tool-error")
-}
-
-async function createSmokeModelForTool(modelId: string) {
-  "use step";
-
-  const { simulateReadableStream } = await import("ai")
-  const { MockLanguageModelV2 } = await import("ai/test")
-
-  return new MockLanguageModelV2({
-    provider: "context-tests",
-    modelId,
-    doGenerate: async () => ({
-      content: [
-        { type: "text", text: "AI SDK reactor requesting echo." },
-        {
-          type: "tool-call",
-          toolCallId: "smoke-tool-call",
-          toolName: "echo",
-          input: JSON.stringify({ message: "ping" }),
-        },
-      ],
-      finishReason: "tool-calls",
-      usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
-      warnings: [],
-    }),
-    doStream: async () => ({
-      stream: simulateReadableStream({
-        initialDelayInMs: null,
-        chunkDelayInMs: null,
-        chunks: [
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "text_1" },
-          { type: "text-delta", id: "text_1", delta: "AI SDK reactor requesting echo." },
-          { type: "text-end", id: "text_1" },
-          { type: "tool-input-start", id: "smoke-tool-call", toolName: "echo" },
-          { type: "tool-input-delta", id: "smoke-tool-call", delta: "{\"message\":\"ping\"}" },
-          { type: "tool-input-end", id: "smoke-tool-call" },
-          {
-            type: "tool-call",
-            toolCallId: "smoke-tool-call",
-            toolName: "echo",
-            input: JSON.stringify({ message: "ping" }),
-          },
-          {
-            type: "finish",
-            finishReason: "tool-calls",
-            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
-          },
-        ],
-      }),
-    }),
-  })
-}
-
 async function executeEchoTool(
   { message }: { message: string },
   ctx: ContextToolExecuteContext<any, WorkflowSmokeEnv>,
   mode: WorkflowSmokeEnv["mode"],
 ) {
-  "use step";
+  "use step"
 
   if (mode === "tool-error") {
     throw new Error("echo_failed")
@@ -140,72 +74,59 @@ async function executeEchoTool(
   }
 }
 
-function createStorySmoke(mode: WorkflowSmokeEnv["mode"]) {
-  if (mode === "scripted") {
-    return createContext<WorkflowSmokeEnv>("story.smoke.scripted")
-      .context((ctx) => ({ ...(ctx.content ?? {}) }))
-      .narrative(() => "Story smoke deterministic workflow (scripted reactor).")
-      .actions(() => ({
-        echo: tool({
-          description: "Return the input payload as a simple echo response.",
-          inputSchema: z.object({ message: z.string() }),
-          execute: (input, ctx) => executeEchoTool(input, ctx, mode),
-        }),
-      }))
-      .reactor(
-        createScriptedReactor({
-          steps: [
-            {
-              assistantEvent: {
-                content: {
-                  parts: [
-                    { type: "text", text: "Scripted reactor requesting echo." },
-                    {
-                      type: "tool-echo",
-                      toolCallId: "scripted-smoke-tool-call",
-                      input: { message: "ping" },
-                    },
-                  ],
-                },
-              },
-              actionRequests: [
-                {
-                  actionRef: "scripted-smoke-tool-call",
-                  actionName: "echo",
-                  input: { message: "ping" },
-                },
-              ],
-              messagesForModel: [],
-            },
-          ],
-        }),
-      )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "echo"))
-      .build()
-  }
+function createEchoAction(mode: WorkflowSmokeEnv["mode"]) {
+  return tool({
+    description: "Return the input payload as a simple echo response.",
+    inputSchema: z.object({ message: z.string() }),
+    execute: (input, ctx) => executeEchoTool(input, ctx, mode),
+  })
+}
 
-  const storyKey = mode === "tool-error" ? "story.smoke.tool-error" : "story.smoke"
-  const model = mode === "tool-error" ? createSmokeToolErrorModel : createSmokeSuccessModel
-  return createContext<WorkflowSmokeEnv>(storyKey)
-    .context((ctx) => ({ ...(ctx.content ?? {}) }))
-    .narrative(() => "Story smoke deterministic workflow.")
-    .actions(() => ({
-      echo: tool({
-        description: "Return the input payload as a simple echo response.",
-        inputSchema: z.object({ message: z.string() }),
-        execute: (input, ctx) => executeEchoTool(input, ctx, mode),
-      }),
+function createStorySmoke(key: string) {
+  return createContext<WorkflowSmokeEnv>(key)
+    .context((ctx, env) => ({
+      ...(ctx.content ?? {}),
+      mode: env.mode,
     }))
-    .model(model)
-    .shouldContinue(() => false)
+    .reactor(
+      createScriptedReactor({
+        repeatLast: true,
+        steps: [
+          {
+            assistantEvent: {
+              content: {
+                parts: [
+                  { type: "text", text: "Scripted reactor requesting echo." },
+                  {
+                    type: "tool-echo",
+                    toolCallId: "scripted-smoke-tool-call",
+                    input: { message: "ping" },
+                  },
+                ],
+              },
+            },
+            actionRequests: [
+              {
+                actionRef: "scripted-smoke-tool-call",
+                actionName: "echo",
+                input: { message: "ping" },
+              },
+            ],
+            messagesForModel: [],
+          },
+        ],
+      }),
+    )
     .build()
 }
 
-export const storySmoke = createStorySmoke("success")
-export const storySmokeToolError = createStorySmoke("tool-error")
-export const storySmokeScripted = createStorySmoke("scripted")
+export const storySmoke = createStorySmoke("story.smoke")
+export const childStorySmoke = createStorySmoke("story.smoke.child")
 export const storySmokeExpandedEvents = createContext<WorkflowSmokeEnv>("story.smoke.expanded-events")
-  .context((ctx) => ({ ...(ctx.content ?? {}) }))
+  .context((ctx, env) => ({
+    ...(ctx.content ?? {}),
+    mode: env.mode,
+  }))
   .expandEvents((events) => [
     ...events,
     {
@@ -223,31 +144,15 @@ export const storySmokeExpandedEvents = createContext<WorkflowSmokeEnv>("story.s
                 type: "text",
                 text: "Derived canvas snapshot reference.",
               },
-              {
-                type: "file",
-                mediaType: "image/png",
-                filename: "canvas.png",
-                data: "QUFBQQ==",
-              },
             ],
-            metadata: {
-              canvas: {
-                sceneId: "scene_workflow_expanded",
-                sceneVersion: 7,
-                sceneRect: { x: 10, y: 20, width: 300, height: 200 },
-                scaleX: 1,
-                scaleY: 1,
-              },
-            },
           },
         ],
       },
     } satisfies ContextItem,
   ])
-  .narrative(() => "Expanded event workflow smoke.")
-  .actions(() => ({}))
   .reactor(
     createScriptedReactor({
+      repeatLast: true,
       steps: [
         (params) => {
           const sawExpandedEvent = params.events.some((event) =>
@@ -270,100 +175,177 @@ export const storySmokeExpandedEvents = createContext<WorkflowSmokeEnv>("story.s
       ],
     }),
   )
-  .shouldContinue(() => false)
   .build()
 
-export type ContextReactMatrixWorkflowInput = {
+export async function runSmokeContext(params: {
+  context: typeof storySmoke
   runtime: EventsTestRuntime<WorkflowSmokeEnv>
-  durable: boolean
+  triggerText?: string
+  parent?: {
+    contextId?: string
+    executionId?: string
+    triggerEventId?: string
+    reactionEventId?: string
+  } | null
+}) {
+  const shell = await params.context.react(
+    buildTriggerEvent(params.triggerText ?? "workflow trigger"),
+    {
+      runtime: params.runtime,
+      context: null,
+      parent: params.parent ?? null,
+    },
+    async (execution) => {
+      await execution.prompt("echo", {
+        instructions: "Story smoke deterministic workflow.",
+        maxModelSteps: 1,
+        actions: {
+          echo: createEchoAction(execution.state.content?.mode ?? params.runtime.env.mode),
+        },
+      })
+      return execution.end()
+    },
+  )
+
+  return await shell.run!
+}
+
+export type ContextReactWorkflowInput = {
+  runtime: EventsTestRuntime<WorkflowSmokeEnv>
   triggerText?: string
 }
 
-export type ContextReactMatrixWorkflowResult = {
+export type ContextReactWorkflowResult = {
   parentWorkflowRunId: string | null
-  durable: boolean
-  childRunId: string | null
-  returnValueHookToken: string | null
   contextId: string
   executionId: string
-  shellExecutionStatus: string | null
   finalExecutionStatus: string | null
   finalReactionStatus: string | null
 }
 
-export async function contextReactMatrixParentWorkflow(
-  input: ContextReactMatrixWorkflowInput,
-): Promise<ContextReactMatrixWorkflowResult> {
-  "use workflow";
+export async function contextReactParentWorkflow(
+  input: ContextReactWorkflowInput,
+): Promise<ContextReactWorkflowResult> {
+  "use workflow"
 
   const { getWorkflowMetadata } = await import("workflow")
   const parentWorkflowRunId = getWorkflowMetadata?.()?.workflowRunId
-  const shell = await storySmokeScripted.react(
-    buildTriggerEvent(input.triggerText ?? "matrix parent trigger"),
-    {
-      runtime: input.runtime,
-      context: null,
-      durable: input.durable,
-      options: {
-        maxIterations: 1,
-        maxModelSteps: 1,
-      },
-    },
-  )
-
-  const finalResult = input.durable
-    ? await shell.run!.returnValue
-    : await shell.run!
+  const finalResult = await runSmokeContext({
+    context: storySmoke,
+    runtime: input.runtime,
+    triggerText: input.triggerText,
+  })
 
   return {
     parentWorkflowRunId:
       parentWorkflowRunId === undefined || parentWorkflowRunId === null
         ? null
         : String(parentWorkflowRunId),
-    durable: input.durable,
-    childRunId: input.durable ? String((shell.run as any)?.runId ?? "") : null,
-    returnValueHookToken: input.durable
-      ? String((shell.run as any)?.returnValueHook?.token ?? "")
-      : null,
-    contextId: String(shell.context.id),
-    executionId: String(shell.execution.id),
-    shellExecutionStatus: readString(shell.execution as any, "status"),
+    contextId: String(finalResult.context.id),
+    executionId: String(finalResult.execution.id),
     finalExecutionStatus: readString(finalResult.execution as any, "status"),
     finalReactionStatus: readString(finalResult.reaction as any, "status"),
   }
 }
 
-export async function contextEngineDurableWorkflow(
-  payload: ContextDurableWorkflowPayload<WorkflowSmokeEnv>,
-) {
-  "use workflow";
-
-  const context =
-    payload.contextKey === "story.smoke.expanded-events"
-      ? storySmokeExpandedEvents
-      : payload.contextKey === "story.smoke.scripted"
-      ? storySmokeScripted
-      : payload.contextKey === "story.smoke.tool-error"
-        ? storySmokeToolError
-        : payload.contextKey === "story.smoke"
-          ? storySmoke
-          : null
-
-  if (!context) {
-    throw new Error(`Unknown context key "${payload.contextKey}" for durable workflow`)
-  }
-
-  const { getWritable } = await import("workflow")
-  return await runContextReactionDirect(context, payload.triggerEvent, {
-    runtime: payload.runtime,
-    context: payload.context ?? null,
-    durable: false,
-    options: {
-      ...(payload.options ?? {}),
-      writable: getWritable(),
-    },
-    __bootstrap: payload.bootstrap,
-  })
+export type NestedContextReactWorkflowResult = ContextReactWorkflowResult & {
+  childContextId: string
+  childExecutionId: string
+  childFinalExecutionStatus: string | null
+  childFinalReactionStatus: string | null
 }
 
-configureContextDurableWorkflow(contextEngineDurableWorkflow)
+export async function nestedContextReactWorkflow(
+  input: ContextReactWorkflowInput,
+): Promise<NestedContextReactWorkflowResult> {
+  "use workflow"
+
+  const { getWorkflowMetadata } = await import("workflow")
+  const parentWorkflowRunId = getWorkflowMetadata?.()?.workflowRunId
+  let childContextId = ""
+  let childExecutionId = ""
+  let childFinalExecutionStatus: string | null = null
+  let childFinalReactionStatus: string | null = null
+
+  const shell = await storySmoke.react(
+    buildTriggerEvent(input.triggerText ?? "nested parent trigger"),
+    {
+      runtime: input.runtime,
+      context: null,
+    },
+    async (execution) => {
+      await execution.prompt("parent-echo", {
+        instructions: "Parent context step.",
+        maxModelSteps: 1,
+        actions: {
+          echo: createEchoAction(input.runtime.env.mode),
+        },
+      })
+
+      const child = await runSmokeContext({
+        context: childStorySmoke,
+        runtime: input.runtime,
+        triggerText: "nested child trigger",
+        parent: execution,
+      })
+      childContextId = String(child.context.id)
+      childExecutionId = String(child.execution.id)
+      childFinalExecutionStatus = readString(child.execution as any, "status")
+      childFinalReactionStatus = readString(child.reaction as any, "status")
+
+      return execution.end()
+    },
+  )
+
+  const finalResult = await shell.run!
+
+  return {
+    parentWorkflowRunId:
+      parentWorkflowRunId === undefined || parentWorkflowRunId === null
+        ? null
+        : String(parentWorkflowRunId),
+    contextId: String(finalResult.context.id),
+    executionId: String(finalResult.execution.id),
+    finalExecutionStatus: readString(finalResult.execution as any, "status"),
+    finalReactionStatus: readString(finalResult.reaction as any, "status"),
+    childContextId,
+    childExecutionId,
+    childFinalExecutionStatus,
+    childFinalReactionStatus,
+  }
+}
+
+export async function expandedContextReactWorkflow(
+  input: ContextReactWorkflowInput,
+): Promise<ContextReactWorkflowResult> {
+  "use workflow"
+
+  const { getWorkflowMetadata } = await import("workflow")
+  const parentWorkflowRunId = getWorkflowMetadata?.()?.workflowRunId
+  const shell = await storySmokeExpandedEvents.react(
+    buildTriggerEvent(input.triggerText ?? "expanded workflow trigger"),
+    {
+      runtime: input.runtime,
+      context: null,
+    },
+    async (execution) => {
+      await execution.prompt("expanded-events", {
+        instructions: "Expanded event workflow smoke.",
+        maxModelSteps: 1,
+      })
+      return execution.end()
+    },
+  )
+  const finalResult = await shell.run!
+
+  return {
+    parentWorkflowRunId:
+      parentWorkflowRunId === undefined || parentWorkflowRunId === null
+        ? null
+        : String(parentWorkflowRunId),
+    contextId: String(finalResult.context.id),
+    executionId: String(finalResult.execution.id),
+    finalExecutionStatus: readString(finalResult.execution as any, "status"),
+    finalReactionStatus: readString(finalResult.reaction as any, "status"),
+  }
+}

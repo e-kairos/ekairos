@@ -1,22 +1,14 @@
 import type { DomainSchemaResult } from "@ekairos/domain"
 
 import type { ContextEnvironment } from "./context.config.js"
-import type { ContextSkillPackage } from "./context.skill.js"
 import {
   ContextEngine,
-  type ContextModelInit,
   type ContextOptions,
-  type ShouldContinue,
-  type ContextShouldContinueArgs,
   type ContextReactParams,
-  type ContextDirectReactParams,
-  type ContextDurableReactParams,
   type ContextReactResult,
   type ContextExecutionHandler,
   type ContextDirectRun,
-  type ContextWorkflowRun,
 } from "./context.engine.js"
-import type { ContextTool } from "./context.action.js"
 import type {
   ContextRuntime,
   ContextRuntimeHandleForDomain,
@@ -42,44 +34,7 @@ export interface ContextConfig<
     env: Env,
     runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
   ) => Promise<ContextItem[]> | ContextItem[]
-  narrative: (
-    context: StoredContext<Context>,
-    env: Env,
-    runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-  ) => Promise<string> | string
-  skills?: (
-    context: StoredContext<Context>,
-    env: Env,
-    runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-  ) => Promise<ContextSkillPackage[]> | ContextSkillPackage[]
-  actions: (
-    context: StoredContext<Context>,
-    env: Env,
-    runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-  ) =>
-    | Promise<Record<string, ContextTool<Context, Env, RequiredDomain>>>
-    | Record<string, ContextTool<Context, Env, RequiredDomain>>
-  /**
-   * @deprecated Use `actions()` instead.
-   */
-  tools?: (
-    context: StoredContext<Context>,
-    env: Env,
-    runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-  ) =>
-    | Promise<Record<string, ContextTool<Context, Env, RequiredDomain>>>
-    | Record<string, ContextTool<Context, Env, RequiredDomain>>
-  model?:
-    | ContextModelInit
-    | ((
-        context: StoredContext<Context>,
-        env: Env,
-        runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-      ) => ContextModelInit)
-  reactor?: ContextReactor<Context, Env, RequiredDomain>
-  shouldContinue?: (
-    args: ContextShouldContinueArgs<Context, Env, RequiredDomain>,
-  ) => Promise<ShouldContinue> | ShouldContinue
+  reactor: ContextReactor<Context, Env, RequiredDomain>
   opts?: ContextOptions<Context, Env, RequiredDomain>
 }
 
@@ -91,20 +46,6 @@ export type ContextInstance<
   readonly __config: ContextConfig<Context, Env, RequiredDomain>
   readonly __contextKey?: ContextKey
   readonly __contextDomain?: RequiredDomain
-}
-
-function isDynamicModelSelector<
-  Context,
-  Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
->(
-  model: ContextConfig<Context, Env, RequiredDomain>["model"],
-): model is (
-  context: StoredContext<Context>,
-  env: Env,
-  runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-) => ContextModelInit {
-  return typeof model === "function" && model.length >= 1
 }
 
 export function context<
@@ -138,47 +79,27 @@ export function context<
     }
 
     protected async buildSystemPrompt(
-      contextValue: StoredContext<Context>,
-      env: Env,
-      runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+      _contextValue: StoredContext<Context>,
+      _env: Env,
+      _runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
     ) {
-      if (config.narrative) return config.narrative(contextValue, env, runtime)
-      throw new Error("Context config is missing narrative()")
+      return ""
     }
 
     protected async buildSkills(
-      contextValue: StoredContext<Context>,
-      env: Env,
-      runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+      _contextValue: StoredContext<Context>,
+      _env: Env,
+      _runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
     ) {
-      if (config.skills) return config.skills(contextValue, env, runtime)
       return []
     }
 
     protected async buildTools(
-      contextValue: StoredContext<Context>,
-      env: Env,
-      runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+      _contextValue: StoredContext<Context>,
+      _env: Env,
+      _runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
     ) {
-      if (config.actions) return config.actions(contextValue, env, runtime)
-      if (config.tools) return config.tools(contextValue, env, runtime)
-      throw new Error("Context config is missing actions()")
-    }
-
-    protected getModel(
-      contextValue: StoredContext<Context>,
-      env: Env,
-      runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-    ) {
-      if (isDynamicModelSelector(config.model)) return config.model(contextValue, env, runtime)
-      return config.model ?? super.getModel(contextValue, env, runtime)
-    }
-
-    protected async shouldContinue(
-      args: ContextShouldContinueArgs<Context, Env, RequiredDomain>,
-    ) {
-      if (config.shouldContinue) return config.shouldContinue(args)
-      return true
+      return {}
     }
   }
 
@@ -199,38 +120,6 @@ type InferContextFromInitializer<I extends AnyContextInitializer<any, any>> = Aw
   ReturnType<I>
 >
 
-type BuilderSystemPrompt<
-  Context,
-  Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
-> = (
-  context: StoredContext<Context>,
-  env: Env,
-  runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-) => Promise<string> | string
-
-type BuilderSkills<
-  Context,
-  Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
-> = (
-  context: StoredContext<Context>,
-  env: Env,
-  runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-) => Promise<ContextSkillPackage[]> | ContextSkillPackage[]
-
-type BuilderTools<
-  Context,
-  Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
-> = (
-  context: StoredContext<Context>,
-  env: Env,
-  runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-) =>
-  | Promise<Record<string, ContextTool<Context, Env, RequiredDomain>>>
-  | Record<string, ContextTool<Context, Env, RequiredDomain>>
-
 type BuilderExpandEvents<
   Context,
   Env extends ContextEnvironment,
@@ -241,26 +130,6 @@ type BuilderExpandEvents<
   env: Env,
   runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
 ) => Promise<ContextItem[]> | ContextItem[]
-
-type BuilderShouldContinue<
-  Context,
-  Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
-> = (
-  args: ContextShouldContinueArgs<Context, Env, RequiredDomain>,
-) => Promise<ShouldContinue> | ShouldContinue
-
-type BuilderModel<
-  Context,
-  Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
-> =
-  | ContextModelInit
-  | ((
-      context: StoredContext<Context>,
-      env: Env,
-      runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
-    ) => ContextModelInit)
 
 export type RegistrableContextBuilder = {
   key: ContextKey
@@ -274,46 +143,13 @@ type FluentContextBuilder<
 > = {
   key: ContextKey
   expandEvents(fn: BuilderExpandEvents<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
-  narrative(fn: BuilderSystemPrompt<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
-  system(fn: BuilderSystemPrompt<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
-  skills(fn: BuilderSkills<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
-  actions(fn: BuilderTools<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
-  tools(fn: BuilderTools<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
-  model(model: BuilderModel<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
   reactor(reactor: ContextReactor<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
-  shouldContinue(fn: BuilderShouldContinue<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
   opts(opts: ContextOptions<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
-  react<Runtime extends ContextRuntime<Env>>(
-    triggerEvent: ContextItem,
-    params: ContextDurableReactParams<Env, RequiredDomain, Runtime>,
-  ): Promise<ContextReactResult<Context, ContextWorkflowRun<Context>>>
-  react<Runtime extends ContextRuntime<Env>>(
-    triggerEvent: ContextItem,
-    params: ContextDirectReactParams<Env, RequiredDomain, Runtime>,
-  ): Promise<ContextReactResult<Context, ContextDirectRun<Context>>>
-  react<Runtime extends ContextRuntime<Env>>(
-    triggerEvent: ContextItem,
-    params: ContextReactParams<Env, RequiredDomain, Runtime>,
-  ): ReturnType<
-    ContextEngine<Context, Env, RequiredDomain>["react"]
-  >
   react<Runtime extends ContextRuntime<Env>>(
     triggerEvent: ContextItem,
     params: ContextReactParams<Env, RequiredDomain, Runtime>,
     handler: ContextExecutionHandler<Context, Env, RequiredDomain>,
   ): Promise<ContextReactResult<Context, ContextDirectRun<Context>>>
-  stream<Runtime extends ContextRuntime<Env>>(
-    triggerEvent: ContextItem,
-    params: ContextDurableReactParams<Env, RequiredDomain, Runtime>,
-  ): Promise<ContextReactResult<Context, ContextWorkflowRun<Context>>>
-  stream<Runtime extends ContextRuntime<Env>>(
-    triggerEvent: ContextItem,
-    params: ContextDirectReactParams<Env, RequiredDomain, Runtime>,
-  ): Promise<ContextReactResult<Context, ContextDirectRun<Context>>>
-  stream<Runtime extends ContextRuntime<Env>>(
-    triggerEvent: ContextItem,
-    params: ContextReactParams<Env, RequiredDomain, Runtime>,
-  ): ReturnType<ContextEngine<Context, Env, RequiredDomain>["react"]>
   register(): void
   config(): ContextConfig<Context, Env, RequiredDomain>
   build(): ContextInstance<Context, Env, RequiredDomain>
@@ -341,11 +177,8 @@ function assertConfigComplete<
   if (!config.context) {
     throw new Error("createContext: you must define context() before building the Context.")
   }
-  if (!config.narrative) {
-    throw new Error("createContext: you must define narrative() before building the Context.")
-  }
-  if (!config.actions && !config.tools) {
-    throw new Error("createContext: you must define actions() before building the Context.")
+  if (!config.reactor) {
+    throw new Error("createContext: you must define reactor() before building the Context.")
   }
 }
 
@@ -409,36 +242,8 @@ export function createContext<
         fluentState.expandEvents = fn
         return builder
       },
-      narrative(narrative) {
-        fluentState.narrative = narrative
-        return builder
-      },
-      system(system) {
-        fluentState.narrative = system
-        return builder
-      },
-      skills(skillsFactory) {
-        fluentState.skills = skillsFactory
-        return builder
-      },
-      actions(actionsFactory) {
-        fluentState.actions = actionsFactory
-        return builder
-      },
-      tools(toolsFactory) {
-        fluentState.actions = toolsFactory
-        return builder
-      },
-      model(model) {
-        fluentState.model = model as any
-        return builder
-      },
       reactor(reactor) {
         fluentState.reactor = reactor
-        return builder
-      },
-      shouldContinue(fn) {
-        fluentState.shouldContinue = fn as any
         return builder
       },
       opts(options) {
@@ -448,21 +253,13 @@ export function createContext<
       react: ((
         triggerEvent: ContextItem,
         params: ContextReactParams<Env, RequiredDomain>,
-        handler?: ContextExecutionHandler<Context, Env, RequiredDomain>,
+        handler: ContextExecutionHandler<Context, Env, RequiredDomain>,
       ) =>
-        handler
-          ? getOrBuild().react(triggerEvent, params as any, handler as any)
-          : getOrBuild().react(triggerEvent, params as any)) as FluentContextBuilder<
+        getOrBuild().react(triggerEvent, params as any, handler as any)) as FluentContextBuilder<
         Context,
         Env,
         RequiredDomain
       >["react"],
-      stream: ((triggerEvent: ContextItem, params: ContextReactParams<Env, RequiredDomain>) =>
-        builder.react(triggerEvent, params as any)) as FluentContextBuilder<
-        Context,
-        Env,
-        RequiredDomain
-      >["stream"],
       register() {
         getOrBuild()
       },

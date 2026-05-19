@@ -9,7 +9,6 @@ import { randomUUID } from "node:crypto"
 import {
   createScriptedReactor,
   createContext,
-  didToolExecute,
   eventsDomain,
   type ContextItem,
 } from "../index.ts"
@@ -92,7 +91,7 @@ describeInstant("context scripted reactor + Instant runtime", () => {
     }
   }, 5 * 60 * 1000)
 
-  itInstant("executes directly in non-durable mode and completes persisted shell state", async () => {
+  itInstant("executes directly in explicit mode and completes persisted shell state", async () => {
     const timer = createStageTimer()
     const contextKey = `context-scripted-context:${Date.now()}`
     const runtime = new EventsTestRuntime({
@@ -107,14 +106,6 @@ describeInstant("context scripted reactor + Instant runtime", () => {
         ...(stored.content ?? {}),
         orgId: env.orgId,
         actorId: env.actorId,
-      }))
-      .narrative(() => "Deterministic scripted test context.")
-      .actions(() => ({
-        set_status: tool({
-          description: "Apply deterministic status update.",
-          inputSchema: z.object({ value: z.string() }),
-          execute: async ({ value }) => ({ ok: true, value }),
-        }),
       }))
       .reactor(
         createScriptedReactor({
@@ -144,21 +135,31 @@ describeInstant("context scripted reactor + Instant runtime", () => {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "set_status"))
       .build()
 
     const shell = await timer.measure("reactShellMs", async () =>
-      await scriptedContext.react(createTriggerEvent("set status to ready"), {
-        runtime,
-        context: { key: contextKey },
-        durable: false,
-        __benchmark: timer,
-        options: {
-          silent: true,
-          maxIterations: 3,
-          maxModelSteps: 1,
+      await scriptedContext.react(
+        createTriggerEvent("set status to ready"),
+        {
+          runtime,
+          context: { key: contextKey },
+          __benchmark: timer,
         },
-      }),
+        async (execution) => {
+          await execution.prompt("set-status", {
+            instructions: "Deterministic scripted test context.",
+            maxModelSteps: 1,
+            actions: {
+              set_status: tool({
+                description: "Apply deterministic status update.",
+                inputSchema: z.object({ value: z.string() }),
+                execute: async ({ value }) => ({ ok: true, value }),
+              }),
+            },
+          })
+          return execution.end()
+        },
+      ),
     )
 
     expect(shell.context.status).toBe("open_streaming")
@@ -234,7 +235,7 @@ describeInstant("context scripted reactor + Instant runtime", () => {
 
     const timings = timer.snapshot()
     writeBenchmarkReport("context-scripted-direct-report", {
-      test: "context scripted reactor + Instant runtime > executes directly in non-durable mode and completes persisted shell state",
+      test: "context scripted reactor + Instant runtime > executes directly in explicit mode and completes persisted shell state",
       mode: "direct",
       totalMs: timings.totalMs,
       componentTimingsMs: {
@@ -259,8 +260,6 @@ describeInstant("context scripted reactor + Instant runtime", () => {
 
     const explicitContext = createContext<ContextTestEnv>("context.tests.explicit.orchestration")
       .context((stored) => ({ ...(stored.content ?? {}) }))
-      .narrative(() => "")
-      .actions(() => ({}))
       .reactor(
         createScriptedReactor({
           steps: [
@@ -296,10 +295,6 @@ describeInstant("context scripted reactor + Instant runtime", () => {
       {
         runtime,
         context: { key: contextKey },
-        options: {
-          silent: true,
-          maxModelSteps: 1,
-        },
       },
       async (execution) => {
         await execution.context({
@@ -383,7 +378,7 @@ describeInstant("context scripted reactor + Instant runtime", () => {
     expect(readString(reactionItem, "status")).toBe("completed")
   }, 5 * 60 * 1000)
 
-  itInstant("marks execution as failed when scripted steps are exhausted in non-durable mode", async () => {
+  itInstant("marks execution as failed when scripted steps are exhausted in explicit mode", async () => {
     const timer = createStageTimer()
     const contextKey = `context-scripted-fail-context:${Date.now()}`
     const runtime = new EventsTestRuntime({
@@ -395,14 +390,6 @@ describeInstant("context scripted reactor + Instant runtime", () => {
 
     const failingContext = createContext<ContextTestEnv>("context.tests.scripted.failure")
       .context((stored) => ({ ...(stored.content ?? {}) }))
-      .narrative(() => "Scripted failure test.")
-      .actions(() => ({
-        keep_looping: tool({
-          description: "No-op tool used to keep the loop running.",
-          inputSchema: z.object({ note: z.string() }),
-          execute: async ({ note }) => ({ ok: true, note }),
-        }),
-      }))
       .reactor(
         createScriptedReactor({
           steps: [
@@ -432,21 +419,37 @@ describeInstant("context scripted reactor + Instant runtime", () => {
           repeatLast: false,
         }),
       )
-      .shouldContinue(() => true)
       .build()
 
     const shell = await timer.measure("reactShellMs", async () =>
-      await failingContext.react(createTriggerEvent("force scripted exhaustion"), {
-        runtime,
-        context: { key: contextKey },
-        durable: false,
-        __benchmark: timer,
-        options: {
-          silent: true,
-          maxIterations: 3,
-          maxModelSteps: 1,
+      await failingContext.react(
+        createTriggerEvent("force scripted exhaustion"),
+        {
+          runtime,
+          context: { key: contextKey },
+          __benchmark: timer,
         },
-      }),
+        async (execution) => {
+          const actions = {
+            keep_looping: tool({
+              description: "No-op tool used to keep the loop running.",
+              inputSchema: z.object({ note: z.string() }),
+              execute: async ({ note }) => ({ ok: true, note }),
+            }),
+          }
+          await execution.prompt("first-scripted-step", {
+            instructions: "Scripted failure test.",
+            maxModelSteps: 1,
+            actions,
+          })
+          await execution.prompt("exhaust-scripted-steps", {
+            instructions: "Scripted failure test.",
+            maxModelSteps: 1,
+            actions,
+          })
+          return execution.end()
+        },
+      ),
     )
     await expect(
       timer.measure("reactRunMs", async () => await shell.run!),
@@ -474,7 +477,7 @@ describeInstant("context scripted reactor + Instant runtime", () => {
 
     const timings = timer.snapshot()
     writeBenchmarkReport("context-scripted-direct-failure-report", {
-      test: "context scripted reactor + Instant runtime > marks execution as failed when scripted steps are exhausted in non-durable mode",
+      test: "context scripted reactor + Instant runtime > marks execution as failed when scripted steps are exhausted in explicit mode",
       mode: "direct",
       totalMs: timings.totalMs,
       stageTimingsMs: timings.stageTimingsMs,
@@ -536,8 +539,6 @@ describeInstant("context scripted reactor + Instant runtime", () => {
           },
         } satisfies ContextItem,
       ])
-      .narrative(() => "Expanded events should reach this reactor.")
-      .actions(() => ({}))
       .reactor(async (params) => {
         reactorSawExpandedEvent = params.events.some((event) =>
           String(event.id).startsWith("derived:") &&
@@ -557,19 +558,22 @@ describeInstant("context scripted reactor + Instant runtime", () => {
           messagesForModel: [],
         }
       })
-      .shouldContinue(() => false)
       .build()
 
-    const shell = await expandedContext.react(createTriggerEvent("use expanded canvas context"), {
-      runtime,
-      context: { key: contextKey },
-      durable: false,
-      options: {
-        silent: true,
-        maxIterations: 1,
-        maxModelSteps: 1,
+    const shell = await expandedContext.react(
+      createTriggerEvent("use expanded canvas context"),
+      {
+        runtime,
+        context: { key: contextKey },
       },
-    })
+      async (execution) => {
+        await execution.prompt("expanded-events", {
+          instructions: "Expanded events should reach this reactor.",
+          maxModelSteps: 1,
+        })
+        return execution.end()
+      },
+    )
     await shell.run!
 
     expect(reactorSawExpandedEvent).toBe(true)

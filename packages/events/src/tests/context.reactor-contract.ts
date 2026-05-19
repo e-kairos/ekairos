@@ -28,7 +28,6 @@ export type VerifyEventDomainRunParams = {
   executionId: string
   triggerEventId?: string
   reactionEventId: string
-  durable?: boolean
   requireStepStream?: boolean
   expectedContextStatus?: string
   expectedExecutionStatus?: string
@@ -134,10 +133,6 @@ export async function verifyEventDomainRun(
   expect(asString(execution.id)).toBe(params.executionId)
   expect(asString(context.status)).toBe(expectedContextStatus)
   expect(asString(execution.status)).toBe(expectedExecutionStatus)
-
-  if (params.durable) {
-    expect(asString(execution.workflowRunId)).toMatch(/^wrun_/)
-  }
 
   const linkedExecutionContext = asRecord(execution.context)
   const linkedExecutionTrigger = asRecord(execution.trigger)

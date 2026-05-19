@@ -142,8 +142,8 @@ export function applyToolExecutionResultToParts(
  * - `state: "output-available"` (success), or
  * - `state: "output-error"` (failure).
  *
- * This is useful for stop/continue logic in `context.shouldContinue(...)` where you want to
- * decide based on the persisted `reactionEvent` (not ephemeral in-memory arrays).
+ * This is useful in explicit reaction handlers when you want to branch based on a persisted
+ * `reactionEvent` instead of ephemeral in-memory arrays.
  */
 export function didToolExecute(event: Pick<ContextItem, "content">, toolName: string): boolean {
   const parts = (((event as any).content.parts ?? []) as any[]).flatMap((part) =>

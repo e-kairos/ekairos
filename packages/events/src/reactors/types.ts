@@ -69,7 +69,6 @@ export type ContextReactorParams<
   iteration: number
   maxModelSteps: number
   sendStart: boolean
-  silent: boolean
   contextStepStream?: WritableStream<string>
   writable?: WritableStream<UIMessageChunk>
   persistReactionParts?: (parts: any[]) => Promise<void>
