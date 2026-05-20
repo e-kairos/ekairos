@@ -38,13 +38,13 @@ describe("Task", () => {
       id: "task_review_1",
       kind: "review",
       key: "review:execution_1:step_1",
-      status: "open",
+      state: "open",
       context: { entityId: "entity_1" },
     })
     expect(runtime.memoryDb.tasks.get("task_review_1")).toMatchObject({
       kind: "review",
       key: "review:execution_1:step_1",
-      status: "open",
+      state: "open",
       outcomeKind: "review",
     })
   })
@@ -111,7 +111,7 @@ describe("Task", () => {
       approved: true,
     })
     expect(runtime.memoryDb.tasks.get("task_approval_1")).toMatchObject({
-      status: "completed",
+      state: "completed",
       outcome: {
         outcome: "approved",
         approved: true,
@@ -146,7 +146,7 @@ describe("Task", () => {
 
     const stored = runtime.memoryDb.tasks.get("task_approval_1")
     expect(stored).toMatchObject({
-      status: "open",
+      state: "open",
     })
     expect(stored).not.toHaveProperty("outcome")
   })

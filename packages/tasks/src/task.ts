@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export type TaskStatus = "open" | "completed" | "cancelled" | "failed"
+export type TaskState = "open" | "completed" | "cancelled" | "failed"
 
 export type TaskStoredOutcomeSchema = {
   type: "json-schema"
@@ -11,7 +11,7 @@ export type TaskData<TContext = unknown, TOutcome = unknown> = {
   id: string
   kind: string
   key: string
-  status: TaskStatus
+  state: TaskState
   instructions: string
   context: TContext
   outcomeKind?: string
@@ -119,7 +119,7 @@ export function createTaskHandle<TOutcome, TContext = unknown>(
         return parseTaskOutcome(outcomeSchema, await options.awaitOutcome())
       }
 
-      if (data.status === "completed") {
+      if (data.state === "completed") {
         return parseTaskOutcome(outcomeSchema, data.resolvedOutcome)
       }
 

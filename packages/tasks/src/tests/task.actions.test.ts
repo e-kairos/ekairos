@@ -51,7 +51,7 @@ describe("tasks domain actions", () => {
       ok: true,
       data: {
         id: "task_action_1",
-        status: "open",
+        state: "open",
       },
     })
 
@@ -63,7 +63,7 @@ describe("tasks domain actions", () => {
       ok: true,
       data: {
         id: "task_action_1",
-        status: "open",
+        state: "open",
       },
     })
 
@@ -76,7 +76,7 @@ describe("tasks domain actions", () => {
       ok: true,
       data: {
         id: "task_action_1",
-        status: "completed",
+        state: "completed",
         resolvedOutcome: { accepted: true },
       },
     })
@@ -115,7 +115,7 @@ describe("tasks domain actions", () => {
       error: "task_outcome_invalid",
     })
     expect(runtime.memoryDb.tasks.get("task_action_2")).toMatchObject({
-      status: "open",
+      state: "open",
     })
   })
 })

@@ -2,7 +2,7 @@
 
 Durable tasks with typed outcomes.
 
-`@ekairos/tasks` is intentionally small. It owns task lifecycle and typed outcomes. Approval
+`@ekairos/tasks` is intentionally small. It owns task `state` and typed outcomes. Approval
 policies, approvers, assignments, notifications, and domain-specific links remain app/domain
 concerns layered above it.
 

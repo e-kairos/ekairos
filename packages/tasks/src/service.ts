@@ -13,7 +13,7 @@ import {
   type TaskData,
   type TaskHandle,
   type TaskOutcomeSchema,
-  type TaskStatus,
+  type TaskState,
   type TaskStoredOutcomeSchema,
 } from "./task.js"
 
@@ -152,14 +152,14 @@ function newEntityId() {
   return instantId()
 }
 
-function normalizeTaskStatus(status: unknown): TaskStatus {
+function normalizeTaskState(state: unknown): TaskState {
   if (
-    status === "open" ||
-    status === "completed" ||
-    status === "cancelled" ||
-    status === "failed"
+    state === "open" ||
+    state === "completed" ||
+    state === "cancelled" ||
+    state === "failed"
   ) {
-    return status
+    return state
   }
   return "open"
 }
@@ -171,7 +171,7 @@ function rowToTaskRecord<TContext = unknown, TOutcome = unknown>(
     id: String(row.id),
     kind: String(row.kind),
     key: String(row.key),
-    status: normalizeTaskStatus(row.status),
+    state: normalizeTaskState(row.state),
     instructions: String(row.instructions ?? ""),
     context: row.context as TContext,
     outcomeKind: typeof row.outcomeKind === "string" ? row.outcomeKind : undefined,
@@ -279,7 +279,7 @@ export class TaskService {
       db.tx.task_tasks[id].update({
         kind: input.kind,
         key: input.key,
-        status: "open",
+        state: "open",
         instructions: input.instructions,
         context: input.context,
         outcomeKind: input.outcomeKind,
@@ -299,8 +299,8 @@ export class TaskService {
 
     const task = await this.getTaskRecord(input.id)
     if (!task) return { ok: false, error: "task_not_found" }
-    if (task.status !== "open") {
-      return { ok: false, error: `task_not_open:${task.status}` }
+    if (task.state !== "open") {
+      return { ok: false, error: `task_not_open:${task.state}` }
     }
 
     const validation = validateStoredOutcome(task.outcomeSchema, input.outcome)
@@ -310,7 +310,7 @@ export class TaskService {
     const now = new Date()
     await db.transact([
       db.tx.task_tasks[input.id].update({
-        status: "completed",
+        state: "completed",
         outcome: validation.data,
         resolvedAt: now,
         updatedAt: now,
@@ -331,15 +331,15 @@ export class TaskService {
 
     const task = await this.getTaskRecord(input.id)
     if (!task) return { ok: false, error: "task_not_found" }
-    if (task.status !== "open") {
-      return { ok: false, error: `task_not_open:${task.status}` }
+    if (task.state !== "open") {
+      return { ok: false, error: `task_not_open:${task.state}` }
     }
 
     const db = await this.db()
     const now = new Date()
     await db.transact([
       db.tx.task_tasks[input.id].update({
-        status: "cancelled",
+        state: "cancelled",
         errorText: input.reason,
         resolvedAt: now,
         updatedAt: now,
@@ -357,15 +357,15 @@ export class TaskService {
 
     const task = await this.getTaskRecord(input.id)
     if (!task) return { ok: false, error: "task_not_found" }
-    if (task.status !== "open") {
-      return { ok: false, error: `task_not_open:${task.status}` }
+    if (task.state !== "open") {
+      return { ok: false, error: `task_not_open:${task.state}` }
     }
 
     const db = await this.db()
     const now = new Date()
     await db.transact([
       db.tx.task_tasks[input.id].update({
-        status: "failed",
+        state: "failed",
         errorText: input.errorText,
         resolvedAt: now,
         updatedAt: now,
@@ -393,12 +393,12 @@ export class TaskService {
     const task = await this.getTaskRecord(input.id)
     if (!task) return { ok: false, error: "task_not_found" }
 
-    if (task.status === "completed") {
+    if (task.state === "completed") {
       return validateStoredOutcome(task.outcomeSchema, task.resolvedOutcome)
     }
 
-    if (task.status !== "open") {
-      return { ok: false, error: `task_not_open:${task.status}` }
+    if (task.state !== "open") {
+      return { ok: false, error: `task_not_open:${task.state}` }
     }
 
     const hook = createTaskOutcomeHook<unknown>(input.id)

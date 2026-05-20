@@ -20,7 +20,7 @@ const taskRecordSchema = z.object({
   id: z.string(),
   kind: z.string(),
   key: z.string(),
-  status: z.enum(["open", "completed", "cancelled", "failed"]),
+  state: z.enum(["open", "completed", "cancelled", "failed"]),
   instructions: z.string(),
   context: z.unknown(),
   outcomeKind: z.string().optional(),
@@ -96,7 +96,7 @@ export const tasksDomain = domain("tasks")
       task_tasks: i.entity({
         kind: i.string().indexed(),
         key: i.string().unique().indexed(),
-        status: i.string().indexed(),
+        state: i.string().indexed(),
         instructions: i.string().optional(),
         context: i.json().optional(),
         outcomeKind: i.string().optional().indexed(),
