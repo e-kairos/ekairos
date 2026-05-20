@@ -22,5 +22,6 @@ export {
   type TaskOpenInput,
   type TaskOpenOptions,
   type TaskRecord,
+  type TasksClientRuntime,
   type TasksRuntime,
 } from "./service.js"

@@ -1,5 +1,5 @@
 import type { ContextEnvironment } from "../context.config.js"
-import type { DomainSchemaResult } from "@ekairos/domain"
+import type { DomainLike } from "@ekairos/domain"
 import type { ContextRuntime, ContextRuntimeHandleForDomain } from "../context.runtime.js"
 import type { ContextModelInit } from "../context.engine.js"
 import type { ContextIdentifier, StoredContext, ContextItem } from "../context.store.js"
@@ -14,7 +14,7 @@ import { actionsToActionSpecs } from "../tools-to-model-tools.js"
 export type CreateAiSdkReactorOptions<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
   Config = unknown,
 > = {
@@ -49,7 +49,7 @@ export type CreateAiSdkReactorOptions<
 export function createAiSdkReactor<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
   Config = unknown,
 >(

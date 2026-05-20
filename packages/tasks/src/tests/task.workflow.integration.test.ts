@@ -14,6 +14,7 @@ import {
 } from "./workflow/task.workflow-fixtures.ts"
 import { approvalOutcomeSchema } from "../approval.ts"
 import type { MemoryTaskRuntime } from "./memory-task-db.ts"
+import type { ServiceResult, TaskRecord } from "../service.ts"
 
 type TaskActionKey = keyof typeof tasksDomain.actions
 
@@ -21,8 +22,12 @@ async function executeAction(
   runtime: MemoryTaskRuntime,
   action: TaskActionKey,
   input: unknown,
-) {
-  const actions = await (tasksDomain as any)(runtime) as Record<TaskActionKey, (input: any) => Promise<any>>
+): Promise<ServiceResult<TaskRecord>> {
+  const scoped = await tasksDomain(runtime)
+  const actions = scoped.actions as Record<
+    TaskActionKey,
+    (input: unknown) => Promise<ServiceResult<TaskRecord>>
+  >
   return await actions[action](input)
 }
 

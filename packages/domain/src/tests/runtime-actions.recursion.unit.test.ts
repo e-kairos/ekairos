@@ -29,9 +29,7 @@ describe("runtime action recursion guard", () => {
         input: z.object({ value: z.number() }),
         output: z.number(),
         async execute({ runtime, input }) {
-          "use step";
-          const scoped = await runtime.use(cycleDomain);
-          return scoped.actions.actionB(input);
+            return runtime.actions.actionB(input);
         },
       }),
       actionB: defineDomainAction({
@@ -39,9 +37,7 @@ describe("runtime action recursion guard", () => {
         input: z.object({ value: z.number() }),
         output: z.number(),
         async execute({ runtime, input }) {
-          "use step";
-          const scoped = await runtime.use(cycleDomain);
-          return scoped.actions.actionA(input);
+            return runtime.actions.actionA(input);
         },
       }),
     });

@@ -18,7 +18,6 @@ export async function openTaskExecute({
   runtime: TasksRuntime
   input: TaskOpenActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  "use step"
   return await new TaskService(runtime).openRaw(input)
 }
 
@@ -29,7 +28,6 @@ export async function decideTaskExecute({
   runtime: TasksRuntime
   input: TaskDecideActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  "use step"
   return await new TaskService(runtime).decide(input)
 }
 
@@ -40,7 +38,6 @@ export async function cancelTaskExecute({
   runtime: TasksRuntime
   input: TaskCancelActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  "use step"
   return await new TaskService(runtime).cancel(input)
 }
 
@@ -51,7 +48,6 @@ export async function failTaskExecute({
   runtime: TasksRuntime
   input: TaskFailActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  "use step"
   return await new TaskService(runtime).fail(input)
 }
 
@@ -62,7 +58,6 @@ export async function getTaskExecute({
   runtime: TasksRuntime
   input: TaskGetActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  "use step"
   return await new TaskService(runtime).getRaw(input)
 }
 

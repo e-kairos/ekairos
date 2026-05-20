@@ -22,6 +22,10 @@ export type ServiceResult<T = unknown> =
   | { ok: false; error: string; issues?: unknown }
 
 export type TasksRuntime = {
+  db: any
+}
+
+export type TasksClientRuntime = {
   use(domain: unknown): Promise<any>
 }
 
@@ -88,12 +92,12 @@ export type TaskApprovalInput<TContext = unknown> = {
 }
 
 async function runTaskDomainAction(
-  runtime: TasksRuntime,
+  runtime: TasksClientRuntime,
   action: keyof typeof tasksDomain.actions,
   input: unknown,
 ) {
   const tasks = await tasksDomain(runtime)
-  const actions = tasks as Record<
+  const actions = tasks.actions as Record<
     keyof typeof tasksDomain.actions,
     (input: unknown) => Promise<unknown>
   >
@@ -106,7 +110,7 @@ function unwrapTaskResult(result: ServiceResult<TaskRecord>): TaskRecord {
 }
 
 async function getTaskRecordThroughDomain(
-  runtime: TasksRuntime,
+  runtime: TasksClientRuntime,
   id: string,
 ): Promise<TaskRecord> {
   return unwrapTaskResult(
@@ -120,7 +124,7 @@ function unwrapOutcomeResult(result: ServiceResult<unknown>): unknown {
 }
 
 function createDomainTaskHandle<TOutcome, TContext = unknown>(
-  runtime: TasksRuntime,
+  runtime: TasksClientRuntime,
   record: TaskRecord<TContext, TOutcome>,
   outcomeSchema: TaskOutcomeSchema<TOutcome>,
 ): TaskHandle<TOutcome, TContext> {
@@ -233,17 +237,12 @@ function createTaskOutcomeHook<TOutcome>(id: string) {
 export class TaskService {
   constructor(private readonly runtime: TasksRuntime) {}
 
-  private async scoped() {
-    return await this.runtime.use(tasksDomain)
-  }
-
-  private async db(): Promise<any> {
-    const scoped = await this.scoped()
-    return scoped.db as any
+  private db(): any {
+    return this.runtime.db as any
   }
 
   private async getTaskRecord(id: string): Promise<TaskRecord | null> {
-    const db = await this.db()
+    const db = this.db()
     const result = await db.query({
       task_tasks: {
         $: { where: { id }, limit: 1 },
@@ -258,7 +257,7 @@ export class TaskService {
     if (!input.key.trim()) return { ok: false, error: "task_key_required" }
     if (!input.outcomeSchema) return { ok: false, error: "task_outcome_schema_required" }
 
-    const db = await this.db()
+    const db = this.db()
     const existing = await db.query({
       task_tasks: {
         $: { where: { key: input.key }, limit: 1 },
@@ -306,7 +305,7 @@ export class TaskService {
     const validation = validateStoredOutcome(task.outcomeSchema, input.outcome)
     if (!validation.ok) return validation
 
-    const db = await this.db()
+    const db = this.db()
     const now = new Date()
     await db.transact([
       db.tx.task_tasks[input.id].update({
@@ -335,7 +334,7 @@ export class TaskService {
       return { ok: false, error: `task_not_open:${task.state}` }
     }
 
-    const db = await this.db()
+    const db = this.db()
     const now = new Date()
     await db.transact([
       db.tx.task_tasks[input.id].update({
@@ -361,7 +360,7 @@ export class TaskService {
       return { ok: false, error: `task_not_open:${task.state}` }
     }
 
-    const db = await this.db()
+    const db = this.db()
     const now = new Date()
     await db.transact([
       db.tx.task_tasks[input.id].update({
@@ -413,7 +412,7 @@ export class TaskService {
 
 export class Task {
   static async open<TOutcome, TContext = unknown>(
-    runtime: TasksRuntime,
+    runtime: TasksClientRuntime,
     input: TaskOpenInput<TOutcome, TContext>,
   ): Promise<TaskHandle<TOutcome, TContext>> {
     const opened = unwrapTaskResult(
@@ -435,7 +434,7 @@ export class Task {
   }
 
   static async approval<TContext = unknown>(
-    runtime: TasksRuntime,
+    runtime: TasksClientRuntime,
     input: TaskApprovalInput<TContext>,
   ) {
     return await Task.open(runtime, {
@@ -450,7 +449,7 @@ export class Task {
   }
 
   static async get<TOutcome, TContext = unknown>(
-    runtime: TasksRuntime,
+    runtime: TasksClientRuntime,
     id: string,
     outcomeSchema: TaskOutcomeSchema<TOutcome>,
   ): Promise<TaskHandle<TOutcome, TContext>> {

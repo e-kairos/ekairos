@@ -66,12 +66,10 @@ export function createManagementDomain() {
         runtimeCall: z.number(),
       }),
       execute: async ({ input, runtime }) => {
-        "use step";
-        const scoped = await runtime.use(appDomain);
         return {
           title: String(input.title).trim(),
           status: "draft" as const,
-          runtimeCall: scoped.db.runtimeCall,
+          runtimeCall: runtime.db.runtimeCall,
         };
       },
     }),
@@ -87,14 +85,12 @@ export function createManagementDomain() {
         nestedRuntimeCall: z.number(),
       }),
       execute: async ({ input, runtime }) => {
-        "use step";
-        const scoped = await runtime.use(appDomain);
-        const normalized = await scoped.actions.normalizeTitle({ title: input.title });
+        const normalized = await runtime.actions.normalizeTitle({ title: input.title });
         return {
           title: normalized.title,
           status: normalized.status,
           orgId: runtime.env.orgId,
-          parentRuntimeCall: scoped.db.runtimeCall,
+          parentRuntimeCall: runtime.db.runtimeCall,
           nestedRuntimeCall: normalized.runtimeCall,
         };
       },

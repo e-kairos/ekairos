@@ -1,5 +1,5 @@
 import type { ModelMessage } from "ai"
-import type { DomainSchemaResult } from "@ekairos/domain"
+import type { DomainLike } from "@ekairos/domain"
 
 import type { ContextEnvironment } from "../context.config.js"
 import type { ContextRuntime } from "../context.runtime.js"
@@ -23,7 +23,7 @@ type ScriptedReactionPayload = {
 export type ScriptedReactorStep<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > =
   | ScriptedReactionPayload
@@ -34,7 +34,7 @@ export type ScriptedReactorStep<
 export type CreateScriptedReactorOptions<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = {
   steps: ScriptedReactorStep<Context, Env, RequiredDomain, Runtime>[]
@@ -44,7 +44,7 @@ export type CreateScriptedReactorOptions<
 function normalizeScriptedAssistantEvent<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 >(
   params: ContextReactorParams<Context, Env, RequiredDomain, Runtime>,
@@ -75,7 +75,7 @@ function normalizeScriptedAssistantEvent<
 export function createScriptedReactor<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 >(
   options: CreateScriptedReactorOptions<Context, Env, RequiredDomain, Runtime>,

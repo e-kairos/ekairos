@@ -16,7 +16,8 @@ async function executeAction(
   action: TaskActionKey,
   input: unknown,
 ) {
-  const actions = await (tasksDomain as any)(runtime) as Record<TaskActionKey, (input: any) => Promise<any>>
+  const scoped = await tasksDomain(runtime)
+  const actions = scoped.actions as Record<TaskActionKey, (input: unknown) => Promise<unknown>>
   return await actions[action](input)
 }
 

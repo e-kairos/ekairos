@@ -75,8 +75,14 @@ async function checkCallableDomainRuntime() {
   // @ts-expect-error promoted action input keeps the declared shape.
   await tasks.createTask({ wrong: "Ship it" });
 
+  // @ts-expect-error explicit action input keeps the declared shape.
+  await tasks.actions.createTask({ wrong: "Ship it" });
+
   // @ts-expect-error query remains scoped to the callable domain schema.
   await tasks.query({ invoices: {} });
+
+  // @ts-expect-error db query remains scoped to the callable domain schema.
+  await tasks.db.query({ invoices: {} });
 
   // @ts-expect-error writes stay behind domain actions.
   await tasks.transact([]);

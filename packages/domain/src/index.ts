@@ -1,6 +1,6 @@
 import { i } from "@instantdb/core";
 import type { InstantAdminDatabase } from "@instantdb/admin";
-import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef } from "@instantdb/core";
+import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef, InstaQLParams } from "@instantdb/core";
 import { z } from "zod";
 export {
   EkairosRuntime,
@@ -58,7 +58,7 @@ export type DomainActionSchema = z.ZodType;
 
 export type DomainActionExecuteParams<
   InputSchema extends DomainActionSchema = DomainActionSchema,
-  Runtime = unknown,
+  Runtime = DomainRuntime<any>,
   Domain = unknown,
 > = {
   input: z.output<InputSchema>;
@@ -79,15 +79,15 @@ export type DomainActionDefinition<
   outputSchema?: unknown;
   requiredScopes?: string[];
   /**
-   * Domain actions are step-safe command units.
+   * Domain actions are command units with typed input and output.
    *
    * Recommended pattern:
    *
-   * `async execute({ runtime, input }) { "use step"; const domain = await runtime.use(myDomain); ... }`
+   * `async execute({ runtime, input }) { await runtime.db.transact([...]); }`
    *
-   * Action execution receives `input` and `runtime`. If action logic needs a scoped domain handle, reconstruct it locally with
-   * `await runtime.use(exportedDomain)`. `"use workflow"` inside `execute(...)`
-   * is intentionally out of scope.
+   * Action execution receives `input` and a runtime already scoped to the
+   * domain that declared the action. Workflow boundaries belong to the
+   * orchestration layer, not to the action executor.
    */
   execute: (
     params: DomainActionExecuteParams<InputSchema, Runtime, Domain>,
@@ -157,11 +157,23 @@ const EKAIROS_META = Symbol.for("@ekairos/domain/meta");
 const EKAIROS_ACTIONS = Symbol.for("@ekairos/domain/actions");
 const EKAIROS_ACTION_MAP = Symbol.for("@ekairos/domain/action-map");
 const EKAIROS_ACTION_BINDING = Symbol.for("@ekairos/domain/action-binding");
-const EKAIROS_ACTION_STACK = Symbol.for("@ekairos/domain/action-stack");
 declare const DOMAIN_NAME_TYPE: unique symbol;
 declare const DOMAIN_INCLUDED_NAMES_TYPE: unique symbol;
 declare const DOMAIN_ACTION_MAP_TYPE: unique symbol;
 declare const DOMAIN_LINKS_TYPE: unique symbol;
+
+export type DomainLike = {
+  readonly entities: EntitiesDef;
+  readonly links: LinksDef<any>;
+  readonly rooms: RoomsDef;
+  instantSchema: () => any;
+  toInstantSchema?: () => any;
+  fromDB?: (db: any, bindings?: { env?: unknown; runtime?: unknown }) => any;
+  readonly [DOMAIN_NAME_TYPE]?: string;
+  readonly [DOMAIN_INCLUDED_NAMES_TYPE]?: string;
+  readonly [DOMAIN_ACTION_MAP_TYPE]?: DomainActionMap;
+  readonly [DOMAIN_LINKS_TYPE]?: LinksDef<any>;
+};
 
 // No hard-coded base entities here. InstantDB adds base entities at runtime inside i.schema.
 // We only add them at the TYPE level via WithBase<> so links can reference them.
@@ -284,8 +296,8 @@ export type IncludedDomainNamesOf<D> =
     : DomainNameOf<D>;
 
 export type DomainInstantSchema<D> =
-  D extends DomainSchemaResult<any, any, any, any, any, any>
-    ? ReturnType<D["instantSchema"]>
+  D extends DomainSchemaResult<infer E, infer L, infer R, any, any, any>
+    ? InstantSchemaDef<WithBase<E>, L, R>
     : never;
 
 // Utility types for extracting from domain definitions/instances
@@ -374,19 +386,13 @@ type DomainActionMethods<Actions extends DomainActionMap> = {
 type DomainDbShortcuts<DB> =
   DB extends { query: infer Query } ? { query: Query } : {};
 
-type RuntimeDomainDbForParts<
-  E extends EntitiesDef,
-  L extends LinksDef<any>,
-  R extends RoomsDef,
-> = InstantAdminDatabase<ReturnType<typeof i.schema<WithBase<E>, L, R>>, true>;
-
 type RuntimeDomainQueryForParts<
   E extends EntitiesDef,
   L extends LinksDef<any>,
   R extends RoomsDef,
-> = RuntimeDomainDbForParts<E, L, R> extends { query: infer Query }
-  ? Query
-  : never;
+> = <Query extends InstaQLParams<InstantSchemaDef<WithBase<E>, L, R>>>(
+  query: Query,
+) => Promise<any>;
 
 type CallableDomainActionMethods<Actions extends DomainActionMap, DB> = Omit<
   DomainActionMethods<Actions>,
@@ -410,7 +416,7 @@ export type CallableDomainScope<
   & {
     domain: unknown;
     db: { query: RuntimeDomainQueryForParts<E, L, R> };
-    schema: ReturnType<typeof i.schema<WithBase<E>, L, R>>;
+    schema: InstantSchemaDef<WithBase<E>, L, R>;
     context: (options?: DomainContextOptions) => DomainContext;
     contextString: (options?: DomainContextOptions) => string;
     env: Env;
@@ -507,8 +513,10 @@ type DomainSchemaSource =
   | InstantSchemaDef<any, any, any>;
 
 type EntitiesOfDomainSource<D> =
-  D extends DomainSchemaResult<infer E, any, any, any, any, any>
-    ? E
+  D extends { readonly originalEntities: infer E }
+    ? E extends EntitiesDef
+      ? E
+      : {}
     : D extends DomainInstance<infer E, any, any>
       ? E
       : D extends InstantSchemaDef<infer E, any, any>
@@ -536,14 +544,11 @@ type PermissiveLinksDef = Record<string, {
 // Simple type to represent entity names for basic validation
 type EntityNames<T> = T extends Record<string, any> ? keyof T : never;
 
-// Result of domain.withSchema() with toInstantSchema method
-// L represents the merged links (current domain + included domains) with literal keys preserved
-// This type preserves both:
-// 1. Full compatibility with InstantDB's schema type for InstaQLParams validation (enriched entities)
-// 2. Original entities (E) accessible via originalEntities property for type safety
-// The key is that DomainSchemaResult extends InstantDB's schema type completely,
-// so typeof domain works with InstaQLParams and validates queries correctly (like InstantDB does)
-// InstaQLParams uses the enriched entities from the schema to validate link names in queries
+// Result of domain.withSchema().
+//
+// DomainSchemaResult is intentionally the Ekairos domain object, not the
+// InstantDB schema object. Use DomainInstantSchema<typeof domain> or
+// domain.instantSchema() when an InstantDB schema type/value is needed.
 export type DomainSchemaResult<
   E extends EntitiesDef = EntitiesDef,
   L extends LinksDef<any> = LinksDef<any>,
@@ -551,14 +556,16 @@ export type DomainSchemaResult<
   Actions extends DomainActionMap = {},
   Name extends string = string,
   IncludedNames extends string = Name,
-> = 
-  ReturnType<typeof i.schema<WithBase<E>, L, R>> & {
+> = {
     <Env = unknown>(
       runtime: RuntimeCallableForDomain<
         DomainSchemaResult<E, L, R, Actions, Name, IncludedNames>
       >,
       options?: unknown,
     ): Promise<CallableDomainScope<E, L, R, Actions, Env>>;
+    readonly entities: E;
+    readonly links: L;
+    readonly rooms: R;
     // Add originalEntities property for type-safe access to original entity definitions
     // This preserves type safety while InstaQLParams uses enriched entities for validation
     readonly originalEntities: E;
@@ -620,6 +627,27 @@ export type ActiveDomain<
       actions: DomainActionMethods<ActionMapOf<D>>;
     }
   : {});
+
+export type DomainRuntimeDb = {
+  query: (...args: any[]) => Promise<any>;
+  transact: (...args: any[]) => Promise<any>;
+  tx: any;
+};
+
+export type DomainRuntime<
+  D extends DomainSchemaResult = DomainSchemaResult,
+  Env = unknown,
+> = D extends DomainSchemaResult<infer E, infer L, infer R, infer Actions, any, any>
+  ? {
+      domain: D;
+      db: DomainRuntimeDb;
+      schema: ReturnType<typeof i.schema<WithBase<E>, L, R>>;
+      context: (options?: DomainContextOptions) => DomainContext;
+      contextString: (options?: DomainContextOptions) => string;
+      env: Env;
+      actions: DomainActionMethods<Actions>;
+    }
+  : ActiveDomain<D, Env>;
 
 // Base entities phantom (type-only) so links can reference $users and $files
 type AnyEntityDef = EntitiesDef[string];
@@ -755,27 +783,6 @@ function setStoredActionMap(source: unknown, actionMap: DomainActionMap) {
     configurable: true,
     writable: true,
   });
-}
-
-function readRuntimeActionStack(runtime: unknown): string[] {
-  if (!runtime || typeof runtime !== "object") return [];
-  const stack = (runtime as any)[EKAIROS_ACTION_STACK];
-  return Array.isArray(stack) ? [...stack] : [];
-}
-
-function cloneRuntimeWithActionStack<Runtime>(runtime: Runtime, stack: string[]): Runtime {
-  if (!runtime || typeof runtime !== "object") return runtime;
-  const scoped = Object.assign(
-    Object.create(Object.getPrototypeOf(runtime)),
-    runtime,
-  ) as Runtime;
-  Object.defineProperty(scoped as object, EKAIROS_ACTION_STACK, {
-    value: [...stack],
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
-  return scoped;
 }
 
 function normalizeActionLike(
@@ -1045,7 +1052,16 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
     contextString: (options?: DomainContextOptions) => domainInstance.contextString(options),
   };
   if (bindings?.runtime !== undefined) {
-    const inheritedStack = readRuntimeActionStack(bindings.runtime);
+    const inheritedStack: string[] = [];
+
+    const createActionRuntime = (stack: string[]): any => {
+      const runtime = {
+        ...concrete,
+        ...(bindings.env !== undefined ? { env: bindings.env } : {}),
+      } as any;
+      runtime.actions = buildActions(stack);
+      return runtime;
+    };
 
     const buildActions = (stack: string[]) =>
       Object.fromEntries(
@@ -1061,13 +1077,10 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
             }
 
             const nextStack = [...stack, key];
-            const scopedRuntime = cloneRuntimeWithActionStack(
-              bindings.runtime,
-              nextStack,
-            );
+            const scopedRuntime = createActionRuntime(nextStack);
 
             const parsedInput = (action as any).input.parse(input);
-            const params: DomainActionExecuteParams<any, unknown> = {
+            const params: DomainActionExecuteParams<any, any, D> = {
               input: parsedInput,
               runtime: scopedRuntime,
             }
@@ -1088,12 +1101,13 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
 
 function promoteRuntimeDomainScope(scoped: any): any {
   const promoted = { ...scoped } as Record<string, unknown>;
-  const db = (scoped as any).db;
+  const db = scoped?.db;
 
   if (db && typeof db.query === "function") {
     promoted.query = db.query.bind(db);
   }
-  const actions = (scoped as any).actions;
+
+  const actions = scoped?.actions;
   if (actions && typeof actions === "object") {
     for (const [key, action] of Object.entries(actions)) {
       if (key in promoted) continue;
@@ -1820,10 +1834,10 @@ export function composeDomain(
  *
  * Convention for new actions:
  *
- * `async execute({ runtime, input }) { "use step"; const domain = await runtime.use(myDomain); ... }`
+ * `async execute({ runtime, input }) { await runtime.db.transact([...]); }`
  *
- * Actions remain callable directly, from nested `runtime.use(domain).actions.*`
- * composition, and from higher-level workflows that orchestrate them.
+ * Actions receive a runtime already scoped to the declaring domain. Nested
+ * action composition is available through `runtime.actions.*`.
  */
 function toJsonSchema(schema: DomainActionSchema): unknown {
   try {
@@ -1836,7 +1850,7 @@ function toJsonSchema(schema: DomainActionSchema): unknown {
 export function defineDomainAction<
   InputSchema extends DomainActionSchema,
   OutputSchema extends DomainActionSchema,
-  Runtime = unknown,
+  Runtime = DomainRuntime<any>,
   Domain = unknown,
 >(
   action: DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain>,
@@ -1860,5 +1874,3 @@ export function getDomainActions(source: unknown): DomainActionRegistration[] {
 export function getDomainActionBinding(source: unknown): { name: string; domain: unknown; key?: string } | null {
   return getActionBinding(source);
 }
-
-

@@ -28,11 +28,9 @@ describe("runtime action included subdomain scoping", () => {
         input: z.object({ title: z.string() }),
         output: z.object({ title: z.string(), runtimeCall: z.number() }),
         execute: async ({ input, runtime }) => {
-          "use step";
-          const scoped = await runtime.use(tasksDomain);
-          return {
+            return {
             title: String(input.title).trim(),
-            runtimeCall: scoped.db.runtimeCall,
+            runtimeCall: runtime.db.runtimeCall,
           };
         },
       }),
@@ -45,9 +43,7 @@ describe("runtime action included subdomain scoping", () => {
           runtimeCall: z.number(),
         }),
         execute: async ({ input, runtime }) => {
-          "use step";
-          const scoped = await runtime.use(tasksDomain);
-          const normalized = await scoped.actions.normalizeTitle({ title: input.title });
+            const normalized = await runtime.actions.normalizeTitle({ title: input.title });
           return {
             title: normalized.title,
             orgId: runtime.env.orgId,
@@ -71,29 +67,14 @@ describe("runtime action included subdomain scoping", () => {
     // tasks action is executed through that scoped handle.
     const tasks = await runtime.use(tasksDomain);
     const result = await tasks.actions.createTask({ title: "  Ship it  " });
-    const callableTasks = await tasksDomain(runtime);
-    const callableResult = await callableTasks.createTask({ title: "  Callable  " });
-    const queryResult = await callableTasks.query({ tasks: {} });
 
     // then: the scoped subdomain exposes the root runtime db/env and keeps its
-    // local action surface. Calling the domain with a runtime uses the same
-    // scope, but promotes actions plus db query for primitive DX.
+    // local action surface.
     expect(tasks.db.runtimeCall).toBe(9);
     expect(tasks.env.orgId).toBe("org_123");
     expect(result).toEqual({
       title: "Ship it",
       orgId: "org_123",
-      runtimeCall: 9,
-    });
-    expect(callableTasks.db.runtimeCall).toBe(9);
-    expect(callableTasks.env.orgId).toBe("org_123");
-    expect(callableResult).toEqual({
-      title: "Callable",
-      orgId: "org_123",
-      runtimeCall: 9,
-    });
-    expect(queryResult).toEqual({
-      input: { tasks: {} },
       runtimeCall: 9,
     });
   });

@@ -182,6 +182,7 @@ describe("sandbox workflow-safe boundary", () => {
     const commandCalls: unknown[] = []
     const runtime = {
       env,
+      meta: () => ({ domain: sandboxDomain }),
       use: async (domain: unknown) => {
         useCalls.push(domain)
         return {

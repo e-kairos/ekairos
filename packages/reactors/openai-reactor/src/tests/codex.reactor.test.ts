@@ -5,7 +5,6 @@ import { dirname } from "node:path"
 
 import type { ContextEnvironment } from "@ekairos/events/runtime"
 import type { ContextItem, ContextReactorParams, ContextSkillPackage } from "@ekairos/events"
-import { Sandbox } from "@ekairos/sandbox/sandbox"
 
 import {
   createCodexReactor,
@@ -16,6 +15,7 @@ import {
   type CodexMappedChunk,
   type CodexTurnResult,
 } from "../index.js"
+import { SANDBOX_RUN_COMMAND_ACTION_NAME } from "../shared.js"
 
 type TestContext = Record<string, unknown>
 type TestEnv = ContextEnvironment & {
@@ -247,7 +247,7 @@ function buildAudit(params: {
     const content = asRecord(record.content)
     return (
       asString(record.type) === "action" &&
-      asString(content.actionName) === Sandbox.runCommandActionName
+      asString(content.actionName) === SANDBOX_RUN_COMMAND_ACTION_NAME
     )
   })
   const assistantText = getAssistantTextPart(params.result.assistantEvent)
@@ -1109,7 +1109,7 @@ describe("createCodexReactor", () => {
       const content = asRecord(part.content)
       return (
         asString(part.type) === "action" &&
-        asString(content.actionName) === Sandbox.runCommandActionName
+        asString(content.actionName) === SANDBOX_RUN_COMMAND_ACTION_NAME
       )
     })
     const started = commandParts.find(

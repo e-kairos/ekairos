@@ -13,8 +13,6 @@ import {
   actionsToActionSpecs,
 } from "@ekairos/events"
 import type { ContextEnvironment } from "@ekairos/events/runtime"
-import type { ActiveDomain } from "@ekairos/domain"
-import type { sandboxDomain as SandboxDomain } from "@ekairos/sandbox"
 import { randomUUID } from "node:crypto"
 
 import { asRecord, asString, buildCodexParts, defaultInstructionFromTrigger, type AnyRecord } from "./shared.js"
@@ -49,7 +47,26 @@ function isCodexExecutableAction(value: unknown): value is CodexExecutableAction
   )
 }
 
-type CodexSandboxDomain = Omit<ActiveDomain<typeof SandboxDomain, Record<string, never>>, "env">
+type ServiceResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string }
+type CodexSandboxProcessResult = {
+  result?: unknown
+  [key: string]: unknown
+}
+
+type CodexSandboxActions = {
+  createSandbox(input: Record<string, unknown>): Promise<ServiceResult<{ sandboxId: string }>>
+  installCodexAuth(input: Record<string, unknown>): Promise<ServiceResult<unknown>>
+  writeFiles(input: Record<string, unknown>): Promise<ServiceResult<unknown>>
+  runCommandProcess(input: Record<string, unknown>): Promise<ServiceResult<CodexSandboxProcessResult>>
+  createCheckpoint(input: Record<string, unknown>): Promise<ServiceResult<{ checkpointId: string }>>
+  createEkairosApp(input: Record<string, unknown>): Promise<ServiceResult<CodexSandboxProcessResult>>
+  getPortUrl(input: Record<string, unknown>): Promise<ServiceResult<{ url: string }>>
+}
+
+type CodexSandboxDomain = {
+  actions: CodexSandboxActions
+  db: any
+}
 
 type SandboxProcessMutation = {
   update(values: Record<string, unknown>): {
@@ -57,20 +74,21 @@ type SandboxProcessMutation = {
   }
 }
 
-type StreamCapableSandboxDb = CodexSandboxDomain["db"] & {
+type StreamCapableSandboxDb = {
   streams: {
     createWriteStream(input: { clientId: string }): WritableStream<string> & {
       streamId?: () => Promise<string>
     }
   }
-  tx: CodexSandboxDomain["db"]["tx"] & {
+  tx: {
     sandbox_processes: Record<string, SandboxProcessMutation>
   }
   transact(txs: unknown[]): Promise<unknown> | unknown
 }
 
 type CodexSandboxRuntime = {
-  use(domain: typeof SandboxDomain): Promise<CodexSandboxDomain>
+  meta?: () => { domain?: unknown }
+  use(domain: unknown): Promise<CodexSandboxDomain>
 }
 
 function isCodexSandboxRuntime(value: unknown): value is CodexSandboxRuntime {
@@ -1023,9 +1041,21 @@ emit("EKAIROS_CODEX_RESULT", { providerContextId: threadId, turnId: asString(com
 `
 }
 
-function ensureOk<T>(result: { ok: true; data: T } | { ok: false; error: string }, label: string): T {
+function ensureOk<T>(result: { ok: true; data?: T } | { ok: false; error: string }, label: string): T {
   if (!result.ok) throw new Error(`${label}: ${result.error}`)
-  return result.data
+  return result.data as T
+}
+
+async function resolveCodexSandboxDomain(runtime: CodexSandboxRuntime): Promise<CodexSandboxDomain> {
+  const rootDomain = runtime.meta?.().domain
+  if (!rootDomain) {
+    throw new Error("codex_sandbox_domain_required")
+  }
+  const scoped = await runtime.use(rootDomain)
+  if (!scoped.actions) {
+    throw new Error("codex_sandbox_actions_required")
+  }
+  return scoped
 }
 
 async function executeCodexSandboxTurn(
@@ -1041,11 +1071,9 @@ async function executeCodexSandboxTurn(
     throw new Error("codex_sandbox_runtime_required")
   }
 
-  const { sandboxDomain } = await import("@ekairos/sandbox")
-  const scoped = await runtime.use(sandboxDomain)
+  const scoped = await resolveCodexSandboxDomain(runtime)
   const actions = scoped.actions
   const sandboxDb = scoped.db
-  if (!actions) throw new Error("codex_sandbox_actions_required")
 
   const provider = sandboxConfig.provider ?? "sprites"
   const homeDir = provider === "vercel" ? "/vercel/sandbox" : "/home/sprite"

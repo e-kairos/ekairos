@@ -1,7 +1,7 @@
 import type { ContextItem } from "@ekairos/events"
-import { Sandbox } from "@ekairos/sandbox/sandbox"
-
 export type AnyRecord = Record<string, unknown>
+
+export const SANDBOX_RUN_COMMAND_ACTION_NAME = "sandbox_run_command" as const
 
 export function asString(value: unknown): string {
   if (typeof value === "string") return value
@@ -473,7 +473,7 @@ export function buildCodexParts(params: {
         type: "action",
         content: {
           status: "started",
-          actionName: Sandbox.runCommandActionName,
+          actionName: SANDBOX_RUN_COMMAND_ACTION_NAME,
           actionCallId: toolCallId,
           input: cleanRecord({
             command: commandText,
@@ -493,7 +493,7 @@ export function buildCodexParts(params: {
         type: "action",
         content: {
           status: "completed",
-          actionName: Sandbox.runCommandActionName,
+          actionName: SANDBOX_RUN_COMMAND_ACTION_NAME,
           actionCallId: toolCallId,
           output: cleanRecord({
             sandboxId: sandboxId || undefined,

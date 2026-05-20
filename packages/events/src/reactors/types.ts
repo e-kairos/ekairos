@@ -1,5 +1,5 @@
 import type { ModelMessage, UIMessageChunk } from "ai"
-import type { DomainSchemaResult } from "@ekairos/domain"
+import type { DomainLike } from "@ekairos/domain"
 
 import type { ContextEnvironment } from "../context.config.js"
 import type { ContextTool } from "../context.action.js"
@@ -42,7 +42,7 @@ export type ContextReactionResult = {
 export type ContextReactorParams<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = any,
 > = {
   runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>
@@ -78,7 +78,7 @@ export type ContextReactorParams<
 export type ContextReactor<
   Context = unknown,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = any,
 > = (
   params: ContextReactorParams<Context, Env, RequiredDomain, Runtime>,

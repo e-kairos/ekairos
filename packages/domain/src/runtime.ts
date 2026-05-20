@@ -604,16 +604,20 @@ export async function executeRuntimeAction<
   const resolvedRuntime = params.runtime
     ? params.runtime
     : ((await resolveRuntime(domain as any, env, params.options)) as unknown as Runtime);
-  const runtime = createActionRuntimeHandle({
+  const rootRuntime = createActionRuntimeHandle({
     runtime: resolvedRuntime,
     env,
     rootDomain: (domain as RuntimeDomainSource | null) ?? null,
-  }) as Runtime;
+  });
+  const actionRuntime =
+    typeof rootRuntime.use === "function"
+      ? await rootRuntime.use(domain as any, params.options)
+      : rootRuntime;
 
   const parsedInput = (action as any).input.parse(params.input);
-  const executeParams: DomainActionExecuteParams<any, Runtime> = {
+  const executeParams: DomainActionExecuteParams<any, typeof actionRuntime> = {
     input: parsedInput,
-    runtime,
+    runtime: actionRuntime,
   };
 
   const execute = action.execute;

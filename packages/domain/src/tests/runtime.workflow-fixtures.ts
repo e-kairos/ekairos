@@ -4,7 +4,7 @@ import { i } from "@instantdb/core"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { z } from "zod"
 
-import { defineDomainAction, domain } from "../index.js"
+import { defineDomainAction, domain, type DomainRuntime } from "../index.js"
 import { executeRuntimeAction } from "../runtime.js"
 import { readActionExecutionContext } from "./workflow.metadata.js"
 
@@ -25,13 +25,9 @@ export type RuntimeWorkflowEnv = {
 export async function normalizeProbeLabelExecute(
   { input }: {
     input: { label: string }
-    runtime: RuntimeWorkflowTestRuntime
-    domain?: any
-    call: (...args: any[]) => Promise<any>
+    runtime: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
   },
 ) {
-  "use step"
-
   const execution = await readActionExecutionContext()
   return {
     label: String(input.label ?? "").trim(),
@@ -52,22 +48,17 @@ export const normalizeProbeLabelAction = defineDomainAction({
 export async function createProbeExecute(
   { input, runtime }: {
     input: { probeId: string; label: string }
-    runtime: RuntimeWorkflowTestRuntime
-    domain?: any
-    call: (...args: any[]) => Promise<any>
+    runtime: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
   },
 ) {
-  "use step"
-
   const execution = await readActionExecutionContext()
-  const domain = await runtime.use(runtimeWorkflowDomain)
-  const normalized = await domain.actions.normalizeProbeLabel({
+  const normalized = await runtime.actions.normalizeProbeLabel({
     label: input.label,
   })
   const rowId = id()
 
-  await domain.db.transact([
-    domain.db.tx.runtime_probe_rows[rowId].update({
+  await runtime.db.transact([
+    runtime.db.tx.runtime_probe_rows[rowId].update({
       probeId: input.probeId,
       label: normalized.label,
       createdAt: new Date(),
@@ -79,7 +70,7 @@ export async function createProbeExecute(
     probeId: input.probeId,
     label: normalized.label,
     marker: runtime.env.marker,
-    runtimeKey: runtime.key(),
+    runtimeKey: `${runtime.env.appId}:${runtime.env.marker}`,
     isRuntimeInstance: runtime instanceof RuntimeWorkflowTestRuntime,
     execution,
     normalizedExecution: normalized.execution,
@@ -105,16 +96,11 @@ export const createProbeAction = defineDomainAction({
 export async function readProbeExecute(
   { input, runtime }: {
     input: { probeId: string }
-    runtime: RuntimeWorkflowTestRuntime
-    domain?: any
-    call: (...args: any[]) => Promise<any>
+    runtime: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
   },
 ) {
-  "use step"
-
   const execution = await readActionExecutionContext()
-  const domain = await runtime.use(runtimeWorkflowDomain)
-  const query = await domain.db.query({
+  const query = await runtime.db.query({
     runtime_probe_rows: {
       $: { where: { probeId: input.probeId }, limit: 1 },
     },
@@ -125,7 +111,7 @@ export async function readProbeExecute(
     probeId: row?.probeId ?? null,
     label: row?.label ?? null,
     marker: runtime.env.marker,
-    runtimeKey: runtime.key(),
+    runtimeKey: `${runtime.env.appId}:${runtime.env.marker}`,
     isRuntimeInstance: runtime instanceof RuntimeWorkflowTestRuntime,
     execution,
   }

@@ -1,5 +1,5 @@
 import type { ModelMessage, UIMessageChunk } from "ai"
-import type { DomainSchemaResult } from "@ekairos/domain"
+import type { DomainLike } from "@ekairos/domain"
 
 import type { ContextEnvironment } from "./context.config.js"
 import type { ContextTool } from "./context.action.js"
@@ -70,7 +70,7 @@ import { getContextDurableWorkflow } from "./context.durable.js"
 export interface ContextOptions<
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 > {
   onContextCreated?: (args: {
     env: Env
@@ -103,7 +103,7 @@ type ContextBenchmarkRecorder = {
 export async function runContextReactionDirect<
   Context,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 >(
   context: ContextEngine<Context, Env, RequiredDomain>,
@@ -166,7 +166,7 @@ export type ContextModelInit = string | (() => Promise<any>)
 
 export type ContextReactParams<
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = {
   runtime: ContextRuntimeForDomain<Runtime, RequiredDomain>
@@ -196,7 +196,7 @@ export type ContextReactParams<
 
 export type ContextDurableReactParams<
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = Omit<ContextReactParams<Env, RequiredDomain, Runtime>, "durable"> & {
   durable?: true | undefined
@@ -204,7 +204,7 @@ export type ContextDurableReactParams<
 
 export type ContextDirectReactParams<
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = Omit<ContextReactParams<Env, RequiredDomain, Runtime>, "durable"> & {
   durable: false
@@ -212,7 +212,7 @@ export type ContextDirectReactParams<
 
 async function resolveReactRuntime<
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
   Runtime extends ContextRuntime<Env>,
 >(
   params: ContextReactParams<Env, RequiredDomain, Runtime>,
@@ -255,7 +255,7 @@ export type ContextReactResult<
 
 export type ContextDurableWorkflowPayload<
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = {
   contextKey: string
@@ -269,7 +269,7 @@ export type ContextDurableWorkflowPayload<
 export type ContextDurableWorkflowFunction<
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = (
   payload: ContextDurableWorkflowPayload<Env, RequiredDomain, Runtime>,
@@ -278,7 +278,7 @@ export type ContextDurableWorkflowFunction<
 export type ContextToolExecuteContext<
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = {
   runtime: ContextRuntimeForDomain<Runtime, RequiredDomain>
@@ -331,7 +331,7 @@ export type ShouldContinue = boolean
 export type ContextShouldContinueArgs<
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 > = {
   env: Env
   runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>
@@ -937,7 +937,7 @@ async function getContextEngineOps<Context>(
 export abstract class ContextEngine<
   Context,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 > {
   private readonly reactor: ContextReactor<Context, Env, RequiredDomain>
 
@@ -1057,7 +1057,7 @@ export abstract class ContextEngine<
   private static async prepareExecutionShell<
     Context,
     Env extends ContextEnvironment,
-    RequiredDomain extends DomainSchemaResult,
+    RequiredDomain extends DomainLike,
     Runtime extends ContextRuntime<Env>,
   >(
     story: ContextEngine<Context, Env, RequiredDomain>,
@@ -1123,7 +1123,7 @@ export abstract class ContextEngine<
   private static async startDurable<
     Context,
     Env extends ContextEnvironment,
-    RequiredDomain extends DomainSchemaResult,
+    RequiredDomain extends DomainLike,
     Runtime extends ContextRuntime<Env>,
   >(
     story: ContextEngine<Context, Env, RequiredDomain>,
@@ -1286,7 +1286,7 @@ export abstract class ContextEngine<
   static async runDirect<
     Context,
     Env extends ContextEnvironment,
-    RequiredDomain extends DomainSchemaResult,
+    RequiredDomain extends DomainLike,
     Runtime extends ContextRuntime<Env>,
   >(
     story: ContextEngine<Context, Env, RequiredDomain>,

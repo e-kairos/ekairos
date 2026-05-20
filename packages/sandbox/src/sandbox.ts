@@ -1,19 +1,17 @@
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
-import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
+import type { EkairosRuntime } from "@ekairos/domain/runtime"
 import { defineAction, type ContextAction } from "@ekairos/events"
 import { z } from "zod"
 
-import { sandboxDomain } from "./actions.js"
+import { SANDBOX_RUN_COMMAND_ACTION_NAME } from "./public.js"
 import type { CommandResult } from "./commands.js"
 import type { SandboxConfig, SandboxProvider } from "./types.js"
 
 type AnyDomainRuntime = EkairosRuntime<Record<string, unknown>, any, any>
-type SandboxRuntimeHandle<Runtime extends AnyDomainRuntime> = RuntimeForDomain<
-  Runtime,
-  typeof sandboxDomain
->
-
-const SANDBOX_RUN_COMMAND_ACTION_NAME = "sandbox_run_command" as const
+type SandboxRuntimeHandle<Runtime extends AnyDomainRuntime> = Runtime & {
+  meta?: () => { domain?: unknown }
+  use(domain: unknown): Promise<any>
+}
 
 const sandboxRunCommandInputSchema = z
   .object({
@@ -111,6 +109,18 @@ async function readSandboxState(
   })
 }
 
+async function resolveSandboxDomain(runtime: SandboxRuntimeHandle<any>) {
+  const rootDomain = runtime.meta?.().domain
+  if (!rootDomain) {
+    throw new Error("sandbox_domain_required")
+  }
+  const scoped = await runtime.use(rootDomain)
+  if (!scoped.actions) {
+    throw new Error("sandbox_actions_required")
+  }
+  return scoped
+}
+
 function normalizeState(state: SerializedSandboxState): SerializedSandboxState {
   const sandboxId = asString(state.sandboxId).trim()
   if (!sandboxId) {
@@ -147,11 +157,8 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
     runtime: SandboxRuntimeHandle<Runtime>,
     config: SandboxConfig,
   ): Promise<Sandbox<Runtime>> {
-    "use step"
-    const scoped = await runtime.use(sandboxDomain)
-    const { SandboxService } = await import("./service.js")
-    const service = new SandboxService(scoped.db as any)
-    const created = await service.createSandbox(config)
+    const scoped = await resolveSandboxDomain(runtime)
+    const created = await scoped.actions.createSandbox(config)
     if (!created.ok) {
       throw new Error(created.error)
     }
@@ -186,10 +193,9 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
   }
 
   async runCommand(input: SandboxRunCommandInput): Promise<SandboxRunCommandOutput> {
-    "use step"
     const parsed = sandboxRunCommandInputSchema.parse(input)
 
-    const domain = await this.runtime.use(sandboxDomain)
+    const domain = await resolveSandboxDomain(this.runtime)
     const run = await domain.actions.runCommandProcess({
       sandboxId: this.stateValue.sandboxId,
       command: parsed.command,

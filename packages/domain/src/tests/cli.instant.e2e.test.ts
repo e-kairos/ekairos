@@ -67,20 +67,18 @@ describeCliE2E("domain cli", () => {
         actorId: z.string().nullable(),
       }),
       async execute({ runtime, input }) {
-        "use step"
-        const domain = await runtime.use(appDomain)
         const taskId = newId()
         const actorId = String(runtime.env.actorId ?? "").trim() || null
         const mutations: any[] = [
-          domain.db.tx.cli_tasks[taskId].update({
+          runtime.db.tx.cli_tasks[taskId].update({
             title: String(input.title ?? "").trim(),
             createdAt: Date.now(),
           }),
         ]
         if (actorId) {
-          mutations.push(domain.db.tx.cli_tasks[taskId].link({ creator: actorId }))
+          mutations.push(runtime.db.tx.cli_tasks[taskId].link({ creator: actorId }))
         }
-        await domain.db.transact(mutations)
+        await runtime.db.transact(mutations)
         return {
           taskId,
           title: String(input.title ?? "").trim(),

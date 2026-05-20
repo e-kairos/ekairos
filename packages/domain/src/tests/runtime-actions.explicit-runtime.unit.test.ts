@@ -23,11 +23,9 @@ describe("runtime action explicit runtime instance", () => {
         input: z.object({ title: z.string() }),
         output: z.object({ title: z.string(), runtimeCall: z.number() }),
         async execute({ input, runtime }) {
-          "use step";
-          const scoped = await runtime.use(explicitDomain);
-          return {
+            return {
             title: String(input.title).trim(),
-            runtimeCall: scoped.db.runtimeCall,
+            runtimeCall: runtime.db.runtimeCall,
           };
         },
       }),
@@ -41,13 +39,11 @@ describe("runtime action explicit runtime instance", () => {
           nestedRuntimeCall: z.number(),
         }),
         async execute({ runtime, input }) {
-          "use step";
-          const scoped = await runtime.use(explicitDomain);
-          const normalized = await scoped.actions.normalizeTitle({ title: input.title });
+            const normalized = await runtime.actions.normalizeTitle({ title: input.title });
           return {
             title: normalized.title,
             orgId: runtime.env.orgId,
-            parentRuntimeCall: scoped.db.runtimeCall,
+            parentRuntimeCall: runtime.db.runtimeCall,
             nestedRuntimeCall: normalized.runtimeCall,
           };
         },

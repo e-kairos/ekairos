@@ -3,7 +3,7 @@ import { z } from "zod"
 import {
   approvalOutcomeSchema,
   Task,
-  type TasksRuntime,
+  type TasksClientRuntime,
 } from "../../index.ts"
 
 export const scoreOutcomeSchema = z.object({
@@ -12,7 +12,7 @@ export const scoreOutcomeSchema = z.object({
 })
 
 export async function typedTaskOutcomeWorkflow(
-  runtime: TasksRuntime,
+  runtime: TasksClientRuntime,
   input: { id: string },
 ) {
   "use workflow"
@@ -28,7 +28,7 @@ export async function typedTaskOutcomeWorkflow(
 }
 
 export async function approvalTaskOutcomeWorkflow(
-  runtime: TasksRuntime,
+  runtime: TasksClientRuntime,
   input: { id: string },
 ) {
   "use workflow"

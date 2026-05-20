@@ -90,7 +90,7 @@ const awaitOutcomeInputSchema = z.object({
   id: z.string(),
 })
 
-export const tasksDomain = domain("tasks")
+export const tasksSchemaDomain = domain("tasks")
   .withSchema({
     entities: {
       task_tasks: i.entity({
@@ -111,6 +111,8 @@ export const tasksDomain = domain("tasks")
     links: {},
     rooms: {},
   })
+
+export const tasksDomain = tasksSchemaDomain
   .withActions({
     openTask: defineAction({
       name: "tasks.openTask",

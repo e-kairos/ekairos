@@ -83,6 +83,10 @@ export class MemoryTaskRuntime extends EkairosRuntime<
     return this.memoryDb
   }
 
+  public override async use(subdomain: unknown, options?: unknown): Promise<any> {
+    return await super.use(subdomain as never, options as never)
+  }
+
   static [WORKFLOW_SERIALIZE](instance: MemoryTaskRuntime) {
     return {
       env: instance.env,
