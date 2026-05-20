@@ -12,6 +12,7 @@ export type RuntimeActionEnv = {
 export type RuntimeActionShape = {
   db: {
     runtimeCall: number;
+    query: (input: unknown) => Promise<{ input: unknown; runtimeCall: number }>;
   };
 };
 
@@ -34,7 +35,10 @@ export class DomainRuntime<RootDomain> extends EkairosRuntime<
   }
 
   protected async resolveDb() {
-    return { runtimeCall: this.runtimeCall };
+    return {
+      runtimeCall: this.runtimeCall,
+      query: async (input: unknown) => ({ input, runtimeCall: this.runtimeCall }),
+    };
   }
 }
 

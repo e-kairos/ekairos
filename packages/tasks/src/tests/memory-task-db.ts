@@ -68,7 +68,7 @@ export function createMemoryTaskDb() {
 
 export class MemoryTaskRuntime extends EkairosRuntime<
   Record<string, unknown>,
-  typeof tasksDomain,
+  any,
   ReturnType<typeof createMemoryTaskDb>
 > {
   constructor(public readonly memoryDb = createMemoryTaskDb()) {

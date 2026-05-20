@@ -1,6 +1,5 @@
 import Ajv from "ajv"
 import { id as instantId } from "@instantdb/core"
-import type { DomainSchemaResult, RuntimeUseForDomain } from "@ekairos/domain"
 import { createHook } from "workflow"
 
 import { approvalOutcomeSchema } from "./approval.js"
@@ -22,10 +21,9 @@ export type ServiceResult<T = unknown> =
   | { ok: true; data: T }
   | { ok: false; error: string; issues?: unknown }
 
-export type TasksRuntime = RuntimeUseForDomain<
-  Record<string, unknown>,
-  DomainSchemaResult<any, any, any, any, any, any>
->
+export type TasksRuntime = {
+  use(domain: unknown): Promise<any>
+}
 
 export type TaskRecord<TContext = unknown, TOutcome = unknown> =
   & TaskData<TContext, TOutcome>
@@ -94,8 +92,8 @@ async function runTaskDomainAction(
   action: keyof typeof tasksDomain.actions,
   input: unknown,
 ) {
-  const scoped = await runtime.use(tasksDomain)
-  const actions = scoped.actions as Record<
+  const tasks = await tasksDomain(runtime)
+  const actions = tasks as Record<
     keyof typeof tasksDomain.actions,
     (input: unknown) => Promise<unknown>
   >
