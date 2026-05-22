@@ -1,7 +1,5 @@
-"use client";
-
 import { redirect } from "next/navigation";
 
-export default function EventStepsPage() {
+export default function EventsPage() {
   redirect("/events/components");
 }

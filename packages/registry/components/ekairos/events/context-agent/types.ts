@@ -1,4 +1,4 @@
-import type { ContextEventForUI } from "../context";
+import type { ContextEventForUI } from "@ekairos/events/react";
 
 export type ContextHistoryItem = {
   id: string;

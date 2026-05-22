@@ -1,8 +1,7 @@
 "use client";
 
 import React, { Suspense, useMemo } from "react";
-
-import { useContext } from "../context";
+import { useContext } from "@ekairos/events/react";
 import {
   Conversation,
   ConversationContent,

@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 
-import type { ContextStepForUI } from "../../context";
+import type { ContextStepForUI } from "@ekairos/events/react";
 import type { AgentClassNames } from "../types";
 import { MessageParts } from "./message-parts";
 

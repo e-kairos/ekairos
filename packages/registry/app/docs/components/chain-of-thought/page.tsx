@@ -1,10 +1,9 @@
 "use client"
 
-import { ComponentDocPage } from "../_component-page"
-import { chainOfThoughtRegistryItem } from "./config"
+import { redirect } from "next/navigation";
 
 export default function ChainOfThoughtPage() {
-  return <ComponentDocPage item={chainOfThoughtRegistryItem} />
+  redirect("/events/components");
 }
 
 

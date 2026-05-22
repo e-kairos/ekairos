@@ -3,7 +3,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
-import type { ContextEventForUI, ContextValue } from "../context/types";
+import type { ContextEventForUI, ContextValue } from "@ekairos/events/react";
 
 export type ContextDebugSnapshot = {
   instanceId: string;

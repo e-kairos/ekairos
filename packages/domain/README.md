@@ -71,8 +71,7 @@ const nextConfig: NextConfig = {
 export default withWorkflow(nextConfig) as NextConfig;
 ```
 
-The CLI uses `/api/ekairos/domain` by default and falls back to the legacy
-`/.well-known/ekairos/v1/domain` endpoint for older apps.
+The CLI uses `/api/ekairos/domain`.
 
 ## Core Pattern
 

@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ekairos Registry | Landing and Showcase",
+  title: "Ekairos Registry | Domain UI",
   description:
-    "Standalone registry website for Ekairos UI components. Browse showcase cards, docs, and CLI install endpoints ready for Vercel deployment.",
+    "Domain-first registry for Ekairos UI primitives, installable shadcn components, and package-backed runtime dependencies.",
 };
 
 export default function RootLayout({
@@ -30,7 +30,7 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <RegistrySessionProvider>
           <RegistryTopbar />
-          <div className="pt-11">{children}</div>
+          <div className="pt-14">{children}</div>
         </RegistrySessionProvider>
       </body>
     </html>

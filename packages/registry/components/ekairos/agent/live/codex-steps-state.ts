@@ -1,6 +1,6 @@
 "use client";
 
-import type { ContextEventForUI } from "@/components/ekairos/context/context";
+import type { ContextEventForUI } from "@ekairos/events/react";
 import {
   asRecord,
   asString,

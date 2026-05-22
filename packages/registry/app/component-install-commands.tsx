@@ -40,13 +40,7 @@ export function ComponentInstallCommands({ componentName }: Props) {
       id: "shadcn",
       label: "shadcn CLI",
       description: "Instala el componente directamente",
-      command: `npx shadcn@latest add @ekairos/${componentName}`,
-    },
-    {
-      id: "ekairos",
-      label: "Ekairos CLI",
-      description: "Ejecuta el flujo interactivo y selecciona este componente",
-      command: `npx ekairos@latest add @ekairos/${componentName}`,
+      command: `pnpm dlx shadcn@4.8.0 add https://registry.ekairos.dev/r/${componentName}.json`,
     },
   ]
 

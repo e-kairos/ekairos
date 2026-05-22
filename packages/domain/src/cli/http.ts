@@ -32,13 +32,9 @@ function authHeaders(refreshToken?: string) {
 }
 
 const DEFAULT_DOMAIN_ENDPOINT = "/api/ekairos/domain"
-const LEGACY_DOMAIN_ENDPOINT = "/.well-known/ekairos/v1/domain"
 
 function domainEndpointCandidates(baseUrl: string) {
-  return [
-    `${baseUrl}${DEFAULT_DOMAIN_ENDPOINT}`,
-    `${baseUrl}${LEGACY_DOMAIN_ENDPOINT}`,
-  ]
+  return [`${baseUrl}${DEFAULT_DOMAIN_ENDPOINT}`]
 }
 
 export async function fetchDomainManifest(params: {

@@ -1,6 +1,6 @@
 /** biome-ignore-all lint/suspicious/noConsole: "server only" */
 
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
 import { track } from "@vercel/analytics/server";
 import type { NextRequest } from "next/server";
@@ -9,10 +9,36 @@ import type { Registry, RegistryItem } from "shadcn/schema";
 
 // Load registry package.json to get dependency versions
 let registryPackageJson: Record<string, any> | null = null;
+
+function resolveRegistryRoot() {
+  const envRoot = process.env.EKAIROS_REGISTRY_ROOT?.trim();
+  const initCwd = process.env.INIT_CWD?.trim();
+  const candidates = [
+    envRoot,
+    process.cwd(),
+    join(process.cwd(), "packages/registry"),
+    initCwd,
+    initCwd ? join(initCwd, "packages/registry") : null,
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    if (
+      existsSync(join(candidate, "registry.json")) &&
+      existsSync(join(candidate, "components", "ekairos", "events", "event-context-panel.tsx"))
+    ) {
+      return candidate;
+    }
+  }
+
+  return process.cwd();
+}
+
+const registryRoot = resolveRegistryRoot();
+
 async function getRegistryPackageJson() {
   if (!registryPackageJson) {
     try {
-      const packageJsonPath = join(process.cwd(), "package.json");
+      const packageJsonPath = join(registryRoot, "package.json");
       const content = await fs.readFile(packageJsonPath, "utf-8");
       registryPackageJson = JSON.parse(content);
     } catch (error) {
@@ -63,7 +89,6 @@ const homepage = registryOrigin
   ? new URL("/registry", registryOrigin).toString()
   : "http://localhost:3001/registry";
 
-const registryRoot = process.cwd();
 const componentsRoot = join(registryRoot, "components");
 const defaultAiElementsRegistry = "https://registry.ai-sdk.dev/";
 const aiElementsRegistryBase =
@@ -126,7 +151,7 @@ const toComponentName = (relativePath: string) =>
   stripExtension(relativePath).split("/").join("-").toLowerCase();
 
 const PUBLISHED_EKAIROS_NAMES: Record<string, string> = {
-  "ekairos/events/context/index": "use-context",
+  "ekairos/events/event-context-panel": "event-context-panel",
 };
 
 function shouldPublishSource(relativePath: string) {
@@ -143,8 +168,8 @@ function getRegistryName(relativePath: string) {
 
 const toTitle = (relativePath: string) => {
   const basePath = stripExtension(relativePath);
-  if (basePath === "ekairos/events/context/index") {
-    return "useContext";
+  if (basePath === "ekairos/events/event-context-panel") {
+    return "EventContextPanel";
   }
 
   return basePath
@@ -158,14 +183,17 @@ const toTitle = (relativePath: string) => {
     .join(" / ");
 };
 
+const toRegistryItemType = (_relativePath: string): "registry:component" =>
+  "registry:component";
+
 const toDescription = (relativePath: string) => {
   const basePath = stripExtension(relativePath);
   const segments = basePath.split("/");
   const fileName = segments[segments.length - 1] ?? basePath;
 
   switch (basePath) {
-    case "ekairos/events/context/index":
-      return "React hook bridge for the canonical @ekairos/events context client runtime.";
+    case "ekairos/events/event-context-panel":
+      return "Client event context panel that uses @ekairos/events/react directly.";
     default: {
       const humanPath = basePath.replace(/\//g, " / ");
       return `Ekairos UI component defined in ${humanPath}.`;
@@ -304,19 +332,27 @@ async function getSources() {
 export async function getRegistry() {
   try {
     const { sources } = await getSources();
-    const registryItems: RegistryItem[] = sources.map((source) => ({
-      name: source.name,
-      type: "registry:component",
-      title: toTitle(source.relativePath),
-      description: toDescription(source.relativePath),
-      files: [
-        {
-          path: `registry/default/${source.relativePath}`,
-          type: "registry:component",
-          target: `components/${source.relativePath}`,
-        },
-      ],
-    }));
+    const registryItems: RegistryItem[] = await Promise.all(
+      sources.map(async (source) => {
+        const analysis = await analyzeSource(source);
+
+        return {
+          name: source.name,
+          type: toRegistryItemType(source.relativePath),
+          title: toTitle(source.relativePath),
+          description: toDescription(source.relativePath),
+          dependencies: Array.from(analysis.dependencies),
+          registryDependencies: Array.from(analysis.registryDependencies),
+          files: [
+            {
+              path: `registry/default/${source.relativePath}`,
+              type: toRegistryItemType(source.relativePath),
+              target: `components/${source.relativePath}`,
+            },
+          ],
+        };
+      })
+    );
 
     return {
       name: "ekairos",
@@ -607,13 +643,13 @@ export const GET = async (_request: NextRequest, { params }: RequestProps) => {
   const itemResponse: RegistryItem = {
     $schema: "https://ui.shadcn.com/schema/registry-item.json",
       name: source.name,
-      type: "registry:component",
+      type: toRegistryItemType(source.relativePath),
       title: toTitle(source.relativePath),
       description: toDescription(source.relativePath),
     files: [
       {
           path: `registry/default/${source.relativePath}`,
-          type: "registry:component",
+          type: toRegistryItemType(source.relativePath),
           content: source.content,
           target: `components/${source.relativePath}`,
       },

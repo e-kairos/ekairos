@@ -31,7 +31,7 @@ import {
   getReasoningText,
   getSourceParts,
   normalizeContextEventParts,
-} from "../../context/context-event-parts";
+} from "../context-event-parts";
 
 import type { AgentClassNames } from "../types";
 

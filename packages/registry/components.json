@@ -20,6 +20,6 @@
   },
   "registries": {
     "@ai-elements": "https://registry.ai-sdk.dev/{name}.json",
-    "@ekairos": "http://localhost:3000/r/{name}.json"
+    "@ekairos": "http://localhost:3030/r/{name}.json"
   }
 }

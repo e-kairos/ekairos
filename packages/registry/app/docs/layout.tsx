@@ -6,13 +6,13 @@ import { usePathname } from "next/navigation";
 import { Menu, Moon, Sun } from "lucide-react";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { registryData } from "@/lib/ui-registry";
+import { domainRegistry } from "@/lib/domain-registry";
 import { cn } from "@/lib/utils";
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [isDark, setIsDark] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains("dark"));
@@ -24,8 +24,20 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
     document.documentElement.classList.toggle("dark", next);
   };
 
-  const isComponentActive = (itemId: string) =>
-    pathname === `/docs/components/${itemId}`;
+  const isDomainActive = (domainId: string) =>
+    pathname === `/docs/domains/${domainId}` ||
+    pathname.startsWith(`/docs/domains/${domainId}/`) ||
+    pathname.startsWith(`/${domainId}`);
+  const isComponentActive = (itemId: string) => pathname === `/docs/components/${itemId}`;
+  const componentLinks = domainRegistry.flatMap((domain) =>
+    domain.components.map((component) => ({ domain, component })),
+  );
+  const activeComponent =
+    componentLinks.find(({ component }) => isComponentActive(component.id)) ?? null;
+  const activeDomain =
+    activeComponent?.domain ??
+    domainRegistry.find((domain) => isDomainActive(domain.id)) ??
+    null;
 
   return (
     <TooltipProvider>
@@ -41,16 +53,16 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
 
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-border/80 bg-card transition-transform duration-300 lg:relative lg:translate-x-0",
-            !isSidebarOpen && "-translate-x-full lg:hidden",
+            "fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 -translate-x-full flex-col border-r border-border/80 bg-background transition-transform duration-300 dark:bg-black lg:relative lg:translate-x-0",
+            isSidebarOpen && "translate-x-0",
           )}
         >
           <div className="flex items-center justify-between border-b border-border/80 p-4">
             <Link
               href="/"
-              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className="font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground transition-colors hover:text-foreground"
             >
-              back to registry
+              registry docs
             </Link>
             <button
               type="button"
@@ -63,24 +75,47 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
           </div>
 
           <nav className="flex-1 overflow-y-auto p-4">
-            <div className="mb-3 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              public surface
+            <div className="mb-3 px-2 font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
+              domains
             </div>
-            <div className="space-y-1">
-              {registryData.map((item) => (
-                <Link
-                  key={item.id}
-                  href={`/docs/components/${item.id}`}
-                  className={cn(
-                    "block rounded-md px-3 py-1.5 text-sm transition-colors",
-                    isComponentActive(item.id)
-                      ? "bg-muted font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                  )}
-                >
-                  {item.title}
-                </Link>
+            <div className="grid gap-5">
+              {domainRegistry.map((domain) => (
+                <div key={domain.id} className="border-t border-border pt-3">
+                  <Link
+                    href={domain.href}
+                    className={cn(
+                      "block font-mono text-xs transition-colors",
+                      isDomainActive(domain.id)
+                        ? "text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    /{domain.id}
+                  </Link>
+                  <div className="mt-3 grid gap-1">
+                    {domain.components.map((component) => (
+                      <Link
+                        key={component.id}
+                        href={`/docs/components/${component.id}`}
+                        className={cn(
+                          "border-l px-3 py-1.5 text-sm transition-colors",
+                          isComponentActive(component.id)
+                            ? "border-foreground text-foreground"
+                            : "border-border text-muted-foreground hover:border-foreground hover:text-foreground",
+                        )}
+                      >
+                        {component.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
               ))}
+              <Link
+                href="/registry"
+                className="border-t border-border pt-3 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                /registry
+              </Link>
             </div>
           </nav>
         </aside>
@@ -88,19 +123,20 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           <header
             className={cn(
-              "fixed right-0 left-0 top-11 z-40 flex h-14 items-center gap-4 border-b bg-background/95 px-4 backdrop-blur transition-all duration-300 supports-[backdrop-filter]:bg-background/60",
-              isSidebarOpen && "lg:left-64",
+              "fixed right-0 left-0 top-14 z-40 flex h-14 items-center gap-4 border-b bg-background/95 px-4 backdrop-blur transition-all duration-300 supports-[backdrop-filter]:bg-background/60 lg:left-64",
             )}
           >
             <button
               type="button"
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="-ml-2 rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="-ml-2 p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
               aria-label="Toggle docs sidebar"
             >
               <Menu className="size-5" />
             </button>
-            <span className="text-sm font-medium">useContext</span>
+            <span className="text-sm font-medium">
+              {activeComponent?.component.label ?? activeDomain?.title ?? "Domain components"}
+            </span>
           </header>
 
           <div className="flex-1 overflow-auto pt-14">

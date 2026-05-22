@@ -1,6 +1,7 @@
 "use client";
 
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { INPUT_TEXT_ITEM_TYPE, type ContextValue } from "@ekairos/events/react";
 import { id } from "@instantdb/react";
 import { DotmSquare10 } from "@/components/ui/dotm-square-10";
 import { Prompt } from "../../prompt/prompt";
@@ -14,12 +15,11 @@ import {
 import { useOrgDb } from "@/lib/org-db-context";
 import { cn } from "@/lib/utils";
 
-import { INPUT_TEXT_ITEM_TYPE, type ContextValue } from "../../context";
 import {
   getActionPartInfo,
   getPartText,
   getReasoningText,
-} from "../../context/context-event-parts";
+} from "../context-event-parts";
 import type { MatrixPattern } from "@/lib/dotmatrix-core";
 import type { ChartEditAttachmentPayload } from "../agent-prompt-bridge";
 import { useAgentPromptBridge } from "../agent-prompt-bridge";

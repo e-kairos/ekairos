@@ -110,49 +110,20 @@ const engineNarrative = [
 const componentPriority = [
   {
     order: "01",
-    title: "Context",
-    href: "/docs/components/context",
-    registryName: "context",
+    title: "EventContextPanel",
+    href: "/events/components#event-context-panel",
+    registryName: "event-context-panel",
     summary:
-      "The primary shell for `event_contexts`: status, timeline framing, scrolling, and the place where item history becomes a product surface.",
-    emphasis: "Open here first when you need to represent a conversation or runtime lane.",
-    tags: ["event_contexts", "aggregate shell", "timeline"],
-  },
-  {
-    order: "02",
-    title: "Message",
-    href: "/docs/components/message",
-    registryName: "message",
-    summary:
-      "The core renderer for `event_items`, covering the durable input/output records that the end user actually reads.",
-    emphasis: "This is the UI expression of the trigger/reaction pair persisted by the engine.",
-    tags: ["event_items", "input/output", "product-visible"],
-  },
-  {
-    order: "03",
-    title: "Event Steps",
-    href: "/docs/components/event-steps",
-    registryName: "ekairos-events-event-steps",
-    summary:
-      "Operational drill-down for `event_steps`, `event_parts`, and `$streams`, used when you need to explain how a visible item was produced.",
-    emphasis: "Important, but intentionally subordinate to context and items in the domain narrative.",
-    tags: ["event_steps", "$streams", "replay + trace"],
-  },
-  {
-    order: "04",
-    title: "Full Agent",
-    href: "/docs/components/full-agent",
-    registryName: "full-agent",
-    summary:
-      "Composed template that wires prompt, context, message, and runtime detail over the same `events` contract.",
-    emphasis: "Reach for this once the domain primitives are already clear and accepted.",
-    tags: ["template", "composed surface", "reactor-ready"],
+      "Published UI component for an `event_contexts` timeline with append support through the events React package.",
+    emphasis:
+      "This is the current public registry surface. Runtime primitives stay in `@ekairos/events`; only the UI component is installed from the registry.",
+    tags: ["event_contexts", "event_items", "@ekairos/events/react"],
   },
 ];
 
 const installCommands = [
   `pnpm add ${eventsDomainEntry.schemaPackage}`,
-  "pnpm dlx shadcn@latest add https://registry.ekairos.dev/r/ekairos-events-event-steps.json",
+  "pnpm dlx shadcn@4.8.0 add https://registry.ekairos.dev/r/event-context-panel.json",
 ];
 
 const engineExports = [

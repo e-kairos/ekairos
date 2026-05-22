@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { usePathname } from "next/navigation";
 
 import { getDbForApp } from "@/lib/client-org-db";
 import { OrgDbProvider } from "@/lib/org-db-context";
@@ -38,6 +39,11 @@ const APP_ADMIN_TOKEN_STORAGE_KEY = "ekairos.registry.examples.adminToken";
 const APP_TITLE_STORAGE_KEY = "ekairos.registry.examples.title";
 
 const RegistrySessionContext = React.createContext<RegistrySessionContextValue | null>(null);
+
+function routeNeedsSession(pathname: string | null): boolean {
+  if (!pathname) return false;
+  return pathname.startsWith("/examples") || pathname.startsWith("/showcases");
+}
 
 function createVisitorId(): string {
   const generated = globalThis.crypto?.randomUUID?.();
@@ -130,6 +136,7 @@ export function RegistrySessionProvider({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
   const [session, setSession] = React.useState<RegistrySession | null>(null);
   const [status, setStatus] = React.useState<RegistrySessionStatus>("initializing");
   const [error, setError] = React.useState<string | null>(null);
@@ -211,8 +218,9 @@ export function RegistrySessionProvider({
   );
 
   React.useEffect(() => {
+    if (!routeNeedsSession(pathname)) return;
     void ensureSession();
-  }, [ensureSession]);
+  }, [ensureSession, pathname]);
 
   const db = React.useMemo(
     () => (session?.appId ? getDbForApp(session.appId) : null),

@@ -6,7 +6,7 @@ import {
   ASSISTANT_MESSAGE_TYPE,
   INPUT_TEXT_ITEM_TYPE,
   type ContextEventForUI,
-} from "@/components/ekairos/context/context";
+} from "@ekairos/events/react";
 import fixture from "@/components/ekairos/agent/mocks/codex-run.fixture.json";
 import type { AppSchema } from "@/instant.schema";
 import {

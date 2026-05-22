@@ -17,6 +17,8 @@ describe("create-app help output", () => {
     // secret-printing controls.
     expect(code).toBe(0);
     expect(io.read().stdout).toContain("Non-interactive mode");
+    expect(io.read().stdout).toContain("--template");
+    expect(io.read().stdout).toContain("agent");
     expect(io.read().stdout).toContain("--smoke");
     expect(io.read().stdout).toContain("--keep-server");
     expect(io.read().stdout).toContain("--print-secrets");
