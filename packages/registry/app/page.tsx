@@ -33,16 +33,17 @@ export default function HomePage() {
           src="/registry-domain-landscape.png"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover object-center opacity-95 saturate-[0.9]"
+          className="absolute inset-0 h-full w-full object-cover object-center opacity-95 saturate-[0.96]"
         />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.24)_0%,rgba(0,0,0,0.18)_42%,rgba(0,0,0,0.72)_100%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_22%,rgba(127,29,29,0.18),transparent_34%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.22)_0%,rgba(0,0,0,0.24)_48%,rgba(0,0,0,0.78)_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_22%,rgba(97,233,255,0.14),transparent_30%),radial-gradient(circle_at_48%_40%,rgba(255,92,103,0.14),transparent_34%)]" />
+        <div className="absolute inset-x-0 bottom-0 h-[42%] bg-[linear-gradient(180deg,transparent_0%,rgba(0,0,0,0.58)_46%,rgba(0,0,0,0.92)_100%)]" />
 
         <div className="relative z-10 mx-auto flex min-h-[calc(100svh-56px)] w-full max-w-[96rem] flex-col justify-center px-5 py-16 md:px-8 md:py-20 lg:px-12">
           <header className="mx-auto flex max-w-4xl flex-col items-center text-center">
             <Link
               href={primaryDomain?.href ?? "/events"}
-              className="inline-flex min-h-8 items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_0_1px_rgba(255,255,255,0.04)] transition-colors hover:bg-white/15"
+              className="inline-flex min-h-8 items-center gap-2 rounded-full border border-[#61e9ff]/30 bg-[#61e9ff]/10 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_36px_rgba(97,233,255,0.12)] transition-colors hover:bg-[#61e9ff]/15"
             >
               Registry domain map
               <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -65,21 +66,25 @@ export default function HomePage() {
               </Link>
               <Link
                 href="/registry"
-                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-white/15 px-4 py-2 text-sm font-semibold text-white transition-[background-color,transform] hover:-translate-y-0.5 hover:bg-white/10"
+                className="inline-flex min-h-10 items-center gap-2 rounded-md border border-[#61e9ff]/22 px-4 py-2 text-sm font-semibold text-white transition-[background-color,transform] hover:-translate-y-0.5 hover:bg-[#61e9ff]/10"
               >
                 View Manifest
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
             </div>
 
-            <div className="mt-9 grid w-full max-w-3xl grid-cols-2 border border-white/12 bg-black/18 text-left backdrop-blur-[1px] md:grid-cols-4">
-              {domainRegistry.map((domain) => (
+            <div className="mt-9 grid w-full max-w-3xl grid-cols-2 border border-white/12 bg-black/[0.88] text-left shadow-[0_24px_90px_rgba(0,0,0,0.64)] md:grid-cols-4">
+              {domainRegistry.map((domain, index) => (
                 <Link
                   key={domain.id}
                   href={domain.href}
-                  className="group min-h-20 border-b border-r border-white/12 p-4 transition-colors hover:bg-white hover:text-black md:border-b-0 md:last:border-r-0"
+                  className="group min-h-20 border-b border-r border-white/12 bg-black/40 p-4 transition-colors hover:bg-white hover:text-black md:border-b-0 md:last:border-r-0"
                 >
-                  <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-red-500 group-hover:text-red-700">
+                  <span
+                    className={`font-mono text-[10px] uppercase tracking-[0.22em] group-hover:text-black/65 ${
+                      index % 2 === 0 ? "text-[#ff5c67]" : "text-[#61e9ff]"
+                    }`}
+                  >
                     /{domain.id}
                   </span>
                   <span className="mt-3 block text-base font-semibold leading-tight">
