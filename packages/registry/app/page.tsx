@@ -33,13 +33,13 @@ export default function HomePage() {
           src="/registry-domain-landscape.png"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover object-center opacity-95 saturate-[0.96]"
+          className="absolute inset-0 h-full w-full object-cover object-center opacity-100 brightness-[1.22] contrast-[1.05] saturate-[1.08]"
         />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.22)_0%,rgba(0,0,0,0.24)_48%,rgba(0,0,0,0.78)_100%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_22%,rgba(97,233,255,0.14),transparent_30%),radial-gradient(circle_at_48%_40%,rgba(255,92,103,0.14),transparent_34%)]" />
-        <div className="absolute inset-x-0 bottom-0 h-[42%] bg-[linear-gradient(180deg,transparent_0%,rgba(0,0,0,0.58)_46%,rgba(0,0,0,0.92)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.08)_0%,rgba(0,0,0,0.12)_48%,rgba(0,0,0,0.42)_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(97,233,255,0.18),transparent_32%),radial-gradient(circle_at_48%_38%,rgba(255,92,103,0.12),transparent_35%)]" />
+        <div className="absolute inset-x-0 bottom-0 h-[28%] bg-[linear-gradient(180deg,transparent_0%,rgba(0,0,0,0.22)_45%,rgba(0,0,0,0.58)_100%)]" />
 
-        <div className="relative z-10 mx-auto flex min-h-[calc(100svh-56px)] w-full max-w-[96rem] flex-col justify-center px-5 py-16 md:px-8 md:py-20 lg:px-12">
+        <div className="relative z-10 mx-auto flex min-h-[calc(100svh-56px)] w-full max-w-[96rem] flex-col justify-start px-5 pb-10 pt-12 md:px-8 md:pt-20 lg:px-12 lg:pt-24">
           <header className="mx-auto flex max-w-4xl flex-col items-center text-center">
             <Link
               href={primaryDomain?.href ?? "/events"}
@@ -73,12 +73,12 @@ export default function HomePage() {
               </Link>
             </div>
 
-            <div className="mt-9 grid w-full max-w-3xl grid-cols-2 border border-white/12 bg-black/[0.88] text-left shadow-[0_24px_90px_rgba(0,0,0,0.64)] md:grid-cols-4">
+            <div className="mt-9 grid w-full max-w-3xl grid-cols-2 border border-white/12 bg-black/60 text-left shadow-[0_24px_90px_rgba(0,0,0,0.5)] backdrop-blur-[2px] md:grid-cols-4">
               {domainRegistry.map((domain, index) => (
                 <Link
                   key={domain.id}
                   href={domain.href}
-                  className="group min-h-20 border-b border-r border-white/12 bg-black/40 p-4 transition-colors hover:bg-white hover:text-black md:border-b-0 md:last:border-r-0"
+                  className="group min-h-20 border-b border-r border-white/12 bg-black/10 p-4 transition-colors hover:bg-white hover:text-black md:border-b-0 md:last:border-r-0"
                 >
                   <span
                     className={`font-mono text-[10px] uppercase tracking-[0.22em] group-hover:text-black/65 ${
