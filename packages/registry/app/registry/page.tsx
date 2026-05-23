@@ -19,8 +19,9 @@ export default function RegistryListPage() {
           </p>
         </div>
         <div className="grid content-start gap-3 border-t border-border pt-5 font-mono text-xs text-muted-foreground md:border-l md:border-t-0 md:pl-5 md:pt-0">
-          <span>{domainRegistry.length} domains</span>
-          <span>{domainRegistry.flatMap((domain) => domain.components).length} components</span>
+          <span>/&lt;domain&gt;</span>
+          <span>/&lt;domain&gt;/components</span>
+          <span>/&lt;domain&gt;/domain</span>
           <span>registry:component</span>
         </div>
       </header>
@@ -40,36 +41,61 @@ export default function RegistryListPage() {
                   </span>
                 </Link>
                 <div className="grid gap-3">
-                  {domain.components.map((component) => (
-                    <div
-                      key={component.id}
-                      className="grid gap-4 border-t border-border pt-4 first:border-t-0 first:pt-0 md:grid-cols-[minmax(0,1fr)_17rem]"
-                    >
+                  {domain.components.length > 0 ? (
+                    domain.components.map((component) => (
+                      <div
+                        key={component.id}
+                        className="grid gap-4 border-t border-border pt-4 first:border-t-0 first:pt-0 md:grid-cols-[minmax(0,1fr)_17rem]"
+                      >
+                        <div>
+                          <h2 className="text-lg font-semibold">
+                            <Link
+                              href={`/registry/${component.registryName}`}
+                              className="transition-colors hover:text-muted-foreground"
+                            >
+                              {component.label}
+                            </Link>
+                          </h2>
+                          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                            {component.description}
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-muted-foreground">
+                            <span>{component.packageImport}</span>
+                            <span>{component.target}</span>
+                          </div>
+                        </div>
+                        <a
+                          href={component.registryPath}
+                          className="font-mono text-xs text-foreground underline underline-offset-4 md:text-right"
+                        >
+                          {component.registryPath}
+                        </a>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="grid gap-4 border-t border-border pt-4 first:border-t-0 first:pt-0 md:grid-cols-[minmax(0,1fr)_17rem]">
                       <div>
                         <h2 className="text-lg font-semibold">
                           <Link
-                            href={`/registry/${component.registryName}`}
+                            href={domain.componentsHref}
                             className="transition-colors hover:text-muted-foreground"
                           >
-                            {component.label}
+                            Showcase-first UI surface
                           </Link>
                         </h2>
                         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                          {component.description}
+                          The route is ready for public iteration before a component is published
+                          into the registry manifest.
                         </p>
-                        <div className="mt-3 flex flex-wrap gap-2 font-mono text-[11px] text-muted-foreground">
-                          <span>{component.packageImport}</span>
-                          <span>{component.target}</span>
-                        </div>
                       </div>
-                      <a
-                        href={component.registryPath}
+                      <Link
+                        href={domain.componentsHref}
                         className="font-mono text-xs text-foreground underline underline-offset-4 md:text-right"
                       >
-                        {component.registryPath}
-                      </a>
+                        {domain.componentsHref}
+                      </Link>
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             </div>

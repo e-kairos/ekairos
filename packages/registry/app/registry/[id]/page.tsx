@@ -27,7 +27,7 @@ export default async function RegistryComponentPage({
   }
 
   const { domain, component } = match;
-  const installCommand = `pnpm dlx shadcn@4.8.0 add https://registry.ekairos.dev${component.registryPath}`;
+  const installCommand = `pnpm dlx shadcn@latest add https://registry.ekairos.dev${component.registryPath}`;
 
   return (
     <main className="mx-auto min-h-[calc(100svh-56px)] w-full max-w-[72rem] px-4 py-8 md:px-8 md:py-12">
