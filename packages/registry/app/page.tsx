@@ -33,11 +33,10 @@ export default function HomePage() {
           src="/registry-domain-landscape.png"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover object-center opacity-80 saturate-[0.92]"
+          className="absolute inset-0 h-full w-full object-cover object-center opacity-95 saturate-[0.9]"
         />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.76)_0%,rgba(0,0,0,0.42)_42%,rgba(0,0,0,0.9)_100%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(127,29,29,0.24),transparent_38%)]" />
-        <div className="absolute inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(255,255,255,0.35)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.35)_1px,transparent_1px)] [background-size:52px_52px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.24)_0%,rgba(0,0,0,0.18)_42%,rgba(0,0,0,0.72)_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_22%,rgba(127,29,29,0.18),transparent_34%)]" />
 
         <div className="relative z-10 mx-auto flex min-h-[calc(100svh-56px)] w-full max-w-[96rem] flex-col justify-center px-5 py-16 md:px-8 md:py-20 lg:px-12">
           <header className="mx-auto flex max-w-4xl flex-col items-center text-center">
@@ -73,21 +72,18 @@ export default function HomePage() {
               </Link>
             </div>
 
-            <div className="mt-9 grid w-full max-w-3xl grid-cols-2 border border-white/12 text-left md:grid-cols-4">
+            <div className="mt-9 grid w-full max-w-3xl grid-cols-2 border border-white/12 bg-black/18 text-left backdrop-blur-[1px] md:grid-cols-4">
               {domainRegistry.map((domain) => (
                 <Link
                   key={domain.id}
                   href={domain.href}
-                  className="group min-h-24 border-b border-r border-white/12 bg-black/28 p-4 shadow-[0_20px_90px_rgba(0,0,0,0.28)] backdrop-blur-[2px] transition-colors hover:bg-white hover:text-black md:border-b-0 md:last:border-r-0"
+                  className="group min-h-20 border-b border-r border-white/12 p-4 transition-colors hover:bg-white hover:text-black md:border-b-0 md:last:border-r-0"
                 >
                   <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-red-500 group-hover:text-red-700">
                     /{domain.id}
                   </span>
-                  <span className="mt-3 block text-lg font-semibold leading-tight">
+                  <span className="mt-3 block text-base font-semibold leading-tight">
                     {domain.title}
-                  </span>
-                  <span className="mt-2 block font-mono text-[10px] text-white/45 group-hover:text-black/55">
-                    {domain.schemaPackage}
                   </span>
                 </Link>
               ))}
