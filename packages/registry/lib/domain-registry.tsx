@@ -291,6 +291,21 @@ export function TenderAgent({ db, contextKey }) {
       group: "Renderers",
     },
     {
+      id: "temporal-evidence-list",
+      label: "TemporalEvidenceList",
+      description:
+        "Source-agnostic renderer for timed evidence cues that can link into replays, traces, documents, or workbench panels.",
+      href: "/events/components#temporal-evidence-list",
+      registryName: "temporal-evidence-list",
+      registryPath: "/r/temporal-evidence-list.json",
+      target: "components/ekairos/events/context-agent/ui/temporal-evidence-list.tsx",
+      dependency: "@ekairos/events@beta",
+      packageImport: "@ekairos/events/react",
+      status: "source",
+      kind: "component",
+      group: "Renderers",
+    },
+    {
       id: "event-steps",
       label: "EventSteps",
       description:

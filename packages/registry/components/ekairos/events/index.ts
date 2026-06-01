@@ -9,6 +9,9 @@ export {
   MessageParts,
   PromptBar,
   SourceWatchStatus,
+  TemporalEvidenceList,
+  formatTemporalEvidenceCount,
+  formatTemporalEvidenceTime,
   getContextActivityState,
 } from "./context-agent";
 export type {
@@ -18,6 +21,8 @@ export type {
   SourceWatchPhase,
   SourceWatchStatusProps,
   SourceWatchStatusValue,
+  TemporalEvidenceItem,
+  TemporalEvidenceListProps,
 } from "./context-agent";
 
 export { useContext } from "@ekairos/events/react";
