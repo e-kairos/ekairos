@@ -10,6 +10,13 @@ import { cn } from "@/lib/utils";
 
 import { MessageParts } from "./message-parts";
 import { ContextStepList } from "./context-step-list";
+import {
+  getActionPartInfo,
+  getCreateMessageText,
+  getPartText,
+  getReasoningText,
+  normalizeContextEventParts,
+} from "../context-event-parts";
 
 import type { AgentClassNames } from "../types";
 
@@ -58,7 +65,7 @@ const MessageList = memo(function MessageList({
       };
     };
 
-    return events.map(toMessage);
+    return events.map(toMessage).filter(hasRenderableMessage);
   }, [events]);
 
   const [visibleCount, setVisibleCount] = useState(100);
@@ -134,3 +141,40 @@ const MessageList = memo(function MessageList({
 });
 
 export { MessageList };
+
+function hasRenderableMessage(message: any) {
+  if (message.role === "user") {
+    return Array.isArray(message.parts) && message.parts.length > 0;
+  }
+
+  if (hasVisibleAssistantParts(message.parts)) {
+    return true;
+  }
+
+  const steps = Array.isArray(message.steps) ? message.steps : [];
+  return steps.some((step: any) => hasVisibleAssistantParts(step?.parts));
+}
+
+function hasVisibleAssistantParts(parts: unknown[]): boolean {
+  return normalizeContextEventParts(parts).some((part) => {
+    if (part.type === "reasoning") {
+      return getReasoningText(part).trim().length > 0;
+    }
+    if (
+      part.type === "source" ||
+      part.type === "source-url" ||
+      part.type === "source-document" ||
+      part.type === "file"
+    ) {
+      return false;
+    }
+    const action = getActionPartInfo(part);
+    if (action) {
+      return (
+        action.actionName === "createMessage" &&
+        getCreateMessageText(part).trim().length > 0
+      );
+    }
+    return getPartText(part).trim().length > 0 || Boolean(part.type);
+  });
+}

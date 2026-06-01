@@ -13,7 +13,11 @@ import { useOrgDb } from "@/lib/org-db-context";
 import type { AgentProps } from "./types";
 import { AgentPromptBridgeProvider } from "./agent-prompt-bridge";
 import { MessageList } from "./ui/message-list";
-import { PromptBar } from "./ui/prompt-bar";
+import {
+  ContextActivityIndicator,
+  getContextActivityState,
+  PromptBar,
+} from "./ui/prompt-bar";
 
 export type { AgentProps, ContextHistoryItem } from "./types";
 
@@ -28,6 +32,7 @@ export default function ContextAgent(props: AgentProps) {
     streamChunkDelayMs,
     toolComponents,
     classNames,
+    emptyState,
     promptDensity = "default",
     showReasoning,
     contextLayoutMockEvents,
@@ -50,10 +55,21 @@ export default function ContextAgent(props: AgentProps) {
     if (contextLayoutMockEvents === undefined) return context;
     return { ...context, events: contextLayoutMockEvents };
   }, [context, contextLayoutMockEvents]);
+  const activity = useMemo(
+    () => getContextActivityState({ context, isUploading: false }),
+    [context],
+  );
+  const hasVisibleEvents = listContext.events.length > 0;
+  const showEmptyState =
+    emptyState !== undefined &&
+    !hasVisibleEvents &&
+    !activity &&
+    context.sendStatus !== "submitting";
 
   const layoutMockReadOnly =
     contextLayoutMockReadOnly ??
-    (contextLayoutMockEvents !== undefined && contextLayoutMockEvents.length > 0);
+    (contextLayoutMockEvents !== undefined &&
+      contextLayoutMockEvents.length > 0);
 
   const instanceId = useMemo(() => {
     const anyCrypto = (globalThis as any)?.crypto;
@@ -78,35 +94,70 @@ export default function ContextAgent(props: AgentProps) {
             classNames?.container
           )}
         >
-          <Conversation className={cn("min-h-0 flex-1", classNames?.scrollArea)}>
-            <ConversationContent
-              className={cn("space-y-6 p-4 md:p-6", classNames?.conversationContent)}
+          {showEmptyState ? (
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 items-center justify-center px-4 py-10",
+                classNames?.emptyState,
+              )}
             >
-              <MessageList
-                context={listContext}
-                toolComponents={toolComponents || {}}
-                classNames={classNames}
-                showReasoning={showReasoning ?? true}
-              />
-              <div className={cn("h-4", classNames?.conversationEndSpacer)} />
-            </ConversationContent>
-            <ConversationScrollButton
-              className={cn("bottom-20 right-8", classNames?.conversationScrollButton)}
-            />
-          </Conversation>
+              <div
+                className={cn(
+                  "w-full max-w-3xl -translate-y-[4vh] space-y-7",
+                  classNames?.emptyStateInner,
+                )}
+              >
+                {emptyState}
+                <div className={cn("w-full", classNames?.emptyPrompt)}>
+                  <PromptBar
+                    context={context}
+                    density={promptDensity}
+                    layoutMockReadOnly={layoutMockReadOnly}
+                    showActivity={false}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Conversation className={cn("min-h-0 flex-1", classNames?.scrollArea)}>
+                <ConversationContent
+                  className={cn("space-y-6 p-4 md:p-6", classNames?.conversationContent)}
+                >
+                  <MessageList
+                    context={listContext}
+                    toolComponents={toolComponents || {}}
+                    classNames={classNames}
+                    showReasoning={showReasoning ?? true}
+                  />
+                  <ContextActivityIndicator
+                    activity={activity}
+                    density={promptDensity}
+                  />
+                  <div className={cn("h-4", classNames?.conversationEndSpacer)} />
+                </ConversationContent>
+                <ConversationScrollButton
+                  className={cn("bottom-20 right-8", classNames?.conversationScrollButton)}
+                />
+              </Conversation>
 
-          <div
-            className={cn(
-              "bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60",
-              classNames?.prompt
-            )}
-          >
-            <PromptBar
-              context={context}
-              density={promptDensity}
-              layoutMockReadOnly={layoutMockReadOnly}
-            />
-          </div>
+              <div
+                data-agent-prompt-shell
+                data-prompt-density={promptDensity}
+                className={cn(
+                  "bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60",
+                  classNames?.prompt
+                )}
+              >
+                <PromptBar
+                  context={context}
+                  density={promptDensity}
+                  layoutMockReadOnly={layoutMockReadOnly}
+                  showActivity={false}
+                />
+              </div>
+            </>
+          )}
         </div>
       </AgentPromptBridgeProvider>
     </Suspense>

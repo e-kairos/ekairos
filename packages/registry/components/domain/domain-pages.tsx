@@ -2,7 +2,11 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { ArrowRight, Braces, Boxes, Library, Route, TerminalSquare } from "lucide-react";
 
-import type { DomainRegistryEntry } from "@/lib/domain-registry";
+import {
+  domainRegistry,
+  type DomainRegistryComponentLink,
+  type DomainRegistryEntry,
+} from "@/lib/domain-registry";
 
 type DomainPageMode = "overview" | "components" | "domain";
 
@@ -108,7 +112,7 @@ export function DomainLandingPage({ domain }: { domain: DomainRegistryEntry }) {
               label="ui"
               value={
                 domain.components.length > 0
-                  ? `${domain.components.length} published component`
+                  ? `${domain.components.length} component listed`
                   : "component surface reserved"
               }
             />
@@ -120,140 +124,259 @@ export function DomainLandingPage({ domain }: { domain: DomainRegistryEntry }) {
 }
 
 export function DomainComponentsPage({ domain }: { domain: DomainRegistryEntry }) {
+  const sections = getDomainComponentSections(domain);
+  const publishedComponent = domain.components.find(
+    (component) => component.status === "published",
+  );
+
   return (
-    <main className="min-h-[calc(100svh-56px)] bg-background text-foreground">
-      <section className="bg-black text-white">
-        <div className="mx-auto w-full max-w-[94rem] px-5 py-8 md:px-10 lg:px-14">
-          <DomainNav domain={domain} active="components" tone="dark" />
-          <header className="grid gap-8 py-12 md:grid-cols-[minmax(0,0.92fr)_minmax(18rem,0.38fr)] md:py-16">
+    <main className="min-h-[calc(100svh-56px)] bg-[#fbfbfa] text-foreground">
+      <div className="mx-auto grid w-full max-w-[96rem] gap-8 px-4 py-8 md:px-8 lg:grid-cols-[15rem_minmax(0,1fr)_15rem] lg:px-10">
+        <aside className="hidden min-w-0 border-r border-border/70 pr-6 lg:block">
+          <div className="sticky top-20 max-h-[calc(100svh-6rem)] overflow-y-auto py-8">
+            <DomainComponentsSidebar domain={domain} sections={sections} />
+          </div>
+        </aside>
+
+        <article className="min-w-0 py-8 lg:py-20">
+          <header className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
-              <p className="font-mono text-xs font-semibold uppercase tracking-[0.3em] text-red-500">
+              <p className="font-mono text-sm text-muted-foreground">
                 {domain.schemaPackage}
               </p>
-              <h1 className="mt-5 max-w-4xl text-5xl font-semibold leading-[0.92] md:text-7xl">
-                {domain.title} UI components.
+              <h1 className="mt-3 text-4xl font-semibold tracking-tight md:text-5xl">
+                {domain.title} Components
               </h1>
-              <p className="mt-6 max-w-3xl text-base leading-7 text-white/65">
+              <p className="mt-4 max-w-2xl text-xl leading-8 text-muted-foreground">
                 {domain.componentSurface}
               </p>
             </div>
-            <div className="grid content-start gap-3 border-t border-white/18 pt-5 font-mono text-xs text-white/62 md:border-l md:border-t-0 md:pl-5 md:pt-0">
-              <span>{domain.packageDependency}</span>
-              <span>{domain.aggregateRoot}</span>
-              <span>{domain.durableSurface}</span>
-            </div>
-          </header>
-        </div>
-      </section>
 
-      <section className="mx-auto w-full max-w-[94rem] px-5 py-10 md:px-10 md:py-14 lg:px-14">
-        {domain.components.length > 0 ? (
-          <div className="border-y border-border">
-            <div className="grid border-b border-border font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground md:grid-cols-[14rem_minmax(0,1fr)_24rem]">
-              <div className="py-3 md:border-r md:pr-4">Component</div>
-              <div className="border-t border-border py-3 md:border-l-0 md:border-t-0 md:px-4">
-                Contract
-              </div>
-              <div className="border-t border-border py-3 md:border-l md:border-t-0 md:pl-4">
-                Install
-              </div>
-            </div>
-            {domain.components.map((component) => (
-              <article
-                key={component.id}
-                id={component.id}
-                className="grid gap-5 border-b border-border py-6 last:border-b-0 md:grid-cols-[14rem_minmax(0,1fr)_24rem]"
+            {publishedComponent ? (
+              <a
+                href={publishedComponent.registryPath}
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium transition-colors hover:bg-muted"
               >
-                <div className="md:border-r md:pr-4">
-                  <h2 className="text-2xl font-semibold leading-tight">{component.label}</h2>
-                  <p className="mt-3 font-mono text-[11px] uppercase tracking-[0.18em] text-red-700">
-                    {component.status}
-                  </p>
+                Manifest
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </a>
+            ) : null}
+          </header>
+
+          <p className="mt-12 max-w-3xl text-base leading-8">
+            Installable components stay small and package-backed. Product apps compose
+            them with local routing, permissions, and domain copy without forking the
+            registry source.
+          </p>
+
+          <div className="mt-12 grid gap-12">
+            {sections.map((section) => (
+              <section key={section.title} className="scroll-mt-24" id={section.id}>
+                <h2 className="mb-6 text-sm font-medium text-muted-foreground">
+                  {section.title}
+                </h2>
+                <div className="grid gap-x-16 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
+                  {section.items.map((component) => (
+                    <div key={component.id} id={component.id} className="scroll-mt-24">
+                      <Link
+                        href={component.href}
+                        className="group inline-flex items-center gap-2 text-base font-medium underline decoration-foreground/80 decoration-2 underline-offset-4 transition-colors hover:text-red-700"
+                      >
+                        {component.label}
+                        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground no-underline group-hover:text-red-700">
+                          {component.status}
+                        </span>
+                      </Link>
+                      <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
+                        {component.description}
+                      </p>
+                    </div>
+                  ))}
                 </div>
-                <div className="min-w-0 md:px-4">
-                  <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                    {component.description}
-                  </p>
-                  <div className="mt-5 grid gap-2 font-mono text-xs text-muted-foreground">
-                    <span>target: {component.target}</span>
-                    <span>type: registry:component</span>
-                    <span>dependency: {component.dependency}</span>
-                    <span>package import: {component.packageImport}</span>
-                  </div>
-                </div>
-                <div className="grid content-start gap-3 md:border-l md:pl-4">
-                  <a
-                    href={component.registryPath}
-                    className="font-mono text-xs text-foreground underline underline-offset-4"
-                  >
-                    {component.registryPath}
-                  </a>
-                  <pre className="whitespace-pre-wrap break-all bg-muted/45 p-3 text-[10px] leading-5">
-                    <code>{installCommand(component.registryName)}</code>
-                  </pre>
-                </div>
-              </article>
+              </section>
             ))}
           </div>
-        ) : (
-          <div className="grid gap-10 border-y border-border py-8 md:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
-            <div>
-              <p className="font-mono text-xs font-semibold uppercase tracking-[0.3em] text-red-700">
-                UI surface
-              </p>
-              <h2 className="mt-5 max-w-xl text-4xl font-semibold leading-[0.95] md:text-6xl">
-                Showcase first. Registry second.
-              </h2>
-              <p className="mt-6 max-w-lg text-sm leading-6 text-muted-foreground">
-                This domain has a public UI section before manifest publication, so primitives can
-                be shaped against the real package contract instead of invented in isolation.
-              </p>
-            </div>
-            <div className="grid content-start gap-4">
-              {domain.componentBacklog.map((item, index) => (
-                <div key={item} className="grid gap-3 border-t border-border pt-4 first:border-t-0 first:pt-0 md:grid-cols-[5rem_minmax(0,1fr)]">
-                  <span className="font-mono text-xs uppercase tracking-[0.24em] text-red-700">
-                    0{index + 1}
-                  </span>
-                  <p className="text-sm leading-6 text-muted-foreground">{item}</p>
-                </div>
-              ))}
-              <Link
-                href={domain.href}
-                className="mt-4 inline-flex min-h-10 w-fit items-center gap-2 border border-foreground bg-foreground px-4 py-2 text-sm font-semibold text-background transition-opacity hover:opacity-90"
-              >
-                Open {domain.title} landing
-                <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </Link>
-            </div>
-          </div>
-        )}
+        </article>
 
-        {domain.components.length > 0 ? (
-          <section className="grid gap-8 border-b border-border py-10 md:grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)]">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-muted-foreground">
-                local iteration
+        <aside className="hidden min-w-0 py-20 xl:block">
+          <div className="sticky top-20 grid gap-4">
+            <section className="rounded-lg bg-[#f2f3f2] p-4">
+              <h2 className="text-base font-semibold">Use in clients</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Registry components are the upstream UI surface for Workbench,
+                templates, and product apps.
               </p>
-              <h2 className="mt-3 text-2xl font-semibold leading-tight">
-                Registry and templates use the same package contract.
-              </h2>
-            </div>
-            <div className="grid gap-4 text-sm leading-6 text-muted-foreground">
-              <p>
-                Installed components import behavior from{" "}
-                <span className="font-mono text-foreground">{domain.schemaPackage}</span>.
-                The registry only ships UI files and shadcn-compatible dependencies.
-              </p>
-              <pre className="whitespace-pre-wrap break-all bg-muted/45 p-4 text-xs leading-6 text-foreground">
-                <code>{localInstallCommand(domain.components[0].registryName)}</code>
-              </pre>
-            </div>
-          </section>
-        ) : null}
-      </section>
+              {publishedComponent ? (
+                <pre className="mt-4 whitespace-pre-wrap break-all rounded-md bg-background p-3 text-[10px] leading-5">
+                  <code>{installCommand(publishedComponent.registryName)}</code>
+                </pre>
+              ) : (
+                <Link
+                  href={domain.domainHref}
+                  className="mt-4 inline-flex text-sm font-medium underline decoration-2 underline-offset-4"
+                >
+                  Open domain library
+                </Link>
+              )}
+            </section>
+            {publishedComponent ? (
+              <section className="rounded-lg bg-[#f2f3f2] p-4">
+                <h2 className="text-base font-semibold">Local install</h2>
+                <pre className="mt-3 whitespace-pre-wrap break-all rounded-md bg-background p-3 text-[10px] leading-5">
+                  <code>{localInstallCommand(publishedComponent.registryName)}</code>
+                </pre>
+              </section>
+            ) : null}
+          </div>
+        </aside>
+      </div>
     </main>
   );
+}
+
+type DomainComponentListItem = {
+  id: string;
+  label: string;
+  description: string;
+  href: string;
+  status: DomainRegistryComponentLink["status"] | "planned";
+  group: string;
+};
+
+type DomainComponentSection = {
+  id: string;
+  title: string;
+  items: DomainComponentListItem[];
+};
+
+function getDomainComponentSections(domain: DomainRegistryEntry): DomainComponentSection[] {
+  const sections = new Map<string, DomainComponentListItem[]>();
+
+  for (const component of domain.components) {
+    const group = component.group || "Components";
+    const items = sections.get(group) ?? [];
+    items.push({
+      id: component.id,
+      label: component.label,
+      description: component.description,
+      href: component.href,
+      status: component.status,
+      group,
+    });
+    sections.set(group, items);
+  }
+
+  if (domain.componentBacklog.length > 0) {
+    sections.set(
+      "Planned",
+      domain.componentBacklog.map((item, index) => ({
+        id: `${domain.id}-planned-${index + 1}`,
+        label: item,
+        description:
+          "Planned domain primitive. It should be shaped in the public route before publication.",
+        href: `${domain.componentsHref}#${domain.id}-planned-${index + 1}`,
+        status: "planned",
+        group: "Planned",
+      })),
+    );
+  }
+
+  return [...sections.entries()].map(([title, items]) => ({
+    id: slugify(title),
+    title,
+    items,
+  }));
+}
+
+function DomainComponentsSidebar({
+  domain,
+  sections,
+}: {
+  domain: DomainRegistryEntry;
+  sections: DomainComponentSection[];
+}) {
+  return (
+    <nav aria-label={`${domain.title} components navigation`} className="text-sm">
+      <div>
+        <p className="mb-3 text-xs text-muted-foreground">Getting Started</p>
+        <div className="grid gap-1">
+          <SidebarLink href={domain.href} active={false}>
+            {domain.title}
+          </SidebarLink>
+          <SidebarLink href={domain.componentsHref} active>
+            Components
+          </SidebarLink>
+          <SidebarLink href={domain.domainHref} active={false}>
+            Domain
+          </SidebarLink>
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <p className="mb-3 text-xs text-muted-foreground">Domains</p>
+        <div className="grid gap-1">
+          {domainRegistry.map((item) => (
+            <SidebarLink
+              key={item.id}
+              href={item.componentsHref}
+              active={item.id === domain.id}
+            >
+              {item.title}
+            </SidebarLink>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-8 grid gap-7">
+        {sections.map((section) => (
+          <div key={section.id}>
+            <p className="mb-3 text-xs text-muted-foreground">{section.title}</p>
+            <div className="grid gap-2">
+              {section.items.map((component) => (
+                <a
+                  key={component.id}
+                  href={`#${component.id}`}
+                  className="leading-5 text-foreground transition-colors hover:text-red-700"
+                >
+                  {component.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function SidebarLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className={[
+        "w-fit rounded-md px-2 py-1 transition-colors",
+        active ? "bg-muted text-foreground" : "text-foreground hover:bg-muted",
+      ].join(" ")}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 export function DomainLibraryPage({ domain }: { domain: DomainRegistryEntry }) {

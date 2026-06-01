@@ -1,5 +1,14 @@
 export { ContextAgent } from "./context-agent";
-export { ContextHistory, ContextNewButton, ContextStepList } from "./context-agent";
+export {
+  ContextActivityIndicator,
+  ContextHistory,
+  ContextNewButton,
+  ContextStepList,
+  MessageList,
+  MessageParts,
+  PromptBar,
+  getContextActivityState,
+} from "./context-agent";
 export type { ContextAgentProps, ContextHistoryItem } from "./context-agent";
 
 export { useContext } from "@ekairos/events/react";

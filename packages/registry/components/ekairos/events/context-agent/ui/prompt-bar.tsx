@@ -177,7 +177,7 @@ function hasAssistantText(parts: Array<Record<string, unknown>>) {
   return parts.some((part) => getPartText(part).trim().length > 0);
 }
 
-function getContextActivityState(params: {
+export function getContextActivityState(params: {
   context: ContextValue;
   isUploading: boolean;
 }): ContextActivityState | null {
@@ -294,7 +294,7 @@ function getContextActivityState(params: {
   };
 }
 
-function ContextActivityIndicator({
+export function ContextActivityIndicator({
   activity,
   density = "default",
 }: {
@@ -353,12 +353,15 @@ type PromptBarProps = {
   density?: "default" | "compact";
   /** Static layout mock: disable input and send. */
   layoutMockReadOnly?: boolean;
+  /** Render the activity indicator inside this prompt surface. */
+  showActivity?: boolean;
 };
 
 const PromptBarInner = memo(function PromptBarInner({
   context,
   density = "default",
   layoutMockReadOnly = false,
+  showActivity = true,
 }: PromptBarProps) {
   const { db } = useOrgDb();
   const { append, contextId, sendStatus, stop } = context;
@@ -581,7 +584,9 @@ const PromptBarInner = memo(function PromptBarInner({
 
   return (
     <div>
-      <ContextActivityIndicator activity={activity} density={density} />
+      {showActivity ? (
+        <ContextActivityIndicator activity={activity} density={density} />
+      ) : null}
       <Prompt
         value={input}
         onChange={setInput}

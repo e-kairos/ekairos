@@ -1,9 +1,11 @@
 import type { ContextEventForUI } from "@ekairos/events/react";
+import type { ReactNode } from "react";
 
 export type ContextHistoryItem = {
   id: string;
   title?: string;
   createdAt: string | Date | number;
+  updatedAt?: string | Date | number;
 };
 
 export type AgentClassNames = {
@@ -15,6 +17,12 @@ export type AgentClassNames = {
   conversationEndSpacer?: string;
   /** ConversationScrollButton positioning. */
   conversationScrollButton?: string;
+  /** Wrapper used only when the agent has no messages yet and `emptyState` is set. */
+  emptyState?: string;
+  /** Inner column used only when the agent has no messages yet and `emptyState` is set. */
+  emptyStateInner?: string;
+  /** Prompt wrapper used only in the centered empty state. */
+  emptyPrompt?: string;
   messageList?: string;
   message?: {
     container?: string;
@@ -56,6 +64,8 @@ export type AgentProps = {
   onDataChunk?: (chunk: unknown) => void;
   toolComponents?: Record<string, any>;
   classNames?: AgentClassNames;
+  /** Optional centered state shown before the first message. */
+  emptyState?: ReactNode;
   /** Tighter prompt chrome (padding, textarea) for embedded panels. */
   promptDensity?: "default" | "compact";
   showReasoning?: boolean;
