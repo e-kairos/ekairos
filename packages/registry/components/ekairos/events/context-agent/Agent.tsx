@@ -14,7 +14,6 @@ import type { AgentProps } from "./types";
 import { AgentPromptBridgeProvider } from "./agent-prompt-bridge";
 import { MessageList } from "./ui/message-list";
 import {
-  ContextActivityIndicator,
   getContextActivityState,
   PromptBar,
 } from "./ui/prompt-bar";
@@ -113,7 +112,6 @@ export default function ContextAgent(props: AgentProps) {
                     context={context}
                     density={promptDensity}
                     layoutMockReadOnly={layoutMockReadOnly}
-                    showActivity={false}
                   />
                 </div>
               </div>
@@ -129,10 +127,6 @@ export default function ContextAgent(props: AgentProps) {
                     actionComponents={actionComponents || {}}
                     classNames={classNames}
                     showReasoning={showReasoning ?? true}
-                  />
-                  <ContextActivityIndicator
-                    activity={activity}
-                    density={promptDensity}
                   />
                   <div className={cn("h-4", classNames?.conversationEndSpacer)} />
                 </ConversationContent>
@@ -153,7 +147,6 @@ export default function ContextAgent(props: AgentProps) {
                   context={context}
                   density={promptDensity}
                   layoutMockReadOnly={layoutMockReadOnly}
-                  showActivity={false}
                 />
               </div>
             </>
