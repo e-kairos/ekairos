@@ -123,6 +123,36 @@ function normalizeCodexToolErrorContent(output: AnyRecord, response: AnyRecord):
   return [{ type: "text", text: errorText }]
 }
 
+function codexContentBlocksToActionValue(blocks: AnyRecord[]) {
+  if (blocks.length === 0) return undefined
+  if (blocks.length === 1) {
+    const first = blocks[0]
+    if (first.type === "json") return first.value
+    if (first.type === "text") return first.text
+    if (first.type === "file") return first
+  }
+
+  return {
+    type: "content",
+    value: blocks,
+  }
+}
+
+function codexContentBlocksToErrorText(blocks: AnyRecord[]) {
+  const text = blocks
+    .filter((block) => block.type === "text")
+    .map((block) => asString(block.text))
+    .filter(Boolean)
+    .join("\n\n")
+    .trim()
+  if (text) return text
+
+  const jsonBlock = blocks.find((block) => block.type === "json")
+  if (jsonBlock) return JSON.stringify(jsonBlock.value, null, 2)
+
+  return ""
+}
+
 function textFromParts(parts: unknown): string {
   if (!Array.isArray(parts)) return ""
   const out: string[] = []
@@ -522,21 +552,39 @@ export function buildCodexParts(params: {
     const providerThreadId = asString(input.threadId)
     const providerTurnId = asString(input.turnId)
     const providerResponse = Object.keys(result).length > 0 ? result : undefined
+    const startedReactorMetadata = cleanRecord({
+      reactorKind: "codex",
+      ...codexProviderMetadata({
+        source: "codex.dynamic_tool",
+        sequence: callSequence,
+        at: toolCall.at,
+        providerThreadId,
+        providerTurnId,
+        providerItemId: toolCallId,
+        providerToolType: "dynamicTool",
+      }),
+    })
 
     parts.push({
       sequence: callSequence,
       part: {
-        type: "tool-call",
-        toolName,
-        toolCallId,
-        state: "input-available",
-        content: [
-          {
-            type: "json",
-            value: input.arguments ?? {},
-          },
-        ],
-        metadata: codexProviderMetadata({
+        type: "action",
+        content: {
+          status: "started",
+          actionName: toolName,
+          actionCallId: toolCallId,
+          input: input.arguments ?? {},
+        },
+        reactorMetadata: startedReactorMetadata,
+      },
+    })
+    if (toolCall.output) {
+      const resultBlocks = success
+        ? normalizeCodexToolOutputContent(output.output)
+        : normalizeCodexToolErrorContent(output, result)
+      const resultReactorMetadata = cleanRecord({
+        reactorKind: "codex",
+        ...codexProviderMetadata({
           source: "codex.dynamic_tool",
           sequence: callSequence,
           at: toolCall.at,
@@ -544,32 +592,33 @@ export function buildCodexParts(params: {
           providerTurnId,
           providerItemId: toolCallId,
           providerToolType: "dynamicTool",
+          success,
+          response: providerResponse,
+          errorText: asString(output.errorText) || undefined,
         }),
-      },
-    })
-    if (toolCall.output) {
+      })
+
       parts.push({
         sequence: callSequence + 0.1,
         part: {
-          type: "tool-result",
-          toolName,
-          toolCallId,
-          state: success ? "output-available" : "output-error",
+          type: "action",
           content: success
-            ? normalizeCodexToolOutputContent(output.output)
-            : normalizeCodexToolErrorContent(output, result),
-          metadata: codexProviderMetadata({
-            source: "codex.dynamic_tool",
-            sequence: callSequence,
-            at: toolCall.at,
-            providerThreadId,
-            providerTurnId,
-            providerItemId: toolCallId,
-            providerToolType: "dynamicTool",
-            success,
-            response: providerResponse,
-            errorText: asString(output.errorText) || undefined,
-          }),
+            ? {
+                status: "completed",
+                actionName: toolName,
+                actionCallId: toolCallId,
+                output: codexContentBlocksToActionValue(resultBlocks),
+              }
+            : {
+                status: "failed",
+                actionName: toolName,
+                actionCallId: toolCallId,
+                error: {
+                  message:
+                    codexContentBlocksToErrorText(resultBlocks) || "Action execution failed.",
+                },
+              },
+          reactorMetadata: resultReactorMetadata,
         },
       })
     }

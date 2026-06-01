@@ -1224,27 +1224,35 @@ describe("createCodexReactor", () => {
     const parts = Array.isArray(result.assistantEvent.content?.parts)
       ? result.assistantEvent.content.parts.map((part) => asRecord(part))
       : []
-    const callPart = parts.find((part) => asString(part.type) === "tool-call" && asString(part.toolName) === "createMessage")
-    const resultPart = parts.find((part) => asString(part.type) === "tool-result" && asString(part.toolName) === "createMessage")
-    const callContent = Array.isArray(callPart?.content) ? callPart?.content.map((entry) => asRecord(entry)) : []
-    const resultContent = Array.isArray(resultPart?.content) ? resultPart?.content.map((entry) => asRecord(entry)) : []
-    const callMetadata = asRecord(callPart?.metadata)
-    const resultMetadata = asRecord(resultPart?.metadata)
+    const callPart = parts.find((part) => {
+      const content = asRecord(part.content)
+      return (
+        asString(part.type) === "action" &&
+        asString(content.status) === "started" &&
+        asString(content.actionName) === "createMessage"
+      )
+    })
+    const resultPart = parts.find((part) => {
+      const content = asRecord(part.content)
+      return (
+        asString(part.type) === "action" &&
+        asString(content.status) === "completed" &&
+        asString(content.actionName) === "createMessage"
+      )
+    })
+    const callContent = asRecord(callPart?.content)
+    const resultContent = asRecord(resultPart?.content)
+    const callMetadata = asRecord(callPart?.reactorMetadata)
+    const resultMetadata = asRecord(resultPart?.reactorMetadata)
     const callProvider = asRecord(asRecord(callMetadata.provider).codex)
     const resultProvider = asRecord(asRecord(resultMetadata.provider).codex)
 
     expect(callPart).toBeTruthy()
     expect(resultPart).toBeTruthy()
-    expect(callContent[0]).toMatchObject({
-      type: "json",
-      value: { message: "hello from canonical parts" },
-    })
-    expect(resultContent[0]).toMatchObject({
-      type: "json",
-      value: { message: "hello from canonical parts" },
-    })
-    expect(JSON.stringify(callContent[0]?.value)).not.toContain("providerToolType")
-    expect(JSON.stringify(resultContent[0]?.value)).not.toContain("success")
+    expect(callContent.input).toMatchObject({ message: "hello from canonical parts" })
+    expect(resultContent.output).toMatchObject({ message: "hello from canonical parts" })
+    expect(JSON.stringify(callContent.input)).not.toContain("providerToolType")
+    expect(JSON.stringify(resultContent.output)).not.toContain("success")
     expect(callProvider).toMatchObject({
       threadId: "thr-dynamic-tool",
       turnId: "turn-dynamic-tool-001",
