@@ -14,18 +14,24 @@ export type TemporalEvidenceItem = {
 };
 
 export type TemporalEvidenceListProps = {
+  activeItemKey?: string | null;
   className?: string;
   emptyState?: ReactNode;
+  getItemKey?: (item: TemporalEvidenceItem, index: number) => string;
   items: TemporalEvidenceItem[];
   maxItems?: number;
+  onSelectItem?: (item: TemporalEvidenceItem, index: number) => void;
   title?: string;
 };
 
 export function TemporalEvidenceList({
+  activeItemKey,
   className,
   emptyState = null,
+  getItemKey,
   items,
   maxItems = 6,
+  onSelectItem,
   title = "Evidence",
 }: TemporalEvidenceListProps) {
   const visibleItems = items.slice(0, maxItems);
@@ -49,7 +55,16 @@ export function TemporalEvidenceList({
       </summary>
       <div className="grid gap-1">
         {visibleItems.map((item, index) => {
-          const key = `${item.kind ?? "evidence"}:${item.label}:${item.time ?? index}`;
+          const key =
+            getItemKey?.(item, index) ??
+            `${item.kind ?? "evidence"}:${item.label}:${item.time ?? index}`;
+          const selected = activeItemKey === key;
+          const className = cn(
+            "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 border-l-2 px-1.5 py-1 text-inherit no-underline transition-colors",
+            selected
+              ? "border-foreground/70 bg-accent/50"
+              : "border-border hover:border-foreground/50 hover:bg-accent/50"
+          );
           const content = (
             <>
               <CirclePlayIcon className="mt-0.5 size-3 text-muted-foreground" />
@@ -75,15 +90,26 @@ export function TemporalEvidenceList({
 
           return item.href ? (
             <a
-              className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 border-l-2 border-border px-1.5 py-1 text-inherit no-underline transition-colors hover:border-foreground/50 hover:bg-accent/50"
+              aria-current={selected ? "true" : undefined}
+              className={className}
               href={item.href}
               key={key}
             >
               {content}
             </a>
+          ) : onSelectItem ? (
+            <button
+              aria-pressed={selected}
+              className={cn(className, "text-left")}
+              key={key}
+              onClick={() => onSelectItem(item, index)}
+              type="button"
+            >
+              {content}
+            </button>
           ) : (
             <div
-              className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 border-l-2 border-border px-1.5 py-1"
+              className={className}
               key={key}
             >
               {content}

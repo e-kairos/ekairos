@@ -39,6 +39,7 @@ Workbench and product review surfaces can render an agnostic turn transcript bef
 - Raw ids, step payloads, and part trees stay in Workshop/debug surfaces; the transcript is a review layer, not a replacement for event inspection.
 - Use `density="compact"` when the transcript lives inside a product rail or workbench side panel; keep the default density for full-width Workshop review.
 - `TemporalEvidenceList` renders source-agnostic timed cues with optional `href`; products decide whether a cue opens a replay timestamp, document source, trace row, or workbench panel.
+- `TemporalEvidenceList` may render cues as links or adapter-owned selection buttons through `onSelectItem`; selected state is keyed by the adapter, not by event internals.
 
 ## Source Watch Status
 
