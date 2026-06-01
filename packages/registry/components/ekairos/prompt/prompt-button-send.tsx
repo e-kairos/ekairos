@@ -39,6 +39,9 @@ export function PromptSendButton({ disabled, status, variant, onStop }: { disabl
         <button
           type="button"
           aria-label="Detener respuesta"
+          data-prompt-send
+          data-prompt-send-status={status}
+          data-prompt-send-variant="filled"
           onClick={onStop}
           className="qa-chat-send inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-destructive text-destructive-foreground shadow-[0_8px_22px_-14px_hsl(var(--destructive)/0.8)] transition-[opacity,transform,box-shadow] hover:opacity-90 active:translate-y-px"
         >
@@ -55,7 +58,10 @@ export function PromptSendButton({ disabled, status, variant, onStop }: { disabl
           type="submit"
           aria-label="Enviar"
           disabled={Boolean(disabled)}
-          className="qa-chat-send inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-foreground text-background shadow-[0_8px_22px_-14px_rgba(15,23,42,0.7)] transition-[opacity,transform,box-shadow] hover:opacity-90 hover:shadow-[0_10px_26px_-14px_rgba(15,23,42,0.78)] active:translate-y-px disabled:pointer-events-none disabled:opacity-30"
+          data-prompt-send
+          data-prompt-send-status={status ?? "idle"}
+          data-prompt-send-variant="filled"
+          className="qa-chat-send inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#8fb0ff] text-white shadow-none transition-[opacity,transform,background-color] hover:bg-[#7da0f2] active:translate-y-px disabled:pointer-events-none disabled:opacity-45"
         >
           {Icon}
         </button>
@@ -69,6 +75,9 @@ export function PromptSendButton({ disabled, status, variant, onStop }: { disabl
       title="Enviar"
       ariaLabel="Enviar"
       disabled={Boolean(disabled)}
+      data-prompt-send
+      data-prompt-send-status={status ?? "idle"}
+      data-prompt-send-variant="default"
       className="qa-chat-send"
     >
       {Icon}

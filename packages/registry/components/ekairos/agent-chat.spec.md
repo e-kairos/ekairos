@@ -19,6 +19,7 @@ The registry prompt composer is the shared baseline for context agents.
 - File, pasted large-text, and virtual-context attachments render as removable chips above the textarea.
 - Attachment chips expose `data-prompt-attachment`, `data-attachment-kind`, `data-attachment-status`, `data-attachment-name`, `data-attachment-media-type`, `data-attachment-size`, `data-attachment-has-file-part`, `data-attachment-has-return-action`, `data-prompt-attachment-main`, and `data-prompt-attachment-remove` so products can verify queued prompt context without reading provider payloads.
 - Sending is valid when there is text or at least one ready non-text part.
+- The send/stop control exposes `data-prompt-send`, `data-prompt-send-status`, and `data-prompt-send-variant` so products can verify compact and streaming chrome without binding to product CSS.
 - The rendered prompt surface exposes `data-prompt-surface`, `data-prompt-status`, `data-prompt-status-label`, `data-prompt-busy`, `data-prompt-density`, and `data-prompt-attachment-count` so Workshop and product smoke tests can inspect composer state without product-specific selectors.
 - `ContextAgent` root `data-context-prompt-density` must match the rendered prompt `data-prompt-density`.
 - The persistent composer wrapper exposes `data-agent-prompt-shell` and `data-prompt-density` so products can locate the prompt rail without binding to layout classes.

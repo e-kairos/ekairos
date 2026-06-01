@@ -7,7 +7,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
-export interface PromptButtonProps {
+export interface PromptButtonProps extends Omit<React.ComponentProps<"button">, "type" | "onClick"> {
   children?: React.ReactNode
   className?: string
   title?: string
@@ -20,7 +20,7 @@ export interface PromptButtonProps {
   variant?: "default" | "ghost"
 }
 
-export function PromptButton({ children, className, title, ariaLabel, type, disabled, active, onClick, variant = "default" }: PromptButtonProps) {
+export function PromptButton({ children, className, title, ariaLabel, type, disabled, active, onClick, variant = "default", ...buttonProps }: PromptButtonProps) {
   const buttonType = type ? type : "button"
   const isActive = Boolean(active)
   const isGhost = variant === "ghost"
@@ -28,6 +28,7 @@ export function PromptButton({ children, className, title, ariaLabel, type, disa
 
   const button = (
     <button
+      {...buttonProps}
       type={buttonType}
       aria-label={ariaLabel || title}
       disabled={disabled}
