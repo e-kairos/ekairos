@@ -25,6 +25,7 @@ export {
   createContext,
   type ContextConfig,
   type ContextInstance,
+  type ContextResourcesParams,
   type RegistrableContextBuilder,
 } from "./context.builder.js"
 

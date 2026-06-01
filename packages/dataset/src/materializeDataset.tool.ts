@@ -6,13 +6,13 @@ import type { ContextReactor } from "@ekairos/events"
 import { dataset, type DatasetSchemaInput } from "./dataset.js"
 import { datasetDomain } from "./schema.js"
 
-const fileSourceSchema = z.object({
+const fileResourceSchema = z.object({
   kind: z.literal("file"),
   fileId: z.string(),
   description: z.string().optional(),
 })
 
-const textSourceSchema = z.object({
+const textResourceSchema = z.object({
   kind: z.literal("text"),
   text: z.string(),
   mimeType: z.string().optional(),
@@ -20,18 +20,23 @@ const textSourceSchema = z.object({
   description: z.string().optional(),
 })
 
-const datasetSourceSchema = z.object({
+const datasetResourceSchema = z.object({
   kind: z.literal("dataset"),
   datasetId: z.string(),
   description: z.string().optional(),
 })
 
-const querySourceSchema = z.object({
+const queryResourceSchema = z.object({
   kind: z.literal("query"),
   query: z.record(z.string(), z.any()),
   title: z.string().optional(),
   explanation: z.string().optional(),
 })
+
+const contextInputSchema = z.union([
+  z.object({ id: z.string() }),
+  z.object({ key: z.string() }),
+])
 
 const datasetSchemaSchema = z.object({
   title: z.string().optional(),
@@ -43,16 +48,11 @@ const materializeDatasetToolInputSchema = z.object({
   datasetId: z.string().optional(),
   sandboxId: z.string().optional(),
   title: z.string().optional(),
-  sources: z
-    .array(
-      z.discriminatedUnion("kind", [
-        fileSourceSchema,
-        textSourceSchema,
-        datasetSourceSchema,
-        querySourceSchema,
-      ]),
-    )
-    .min(1),
+  context: contextInputSchema.optional(),
+  files: z.array(fileResourceSchema.omit({ kind: true })).optional(),
+  texts: z.array(textResourceSchema.omit({ kind: true })).optional(),
+  datasets: z.array(datasetResourceSchema.omit({ kind: true })).optional(),
+  queries: z.array(queryResourceSchema.omit({ kind: true })).optional(),
   instructions: z.string().optional(),
   mode: z.enum(["auto", "schema"]).optional(),
   output: z.enum(["rows", "object"]).optional(),
@@ -60,6 +60,7 @@ const materializeDatasetToolInputSchema = z.object({
   first: z.boolean().optional(),
 })
 
+type MaterializeDatasetToolInput = z.infer<typeof materializeDatasetToolInputSchema>
 type MaterializeDatasetRuntimeEnv = { orgId: string }
 type AnyMaterializeDatasetRuntime = EkairosRuntime<any, any, any>
 type MaterializeDatasetRuntimeHandle<
@@ -82,24 +83,9 @@ export function createMaterializeDatasetTool<
 }) {
   return tool({
     description:
-      "Materialize a dataset from declarative sources. Returns only the target datasetId. Query sources use the preconfigured runtime domain.",
+      "Materialize a dataset from declarative resources. Returns only the target datasetId. Query resources use the preconfigured runtime domain.",
     inputSchema: materializeDatasetToolInputSchema,
-    execute: async (input: {
-      datasetId?: string
-      sandboxId?: string
-      title?: string
-      sources: Array<
-        | z.infer<typeof fileSourceSchema>
-        | z.infer<typeof textSourceSchema>
-        | z.infer<typeof datasetSourceSchema>
-        | z.infer<typeof querySourceSchema>
-      >
-      instructions?: string
-      mode?: "auto" | "schema"
-      output?: "rows" | "object"
-      schema?: DatasetSchemaInput
-      first?: boolean
-    }) => {
+    execute: async (input: MaterializeDatasetToolInput) => {
       let builder = dataset(params.runtime)
 
       if (input.title?.trim()) {
@@ -109,23 +95,35 @@ export function createMaterializeDatasetTool<
         builder = builder.sandbox({ sandboxId: input.sandboxId })
       }
 
-      for (const source of input.sources) {
-        if (source.kind === "file") {
-          builder = builder.fromFile(source)
-          continue
-        }
-        if (source.kind === "text") {
-          builder = builder.fromText(source)
-          continue
-        }
-        if (source.kind === "dataset") {
-          builder = builder.fromDataset(source)
-          continue
-        }
+      const materialCount =
+        (input.files?.length ?? 0) +
+        (input.texts?.length ?? 0) +
+        (input.datasets?.length ?? 0) +
+        (input.queries?.length ?? 0)
+      if (input.context && materialCount > 0) {
+        throw new Error("dataset_context_resource_is_exclusive")
+      }
+      if (!input.context && materialCount === 0) {
+        throw new Error("dataset_context_or_material_required")
+      }
+
+      if (input.context) {
+        builder = builder.fromContext(input.context)
+      }
+      for (const resource of input.files ?? []) {
+        builder = builder.fromFile(resource)
+      }
+      for (const resource of input.texts ?? []) {
+        builder = builder.fromText(resource)
+      }
+      for (const resource of input.datasets ?? []) {
+        builder = builder.fromDataset(resource)
+      }
+      for (const resource of input.queries ?? []) {
         builder = (builder as any).fromQuery(params.queryDomain, {
-          query: source.query as any,
-          title: source.title,
-          explanation: source.explanation,
+          query: resource.query as any,
+          title: resource.title,
+          explanation: resource.explanation,
         })
       }
 

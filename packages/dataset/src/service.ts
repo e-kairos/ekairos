@@ -41,8 +41,7 @@ export class DatasetService {
 
     async createDataset(params: {
         id?: string
-        sources?: any
-        sourceKinds?: any
+        contextId?: string
         instructions?: string
         status?: string
         organizationId?: string
@@ -50,6 +49,11 @@ export class DatasetService {
     }): Promise<ServiceResult<{ datasetId: string }>> {
         try {
             const datasetId = params.id ?? createDatasetId()
+            const {
+                id: _id,
+                contextId,
+                ...attrs
+            } = params
             const existing = await this.resolveDatasetEntityId(datasetId)
             const entityId = existing.ok ? existing.data : createDatasetId()
             const mutations = []
@@ -57,14 +61,18 @@ export class DatasetService {
             mutations.push(
                 this.db.tx.dataset_datasets[entityId].update({
                     datasetId,
-                    sources: params.sources ?? "",
                     instructions: params.instructions ?? "",
                     status: params.status ?? "created",
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
-                    ...params,
+                    ...attrs,
                 })
             )
+            if (contextId) {
+                mutations.push(
+                    this.db.tx.dataset_datasets[entityId].link({ context: contextId })
+                )
+            }
 
             await this.db.transact(mutations)
 

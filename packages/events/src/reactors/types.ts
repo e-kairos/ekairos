@@ -5,7 +5,12 @@ import type { ContextEnvironment } from "../context.config.js"
 import type { ContextTool } from "../context.action.js"
 import type { ContextRuntime, ContextRuntimeHandleForDomain } from "../context.runtime.js"
 import type { ContextModelInit } from "../context.engine.js"
-import type { ContextIdentifier, StoredContext, ContextItem } from "../context.store.js"
+import type {
+  ContextIdentifier,
+  StoredContext,
+  StoredContextResource,
+  ContextItem,
+} from "../context.store.js"
 import type { ContextSkillPackage } from "../context.skill.js"
 import { eventsDomain } from "../schema.js"
 
@@ -48,6 +53,7 @@ export type ContextReactorParams<
   runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>
   context: StoredContext<Context>
   contextIdentifier: ContextIdentifier
+  resources: StoredContextResource[]
   /**
    * Context items after the engine-level expansion stage.
    *
@@ -69,7 +75,6 @@ export type ContextReactorParams<
   iteration: number
   maxModelSteps: number
   sendStart: boolean
-  silent: boolean
   contextStepStream?: WritableStream<string>
   writable?: WritableStream<UIMessageChunk>
   persistReactionParts?: (parts: any[]) => Promise<void>

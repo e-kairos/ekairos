@@ -14,6 +14,8 @@ import type {
   ContextExecution,
   ContextItem,
   ContextIdentifier,
+  ContextResource,
+  StoredContextResource,
   StoredContext,
 } from "./context.store.js"
 import { OUTPUT_ITEM_TYPE, WEB_CHANNEL } from "./context.events.js"
@@ -47,11 +49,13 @@ import {
   openExecution,
   saveExecutionStepOutput,
   updateContextContent,
+  updateContextDefinition,
   updateContextReactor,
   updateContextStatus,
   updateItem,
   updateContextStep,
   updateExecutionWorkflowRun,
+  upsertContextResources,
 } from "./steps/store.steps.js"
 import {
   readContextDurableWorkflowReturnValue,
@@ -137,15 +141,6 @@ export interface ContextStreamOptions {
    * Default: true.
    */
   sendFinish?: boolean
-
-  /**
-   * If true, the story loop runs silently (no UI streaming output).
-   *
-   * Persistence (contexts/events/executions) still happens normally.
-   *
-   * Default: false.
-   */
-  silent?: boolean
 
   /**
    * Optional writable stream used by direct/non-durable execution.
@@ -443,7 +438,6 @@ function summarizePartPreview(part: unknown): {
 }
 
 async function emitContextEvents(params: {
-  silent: boolean
   writable?: WritableStream<UIMessageChunk>
   events: ContextStreamEvent[]
 }) {
@@ -510,12 +504,19 @@ type ContextStepPatch = {
 type ContextEngineOps<Context> = {
   initializeContext: (
     contextIdentifier: ContextIdentifier | null,
-    opts?: { silent?: boolean },
   ) => Promise<{ context: StoredContext<Context>; isNew: boolean }>
   updateContextContent: (
     contextIdentifier: ContextIdentifier,
     content: Context,
   ) => Promise<StoredContext<Context>>
+  updateContextDefinition: (
+    contextIdentifier: ContextIdentifier,
+    definition: { description?: string | null; goal?: string | null },
+  ) => Promise<StoredContext<Context>>
+  upsertContextResources: (
+    contextIdentifier: ContextIdentifier,
+    resources: ContextResource[],
+  ) => Promise<StoredContextResource[]>
   updateContextReactor: (
     contextIdentifier: ContextIdentifier,
     reactor: { kind: string; state?: Record<string, unknown> | null },
@@ -671,6 +672,10 @@ async function createRuntimeOps<Context>(
     },
     updateContextContent: async (contextIdentifier, content) =>
       await store.updateContextContent(contextIdentifier, content),
+    updateContextDefinition: async (contextIdentifier, definition) =>
+      await store.updateContextDefinition(contextIdentifier, definition),
+    upsertContextResources: async (contextIdentifier, resources) =>
+      await store.upsertContextResources(contextIdentifier, resources),
     updateContextReactor: async (contextIdentifier, reactor) =>
       await store.updateContextReactor(contextIdentifier, reactor),
     updateContextStatus: async (contextIdentifier, status) =>
@@ -892,10 +897,14 @@ async function createWorkflowOps<Context>(
 ): Promise<ContextEngineOps<Context>> {
   const env = runtime.env
   return {
-    initializeContext: async (contextIdentifier, opts) =>
-      await initializeContext<Context>({ runtime, contextIdentifier, opts }),
+    initializeContext: async (contextIdentifier) =>
+      await initializeContext<Context>({ runtime, contextIdentifier }),
     updateContextContent: async (contextIdentifier, content) =>
       await updateContextContent<Context>({ runtime, contextIdentifier, content }),
+    updateContextDefinition: async (contextIdentifier, definition) =>
+      await updateContextDefinition<Context>({ runtime, contextIdentifier, definition }),
+    upsertContextResources: async (contextIdentifier, resources) =>
+      await upsertContextResources({ runtime, contextIdentifier, resources }),
     updateContextReactor: async (contextIdentifier, reactor) =>
       await updateContextReactor<Context>({ runtime, contextIdentifier, reactor }),
     updateContextStatus: async (contextIdentifier, status) =>
@@ -961,6 +970,33 @@ export abstract class ContextEngine<
     env: Env,
     runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
   ): Promise<string> | string
+
+  protected async describeContext(
+    _content: Context,
+    _context: StoredContext<Context>,
+    _env: Env,
+    _runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+  ): Promise<string | null> {
+    return null
+  }
+
+  protected async defineGoal(
+    _content: Context,
+    _context: StoredContext<Context>,
+    _env: Env,
+    _runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+  ): Promise<string | null> {
+    return null
+  }
+
+  protected async defineResources(
+    _content: Context,
+    _context: StoredContext<Context>,
+    _env: Env,
+    _runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+  ): Promise<ContextResource[]> {
+    return []
+  }
 
   protected abstract buildTools(
     context: StoredContext<Context>,
@@ -1072,11 +1108,10 @@ export abstract class ContextEngine<
       async () => await getContextEngineOps<Context>(runtimeHandle as Runtime, params.__benchmark),
     )
 
-    const silent = params.options?.silent ?? false
     const ctxResult = await measureBenchmark(
       params.__benchmark,
       "react.initializeContextMs",
-      async () => await ops.initializeContext(params.context ?? null, { silent }),
+      async () => await ops.initializeContext(params.context ?? null),
     )
     let currentContext = ctxResult.context
 
@@ -1230,7 +1265,6 @@ export abstract class ContextEngine<
           maxModelSteps: params.options?.maxModelSteps,
           preventClose: params.options?.preventClose,
           sendFinish: params.options?.sendFinish,
-          silent: params.options?.silent,
         },
         bootstrap: {
           contextId: shell.currentContext.id,
@@ -1327,7 +1361,6 @@ export abstract class ContextEngine<
     const maxModelSteps = params.options?.maxModelSteps ?? 1
     const preventClose = params.options?.preventClose ?? false
     const sendFinish = params.options?.sendFinish ?? true
-    const silent = params.options?.silent ?? false
     const writable = params.options?.writable
 
     const bootstrapped = params.__bootstrap
@@ -1347,11 +1380,7 @@ export abstract class ContextEngine<
           currentContext: (await measureBenchmark(
             params.__benchmark,
             "react.bootstrapContextLookupMs",
-            async () =>
-              await ops.initializeContext(
-                { id: String(bootstrapped.contextId) },
-                { silent },
-              ),
+            async () => await ops.initializeContext({ id: String(bootstrapped.contextId) }),
           )).context,
           trigger: bootstrapped.trigger,
           reaction: bootstrapped.reaction,
@@ -1379,7 +1408,6 @@ export abstract class ContextEngine<
         execution = { ...execution, status: "failed" }
         updatedContext = { ...updatedContext, status: "closed" }
         await emitContextEvents({
-          silent,
           writable,
           events: [
             {
@@ -1401,9 +1429,7 @@ export abstract class ContextEngine<
         // noop
       }
       try {
-        if (!silent) {
-          await closeContextStream({ preventClose, sendFinish, writable })
-        }
+        await closeContextStream({ preventClose, sendFinish, writable })
       } catch {
         // noop
       }
@@ -1443,8 +1469,59 @@ export abstract class ContextEngine<
         updatedContext = openedStep.context
         const rawEvents = openedStep.events
 
+        const previousResources = updatedContext.resources ?? []
+        const resources = await measureBenchmark(
+          params.__benchmark,
+          `${stagePrefix}.resourcesMs`,
+          async () => await story.defineResources(nextContent, updatedContext, env, runtimeHandle),
+        )
+        const shouldPersistResources = resources.length > 0 || previousResources.length > 0
+        let contextResources: StoredContextResource[] = previousResources
+        if (shouldPersistResources) {
+          contextResources = await measureBenchmark(
+            params.__benchmark,
+            `${stagePrefix}.contextResourcesMs`,
+            async () => await ops.upsertContextResources(activeContextSelector, resources),
+          )
+          updatedContext = {
+            ...updatedContext,
+            resources: contextResources,
+          }
+        } else {
+          updatedContext = {
+            ...updatedContext,
+            resources: [],
+          }
+        }
+
+        const description = await measureBenchmark(
+          params.__benchmark,
+          `${stagePrefix}.descriptionMs`,
+          async () => await story.describeContext(nextContent, updatedContext, env, runtimeHandle),
+        )
+        const goal = await measureBenchmark(
+          params.__benchmark,
+          `${stagePrefix}.goalMs`,
+          async () => await story.defineGoal(nextContent, updatedContext, env, runtimeHandle),
+        )
+
+        if (description !== null || goal !== null) {
+          updatedContext = await measureBenchmark(
+            params.__benchmark,
+            `${stagePrefix}.contextDefinitionMs`,
+            async () =>
+              await ops.updateContextDefinition(activeContextSelector, {
+                ...(description !== null ? { description } : {}),
+                ...(goal !== null ? { goal } : {}),
+              }),
+          )
+          updatedContext = {
+            ...updatedContext,
+            resources: contextResources,
+          }
+        }
+
         await emitContextEvents({
-          silent,
           writable,
           events: [
             {
@@ -1460,6 +1537,24 @@ export abstract class ContextEngine<
               at: nowIso(),
               contextId: String(updatedContext.id),
             },
+            ...(description !== null || goal !== null
+              ? [
+                  {
+                    type: "context.definition_updated" as const,
+                    at: nowIso(),
+                    contextId: String(updatedContext.id),
+                  },
+                ]
+              : []),
+            ...(shouldPersistResources
+              ? [
+                  {
+                    type: "context.resources_updated" as const,
+                    at: nowIso(),
+                    contextId: String(updatedContext.id),
+                  },
+                ]
+              : []),
           ],
         })
 
@@ -1539,6 +1634,7 @@ export abstract class ContextEngine<
               runtime: runtimeHandle,
               context: updatedContext,
               contextIdentifier: activeContextSelector,
+              resources: contextResources,
               events: expandedEvents,
               triggerEvent,
               model: story.getModel(updatedContext, env, runtimeHandle),
@@ -1552,8 +1648,7 @@ export abstract class ContextEngine<
               iteration: iter,
               maxModelSteps,
               // Only emit a `start` chunk once per story turn.
-              sendStart: !silent && iter === 0,
-              silent,
+              sendStart: iter === 0,
               contextStepStream: currentStepStream?.stream,
               writable,
               persistReactionParts,
@@ -1619,7 +1714,6 @@ export abstract class ContextEngine<
         )
         reactionEvent = appendedReactorOutput.reactionEvent
         await emitContextEvents({
-          silent,
           writable,
           events: stepParts.map((part: any, idx: number) => ({
             type: "part.created" as const,
@@ -1652,7 +1746,6 @@ export abstract class ContextEngine<
         story.opts.onEventCreated?.(assistantEventEffective)
 
         await emitContextEvents({
-          silent,
           writable,
           events: [
             {
@@ -1693,7 +1786,6 @@ export abstract class ContextEngine<
             currentStepId = null
             reactionEvent = finalized.reactionEvent ?? completedReactionEvent
             await emitContextEvents({
-              silent,
               writable,
               events: [
                 {
@@ -1716,7 +1808,6 @@ export abstract class ContextEngine<
             })
 
             await emitContextEvents({
-              silent,
               writable,
               events: [
                 {
@@ -1737,7 +1828,6 @@ export abstract class ContextEngine<
             execution = { ...execution, status: "completed" }
             updatedContext = { ...updatedContext, status: "closed" }
             await emitContextEvents({
-              silent,
               writable,
               events: [
                 {
@@ -1755,9 +1845,7 @@ export abstract class ContextEngine<
                 },
               ],
             })
-            if (!silent) {
-              await closeContextStream({ preventClose, sendFinish, writable })
-            }
+            await closeContextStream({ preventClose, sendFinish, writable })
             const result = {
               context: updatedContext,
               trigger,
@@ -1897,13 +1985,11 @@ export abstract class ContextEngine<
         reactionEvent = completedStep.reactionEvent ?? pendingReactionEvent
 
         await emitContextEvents({
-          silent,
           writable,
           events: completedStep.actionResultChunkEvents,
         })
 
         await emitContextEvents({
-          silent,
           writable,
           events: [
             {
@@ -1956,7 +2042,6 @@ export abstract class ContextEngine<
 
         if (continueLoop !== false) {
           await emitContextEvents({
-            silent,
             writable,
             events: [
               {
@@ -1977,7 +2062,6 @@ export abstract class ContextEngine<
             status: "completed",
           }
           await emitContextEvents({
-            silent,
             writable,
             events: [
               {
@@ -2003,7 +2087,6 @@ export abstract class ContextEngine<
           execution = { ...execution, status: "completed" }
           updatedContext = { ...updatedContext, status: "closed" }
           await emitContextEvents({
-            silent,
             writable,
             events: [
               {
@@ -2021,9 +2104,7 @@ export abstract class ContextEngine<
               },
             ],
           })
-          if (!silent) {
-            await closeContextStream({ preventClose, sendFinish, writable })
-          }
+          await closeContextStream({ preventClose, sendFinish, writable })
           const result = {
             context: updatedContext,
             trigger,
@@ -2069,7 +2150,6 @@ export abstract class ContextEngine<
               }),
           )
           await emitContextEvents({
-            silent,
             writable,
             events: [
               {

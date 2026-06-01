@@ -16,7 +16,7 @@ export type TransformDatasetResult = {
 }
 
 function buildInstructions(input: TransformDatasetInput): string {
-  const sources = input.datasets
+  const inputs = input.datasets
     .map((d, idx) => {
       const name = d.description ? ` - ${d.description}` : ""
       return `${idx + 1}. ${d.id}${name}`
@@ -28,8 +28,8 @@ function buildInstructions(input: TransformDatasetInput): string {
     "Use pandas when helpful. Output must be JSONL with {type:'row', data:{...}} lines.",
     "Respect the provided output schema exactly.",
     "",
-    "## Source Datasets",
-    sources || "- (none)",
+    "## Input Datasets",
+    inputs || "- (none)",
     "",
     "## Transformation Description (LaTeX + sets)",
     String(input.description ?? "").trim(),
@@ -45,7 +45,7 @@ export async function transformDataset(
   input: TransformDatasetInput,
 ): Promise<TransformDatasetResult> {
   const transformContext = createTransformDatasetContext({
-    sourceDatasetIds: input.datasets.map((d) => d.id),
+    inputDatasetIds: input.datasets.map((d) => d.id),
     outputSchema: input.outputSchema,
     instructions: buildInstructions(input),
     datasetId: input.datasetId,

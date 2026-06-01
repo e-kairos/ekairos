@@ -13,7 +13,6 @@ import { createFileParseContext } from "../../file/file-dataset.agent"
 import { createTransformDatasetContext } from "../transform-dataset.agent"
 import { DatasetService } from "../../service"
 import { describeInstant, hasInstantAdmin, setupInstantTestEnv } from "../../tests/_env"
-import { attachMockInstantStreams } from "../../tests/_streams"
 
 dotenvConfig({ path: path.resolve(process.cwd(), ".env.local") })
 
@@ -40,10 +39,6 @@ const adminDb = hasInstantAdmin()
         schema: appDomain.toInstantSchema(),
       })
     : null as any
-
-if (adminDb) {
-    attachMockInstantStreams(adminDb)
-}
 
 if (adminDb) {
     configureRuntime({
@@ -124,7 +119,7 @@ function buildGroupTransformSchema() {
                                             },
                                             name: {
                                                 type: "string",
-                                                description: "Address label if present in the source file",
+                                                description: "Address label if present in the resource file",
                                             },
                                             formattedAddress: {
                                                 type: "string",
@@ -165,7 +160,7 @@ function buildItemTransformSchema() {
                             },
                             description: {
                                 type: "string",
-                                description: "Item description detected in the source file",
+                                description: "Item description detected in the resource file",
                             },
                             unitOfMeasure: {
                                 anyOf: [
@@ -286,7 +281,7 @@ describeInstant("Multi Group RFQ Dataset", () => {
             expect(sourceDataset.calculatedTotalRows).toBeGreaterThan(0)
 
             const groupTransform = createTransformDatasetContext({
-                sourceDatasetIds: sourceDataset.id,
+                inputDatasetIds: sourceDataset.id,
                 outputSchema: buildGroupTransformSchema(),
                 sandboxId: sandbox.sandboxId,
             })
@@ -311,7 +306,7 @@ describeInstant("Multi Group RFQ Dataset", () => {
             expect(groupsDataset.schema?.schema?.properties?.groups).toBeTruthy()
 
             const itemTransform = createTransformDatasetContext({
-                sourceDatasetIds: [sourceDataset.id, groupsDataset.id],
+                inputDatasetIds: [sourceDataset.id, groupsDataset.id],
                 outputSchema: buildItemTransformSchema(),
                 sandboxId: sandbox.sandboxId,
             })

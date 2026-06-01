@@ -105,7 +105,6 @@ export function createAiSdkReactor<
       iteration: params.iteration,
       maxSteps,
       sendStart: params.sendStart,
-      silent: params.silent,
       contextStepStream: params.contextStepStream,
       writable: params.writable,
       executionId: params.executionId,

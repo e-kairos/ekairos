@@ -4,7 +4,7 @@ Internal implementation notes for the dataset package.
 
 ## Core idea
 
-`@ekairos/dataset` turns query, file, text, and dataset sources into persisted datasets.
+`@ekairos/dataset` turns query, file, text, and dataset resources into persisted datasets.
 
 It uses:
 
@@ -24,21 +24,21 @@ await dataset(runtime, { datasetId: "products_v1" })
   .build()
 ```
 
-Query sources need a second domain: the source domain being queried. The runtime must include both `datasetDomain` and the source domain. Compatibility is checked by domain name and schema, including transitive subdomains.
+Query resources need a second domain: the domain being queried. The runtime must include both `datasetDomain` and the queried domain. Compatibility is checked by domain name and schema, including transitive subdomains.
 
 ```ts
 await dataset(runtime)
   .fromQuery(sourceDomain, {
     query: {
-      source_items: {},
+      resource_items: {},
     },
   })
-  .build({ datasetId: "source_snapshot_v1" })
+  .build({ datasetId: "resource_snapshot_v1" })
 ```
 
 ## Structure replacement
 
-The replacement API keeps the structure-style source and output shape:
+The replacement API keeps the structure-style resource and output shape:
 
 - `from({ kind: "file" | "text" | "dataset", ... })`
 - `auto()` / `schema(...)`
@@ -50,7 +50,7 @@ The replacement API keeps the structure-style source and output shape:
 ## High-level flow
 
 1. Create or update dataset metadata.
-2. Materialize source data.
+2. Materialize resource data.
 3. Run sandbox-backed transforms when needed.
 4. Validate rows against schema.
 5. Upload JSONL output to InstantDB storage.

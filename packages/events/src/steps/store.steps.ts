@@ -1,5 +1,3 @@
-import type { UIMessageChunk } from "ai"
-
 import type { ContextEnvironment } from "../context.config.js"
 import type { ContextRuntime } from "../context.runtime.js"
 import { getContextRuntimeServices } from "../context.runtime.js"
@@ -7,6 +5,8 @@ import type {
   ContextExecution,
   ContextItem,
   ContextIdentifier,
+  ContextResource,
+  StoredContextResource,
   StoredContext,
   ContextStatus,
 } from "../context.store.js"
@@ -160,7 +160,6 @@ function logStepDebug(message: string, payload: Record<string, unknown>) {
 export async function initializeContext<C>(
   params: RuntimeParams & {
     contextIdentifier: ContextIdentifier | null
-    opts?: { silent?: boolean; writable?: WritableStream<UIMessageChunk> }
   },
 ): Promise<{ context: StoredContext<C>; isNew: boolean }> {
   "use step"
@@ -213,6 +212,34 @@ export async function updateContextContent<C>(
   "use step"
   const { runtime } = await getRuntimeAndEnv(params)
   return await runtime.store.updateContextContent<C>(params.contextIdentifier, params.content)
+}
+
+export async function updateContextDefinition<C>(
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier
+    definition: { description?: string | null; goal?: string | null }
+  },
+): Promise<StoredContext<C>> {
+  "use step"
+  const { runtime } = await getRuntimeAndEnv(params)
+  return await runtime.store.updateContextDefinition<C>(
+    params.contextIdentifier,
+    params.definition,
+  )
+}
+
+export async function upsertContextResources(
+  params: RuntimeParams & {
+    contextIdentifier: ContextIdentifier
+    resources: ContextResource[]
+  },
+): Promise<StoredContextResource[]> {
+  "use step"
+  const { runtime } = await getRuntimeAndEnv(params)
+  return await runtime.store.upsertContextResources(
+    params.contextIdentifier,
+    params.resources,
+  )
 }
 
 export async function updateContextReactor<C>(

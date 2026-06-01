@@ -13,7 +13,7 @@ function buildRole(): string {
 function buildGoal(): string {
     let xml = create()
         .ele("Goal")
-        .txt("Transform the source dataset(s) (JSONL with {type:'row', data:{...}} per line) into a new dataset strictly matching the output schema. Save to output.jsonl in the dataset workstation. Each line must remain a single JSON object representing one record. You may need to combine, filter, or reshape data from multiple source datasets.")
+        .txt("Transform the input dataset(s) (JSONL with {type:'row', data:{...}} per line) into a new dataset strictly matching the output schema. Save to output.jsonl in the dataset workstation. Each line must remain a single JSON object representing one record. You may need to combine, filter, or reshape data from multiple input datasets.")
         .up()
 
     return xml.end({ prettyPrint: true, headless: true })
@@ -24,28 +24,28 @@ function buildContextSection(context: TransformPromptContext): string {
         .ele("Context")
         .ele("DatasetId").txt(context.datasetId).up()
 
-    let sourcesXml = create().ele("SourceDatasets")
-    for (const sourceId of context.sourceDatasetIds) {
-        sourcesXml = sourcesXml.ele("SourceDatasetId").txt(sourceId).up()
+    let inputsXml = create().ele("InputDatasets")
+    for (const sourceId of context.inputDatasetIds) {
+        inputsXml = inputsXml.ele("InputDatasetId").txt(sourceId).up()
     }
-    xml = xml.import(sourcesXml.first())
+    xml = xml.import(inputsXml.first())
 
     let sandboxXml = create().ele("Sandbox")
-    for (const sourcePathInfo of context.sandboxConfig.sourcePaths) {
-        sandboxXml = sandboxXml.ele("SourceFile")
-            .ele("DatasetId").txt(sourcePathInfo.datasetId).up()
-            .ele("Path").txt(sourcePathInfo.path).up()
+    for (const inputPathInfo of context.sandboxConfig.inputPaths) {
+        sandboxXml = sandboxXml.ele("InputFile")
+            .ele("DatasetId").txt(inputPathInfo.datasetId).up()
+            .ele("Path").txt(inputPathInfo.path).up()
             .up()
     }
     sandboxXml = sandboxXml.ele("OutputPath").txt(context.sandboxConfig.outputPath).up()
     xml = xml.import(sandboxXml.first())
 
-    if (context.sourcePreviews && context.sourcePreviews.length > 0) {
-        let previewsXml = create().ele("SourcePreviews")
-        for (const sourcePreviewInfo of context.sourcePreviews) {
-            const sp = sourcePreviewInfo.preview
-            let px = create().ele("SourcePreview")
-                .ele("DatasetId").txt(sourcePreviewInfo.datasetId).up()
+    if (context.inputPreviews && context.inputPreviews.length > 0) {
+        let previewsXml = create().ele("InputPreviews")
+        for (const inputPreviewInfo of context.inputPreviews) {
+            const sp = inputPreviewInfo.preview
+            let px = create().ele("InputPreview")
+                .ele("DatasetId").txt(inputPreviewInfo.datasetId).up()
                 .ele("TotalRows").txt(String(sp.totalRows)).up()
 
             if (sp.metadata) {
@@ -102,22 +102,22 @@ function buildOutputSchemaSection(context: TransformPromptContext): string {
 
 function buildInstructions(context: TransformPromptContext): string {
     const outputPath = context.sandboxConfig.outputPath
-    const multipleSourcesNote = context.sourceDatasetIds.length > 1 
-        ? "You have multiple source datasets available. You may need to read, join, filter, or combine data from them to produce the output." 
+    const multipleInputsNote = context.inputDatasetIds.length > 1
+        ? "You have multiple input datasets available. You may need to read, join, filter, or combine data from them to produce the output."
         : ""
 
     let xml = create()
         .ele("Instructions")
         .ele("Workflow")
-        .ele("Step", { number: "1", name: "Inspect Source" })
-        .ele("Action").txt(`Review SourcePreviews to understand current record structures (data fields, shapes, edge cases). ${multipleSourcesNote}`).up()
+        .ele("Step", { number: "1", name: "Inspect Inputs" })
+        .ele("Action").txt(`Review InputPreviews to understand current record structures (data fields, shapes, edge cases). ${multipleInputsNote}`).up()
         .up()
         .ele("Step", { number: "2", name: "Plan Mapping" })
-        .ele("Action").txt("Plan a deterministic mapping from source data fields to the output schema fields (normalize names, types, and formats).").up()
-        .ele("Note").txt("If fields are missing, set defaults; if types differ, coerce consistently. When working with multiple sources, decide how to combine or relate them. Output field names must remain exactly as declared by the output schema.").up()
+        .ele("Action").txt("Plan a deterministic mapping from input data fields to the output schema fields (normalize names, types, and formats).").up()
+        .ele("Note").txt("If fields are missing, set defaults; if types differ, coerce consistently. When working with multiple inputs, decide how to combine or relate them. Output field names must remain exactly as declared by the output schema.").up()
         .up()
         .ele("Step", { number: "3", name: "Transform" })
-        .ele("Action").txt("Use executeCommand to run a Python script that reads source JSONL file(s) and writes transformed records to output.jsonl. Keep line-per-record JSON objects with { 'type': 'row', 'data': { ... } }.").up()
+        .ele("Action").txt("Use executeCommand to run a Python script that reads input JSONL file(s) and writes transformed records to output.jsonl. Keep line-per-record JSON objects with { 'type': 'row', 'data': { ... } }.").up()
         .ele("Requirement").txt(`Write file to: ${outputPath}`).up()
         .ele("Requirement").txt("Every data object MUST use the exact property names from OutputSchema required/properties keys. Do not translate, localize, rename, or infer alternative field names.").up()
         .ele("Requirement").txt("Do not print large data to stdout; only progress and summaries.").up()
@@ -129,12 +129,12 @@ function buildInstructions(context: TransformPromptContext): string {
         .up()
         .ele("Rules")
         .ele("Rule").txt("Output must strictly match the output schema for each record in data.").up()
-        .ele("Rule").txt("OutputSchema property names are authoritative. Field names are a technical contract; only field values may preserve source language.").up()
+        .ele("Rule").txt("OutputSchema property names are authoritative. Field names are a technical contract; only field values may preserve input language.").up()
         .ele("Rule").txt("Each line in output.jsonl must be a standalone JSON object with {type:'row', data:{...}}.").up()
         .ele("Rule").txt("Do not include headers, summaries, or metadata as records.").up()
-        .ele("Rule").txt("Be robust to malformed lines in source: skip or sanitize, but do not crash.").up()
+        .ele("Rule").txt("Be robust to malformed lines in input: skip or sanitize, but do not crash.").up()
         .up()
-        .ele("CurrentTask").txt("Transform source dataset(s) to match OutputSchema and write output.jsonl, then complete.").up()
+        .ele("CurrentTask").txt("Transform input dataset(s) to match OutputSchema and write output.jsonl, then complete.").up()
         .up()
 
     return xml.end({ prettyPrint: true, headless: true })

@@ -9,10 +9,9 @@ import { configureRuntime, EkairosRuntime } from "@ekairos/domain/runtime"
 import { createScriptedReactor, eventsDomain } from "@ekairos/events"
 import { sandboxDomain, SandboxService } from "@ekairos/sandbox"
 import { dataset } from "../dataset"
-import { getDatasetOutputPath, getDatasetSourcesDir } from "../datasetFiles"
+import { getDatasetOutputPath, getDatasetResourcesDir } from "../datasetFiles"
 import { datasetDomain } from "../schema"
 import { describeInstant, hasInstantAdmin, setupInstantTestEnv } from "./_env"
-import { attachMockInstantStreams } from "./_streams"
 
 dotenvConfig({ path: path.resolve(__dirname, "..", "..", "..", "..", ".env.local") })
 dotenvConfig({ path: path.resolve(__dirname, "..", "..", "..", "..", ".env") })
@@ -57,10 +56,6 @@ const adminDb =
     : null
 
 if (adminDb) {
-  attachMockInstantStreams(adminDb)
-}
-
-if (adminDb) {
   configureRuntime({
     domain: { domain: appDomain },
     runtime: async () => ({ db: adminDb } as any),
@@ -96,6 +91,7 @@ async function getDatasetSnapshot(datasetId: string) {
     dataset_datasets: {
       $: { where: { datasetId } as any, limit: 1 },
       dataFile: {},
+      context: {},
     } as any,
   })
 
@@ -243,7 +239,8 @@ describeInstant("dataset() builder direct API", () => {
     const snapshot = await getDatasetSnapshot(result.datasetId)
     expect(snapshot.rows.length).toBe(2)
     expect(snapshot.dataset.analysis?.query).toBeTruthy()
-    expect(snapshot.dataset.sources).toBeTruthy()
+    expect(snapshot.dataset.resourceKinds).toBeUndefined()
+    expect(snapshot.dataset.context?.resources?.[0]?.type).toBe("query")
     expect(snapshot.dataset.sandboxId ?? null).toBeNull()
   })
 
@@ -255,14 +252,14 @@ describeInstant("dataset() builder direct API", () => {
           scriptedToolStep(
             "executeCommand",
             {
-              scriptName: "summarize_query_source",
+              scriptName: "summarize_query_resource",
               pythonCode: [
                 "import json",
-                `source_path = ${JSON.stringify(`${getDatasetSourcesDir("query_summary_v1")}/source_query_summary_v1__query_0.jsonl`)}`,
+                `resource_path = ${JSON.stringify(`${getDatasetResourcesDir("query_summary_v1")}/resource_query_summary_v1__query_0.jsonl`)}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("query_summary_v1"))}`,
                 "count = 0",
                 "total = 0.0",
-                "with open(source_path, 'r', encoding='utf-8') as f:",
+                "with open(resource_path, 'r', encoding='utf-8') as f:",
                 "  for line in f:",
                 "    line = line.strip()",
                 "    if not line:",
@@ -339,9 +336,9 @@ describeInstant("dataset() builder direct API", () => {
               scriptName: "parse_csv_rows",
               pythonCode: [
                 "import csv, glob, json",
-                `sources_dir = ${JSON.stringify(getDatasetSourcesDir("file_products_v1"))}`,
+                `resources_dir = ${JSON.stringify(getDatasetResourcesDir("file_products_v1"))}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("file_products_v1"))}`,
-                "csv_path = glob.glob(sources_dir + '/*.csv')[0]",
+                "csv_path = glob.glob(resources_dir + '/*.csv')[0]",
                 "with open(csv_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
                 "  reader = csv.DictReader(src)",
                 "  for row in reader:",
@@ -414,10 +411,10 @@ describeInstant("dataset() builder direct API", () => {
             scriptName: "parse_text_csv",
             pythonCode: [
               "import csv, glob, json",
-              `sources_dir = ${JSON.stringify(getDatasetSourcesDir("text_products_v1"))}`,
+              `resources_dir = ${JSON.stringify(getDatasetResourcesDir("text_products_v1"))}`,
               `output_path = ${JSON.stringify(getDatasetOutputPath("text_products_v1"))}`,
-              "source_path = glob.glob(sources_dir + '/*')[0]",
-              "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
+              "resource_path = glob.glob(resources_dir + '/*')[0]",
+              "with open(resource_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
               "  reader = csv.DictReader(src)",
               "  for row in reader:",
               "    payload = {'type': 'row', 'data': {'code': row['code'], 'description': row['description'], 'price': float(row['price'])}}",
@@ -450,7 +447,7 @@ describeInstant("dataset() builder direct API", () => {
 
   it("fromDataset(datasetId) + reactor + instructions produces a derived dataset", async () => {
     const { electronicsCategory } = await seedSampleRows(`derived-${Date.now()}`)
-    const source = await dataset(testRuntime)
+    const inputDataset = await dataset(testRuntime)
       .fromQuery(sampleDomain, {
         query: {
           sample_items: {
@@ -458,7 +455,7 @@ describeInstant("dataset() builder direct API", () => {
           },
         },
       })
-      .build({ datasetId: "source_dataset_v1" })
+      .build({ datasetId: "resource_dataset_v1" })
 
       const reactor = createScriptedReactor({
         steps: [
@@ -468,9 +465,9 @@ describeInstant("dataset() builder direct API", () => {
               scriptName: "derive_dataset",
               pythonCode: [
                 "import json",
-                `source_path = ${JSON.stringify(`${getDatasetSourcesDir("derived_dataset_v1")}/source_${source.datasetId}.jsonl`)}`,
+                `resource_path = ${JSON.stringify(`${getDatasetResourcesDir("derived_dataset_v1")}/resource_${inputDataset.datasetId}.jsonl`)}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("derived_dataset_v1"))}`,
-                "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
+                "with open(resource_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
                 "  for line in src:",
                 "    line = line.strip()",
                 "    if not line:",
@@ -489,7 +486,7 @@ describeInstant("dataset() builder direct API", () => {
 
       const result = await dataset(testRuntime)
         .sandbox({ sandboxId: suiteSandboxId! })
-        .fromDataset({ datasetId: source.datasetId, description: "source electronics" })
+        .fromDataset({ datasetId: inputDataset.datasetId, description: "input electronics" })
         .instructions("Rename fields to sku and priceUsd")
         .schema({
           title: "DerivedProduct",
@@ -517,18 +514,18 @@ describeInstant("dataset() builder direct API", () => {
       ])
   }, 240000)
 
-  it("multiple text sources materialize raw rows before the transform reactor runs", async () => {
+  it("multiple text resources materialize raw rows before the transform reactor runs", async () => {
     const reactor = createScriptedReactor({
       steps: [
         scriptedToolStep(
           "executeCommand",
           {
-            scriptName: "combine_text_sources",
+            scriptName: "combine_text_resources",
             pythonCode: [
               "import json",
-              `items_path = ${JSON.stringify(`${getDatasetSourcesDir("combined_text_sources_v1")}/source_combined_text_sources_v1__text_0.jsonl`)}`,
-              `criteria_path = ${JSON.stringify(`${getDatasetSourcesDir("combined_text_sources_v1")}/source_combined_text_sources_v1__text_1.jsonl`)}`,
-              `output_path = ${JSON.stringify(getDatasetOutputPath("combined_text_sources_v1"))}`,
+              `items_path = ${JSON.stringify(`${getDatasetResourcesDir("combined_text_resources_v1")}/resource_combined_text_resources_v1__text_0.jsonl`)}`,
+              `criteria_path = ${JSON.stringify(`${getDatasetResourcesDir("combined_text_resources_v1")}/resource_combined_text_resources_v1__text_1.jsonl`)}`,
+              `output_path = ${JSON.stringify(getDatasetOutputPath("combined_text_resources_v1"))}`,
               "def read_rows(path):",
               "  rows = []",
               "  with open(path, 'r', encoding='utf-8') as src:",
@@ -544,11 +541,11 @@ describeInstant("dataset() builder direct API", () => {
               "  for item in items:",
               "    payload = {'type': 'row', 'data': {'sku': item['sku'], 'criterion': criterion}}",
               "    out.write(json.dumps(payload) + '\\n')",
-              "print('combined text sources')",
+              "print('combined text resources')",
             ].join("\n"),
           },
         ),
-        scriptedToolStep("completeDataset", { summary: "combined text sources complete" }),
+        scriptedToolStep("completeDataset", { summary: "combined text resources complete" }),
       ],
     })
 
@@ -571,8 +568,8 @@ describeInstant("dataset() builder direct API", () => {
       })
       .instructions("Join items with criterion.")
       .schema({
-        title: "CombinedTextSource",
-        description: "Combined text source row",
+        title: "CombinedTextResource",
+        description: "Combined text input row",
         schema: {
           type: "object",
           additionalProperties: false,
@@ -584,17 +581,33 @@ describeInstant("dataset() builder direct API", () => {
         },
       })
       .reactor(reactor)
-      .build({ datasetId: "combined_text_sources_v1" })
+      .build({ datasetId: "combined_text_resources_v1" })
 
     const snapshot = await getDatasetSnapshot(result.datasetId)
-    expect(snapshot.dataset.sourceKinds).toEqual(["text", "text"])
+    expect(snapshot.dataset.context?.resources?.map((resource: any) => resource.type)).toEqual([
+      "text",
+      "text",
+    ])
+    expect(snapshot.dataset.resourceKinds).toBeUndefined()
     expect(snapshot.rows).toEqual([
       { sku: "A1", criterion: "Operational safety" },
       { sku: "A2", criterion: "Operational safety" },
     ])
   }, 240000)
 
-  it("multiple sources with reactor and instructions produce a combined dataset", async () => {
+  it("fromContext is exclusive and cannot be mixed with shortcut resources", async () => {
+    await expect(
+      dataset(testRuntime)
+        .fromContext({ id: newId() })
+        .fromText({
+          name: "inline.txt",
+          text: "inline material",
+        })
+        .build({ datasetId: "context_exclusive_v1" }),
+    ).rejects.toThrow("dataset_context_resource_is_exclusive")
+  })
+
+  it("multiple resources with reactor and instructions produce a combined dataset", async () => {
     const { electronicsCategory } = await seedSampleRows(`combined-${Date.now()}`)
     const sourceDataset = await dataset(testRuntime)
       .fromQuery(sampleDomain, {
@@ -604,7 +617,7 @@ describeInstant("dataset() builder direct API", () => {
           },
         },
       })
-      .build({ datasetId: "combined_source_dataset_v1" })
+      .build({ datasetId: "combined_resource_dataset_v1" })
 
       const reactor = createScriptedReactor({
         steps: [
@@ -614,8 +627,8 @@ describeInstant("dataset() builder direct API", () => {
               scriptName: "combine_dataset_query",
               pythonCode: [
                 "import json",
-                `items_path = ${JSON.stringify(`${getDatasetSourcesDir("combined_target_v1")}/source_${sourceDataset.datasetId}.jsonl`)}`,
-                `rates_path = ${JSON.stringify(`${getDatasetSourcesDir("combined_target_v1")}/source_combined_target_v1__query_1.jsonl`)}`,
+                `items_path = ${JSON.stringify(`${getDatasetResourcesDir("combined_target_v1")}/resource_${sourceDataset.datasetId}.jsonl`)}`,
+                `rates_path = ${JSON.stringify(`${getDatasetResourcesDir("combined_target_v1")}/resource_combined_target_v1__query_1.jsonl`)}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("combined_target_v1"))}`,
                 "rates = {}",
                 "with open(rates_path, 'r', encoding='utf-8') as src:",
@@ -732,7 +745,7 @@ describeInstant("dataset() builder direct API", () => {
 
   it("fromDataset without sandbox fails with dataset_sandbox_required", async () => {
     const { electronicsCategory } = await seedSampleRows(`noreactor-dataset-${Date.now()}`)
-    const source = await dataset(testRuntime)
+    const inputDataset = await dataset(testRuntime)
       .fromQuery(sampleDomain, {
         query: {
           sample_items: {
@@ -740,18 +753,18 @@ describeInstant("dataset() builder direct API", () => {
           },
         },
       })
-      .build({ datasetId: "dataset_source_no_reactor_v1" })
+      .build({ datasetId: "dataset_resource_no_reactor_v1" })
 
     await expect(
       dataset(testRuntime)
-        .fromDataset({ datasetId: source.datasetId })
+        .fromDataset({ datasetId: inputDataset.datasetId })
         .build({ datasetId: "dataset_no_sandbox_v1" }),
     ).rejects.toThrow("dataset_sandbox_required")
   })
 
-  it("multiple sources without sandbox fail with dataset_sandbox_required", async () => {
+  it("multiple resources without sandbox fail with dataset_sandbox_required", async () => {
     const { electronicsCategory } = await seedSampleRows(`noreactor-multi-${Date.now()}`)
-    const source = await dataset(testRuntime)
+    const inputDataset = await dataset(testRuntime)
       .fromQuery(sampleDomain, {
         query: {
           sample_items: {
@@ -759,11 +772,11 @@ describeInstant("dataset() builder direct API", () => {
           },
         },
       })
-      .build({ datasetId: "multi_no_reactor_source_v1" })
+      .build({ datasetId: "multi_no_reactor_resource_v1" })
 
     await expect(
       dataset(testRuntime)
-        .fromDataset({ datasetId: source.datasetId })
+        .fromDataset({ datasetId: inputDataset.datasetId })
         .fromQuery(sampleDomain, {
           query: {
             sample_fx_rates: {
@@ -805,9 +818,9 @@ describeInstant("dataset() builder direct API", () => {
     ).rejects.toThrow("dataset_reactor_required")
   })
 
-  it("build({ datasetId }) persists the target id and keeps source ids separate", async () => {
+  it("build({ datasetId }) persists the target id and keeps input ids separate", async () => {
     const { electronicsCategory } = await seedSampleRows(`target-${Date.now()}`)
-    const source = await dataset(testRuntime)
+    const inputDataset = await dataset(testRuntime)
       .fromQuery(sampleDomain, {
         query: {
           sample_items: {
@@ -815,21 +828,21 @@ describeInstant("dataset() builder direct API", () => {
           },
         },
       })
-      .build({ datasetId: "target_source_snapshot_v1" })
+      .build({ datasetId: "target_resource_snapshot_v1" })
 
       const reactor = createScriptedReactor({
         steps: [
           scriptedToolStep(
             "executeCommand",
             {
-              scriptName: "copy_source_dataset",
+              scriptName: "copy_resource_dataset",
               pythonCode: [
                 "import json",
-                `source_path = ${JSON.stringify(`${getDatasetSourcesDir("target_output_v1")}/source_${source.datasetId}.jsonl`)}`,
+                `resource_path = ${JSON.stringify(`${getDatasetResourcesDir("target_output_v1")}/resource_${inputDataset.datasetId}.jsonl`)}`,
                 `output_path = ${JSON.stringify(getDatasetOutputPath("target_output_v1"))}`,
-                "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
+                "with open(resource_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
                 "  out.write(src.read())",
-                "print('copied source dataset')",
+                "print('copied input dataset')",
               ].join("\n"),
             },
           ),
@@ -839,7 +852,7 @@ describeInstant("dataset() builder direct API", () => {
 
       const result = await dataset(testRuntime)
         .sandbox({ sandboxId: suiteSandboxId! })
-        .fromDataset({ datasetId: source.datasetId, description: "copy me" })
+        .fromDataset({ datasetId: inputDataset.datasetId, description: "copy me" })
         .instructions("Copy the dataset as-is")
         .schema({
           title: "CopiedRow",
@@ -858,7 +871,7 @@ describeInstant("dataset() builder direct API", () => {
         .build({ datasetId: "target_output_v1" })
 
       expect(result.datasetId).toBe("target_output_v1")
-      expect(result.datasetId).not.toBe(source.datasetId)
+      expect(result.datasetId).not.toBe(inputDataset.datasetId)
       const snapshot = await getDatasetSnapshot(result.datasetId)
       expect(snapshot.dataset.datasetId).toBe("target_output_v1")
       expect(snapshot.dataset.sandboxId).toBe(suiteSandboxId)

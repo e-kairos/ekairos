@@ -154,7 +154,6 @@ describeInstant("context scripted reactor + Instant runtime", () => {
         durable: false,
         __benchmark: timer,
         options: {
-          silent: true,
           maxIterations: 3,
           maxModelSteps: 1,
         },
@@ -248,6 +247,137 @@ describeInstant("context scripted reactor + Instant runtime", () => {
     })
   }, 5 * 60 * 1000)
 
+  itInstant("persists content, resources, description, and goal for the new context contract", async () => {
+    const contextKey = `context-scripted-contract:${Date.now()}`
+    const runtime = new EventsTestRuntime({
+      appId: String(appId),
+      adminToken: String(adminToken),
+      orgId: "org_context_tests",
+      actorId: "user_context_tests",
+    })
+    let observedSystemPrompt = ""
+    let observedResourceNames: string[] = []
+
+    const contractContext = createContext<ContextTestEnv>("context.tests.scripted.contract")
+      .content((stored, env) => ({
+        ...(stored.content ?? {}),
+        orgId: env.orgId,
+        actorId: env.actorId,
+        tenderId: "tender_contract",
+      }))
+      .resources(({ content }) => [
+        {
+          type: "file",
+          key: `tender:${content.tenderId}:file:technical-spec`,
+          name: "Technical specification",
+          description: "Tender technical specification used as context evidence.",
+          fileId: "file_contract_technical_spec",
+          filename: "technical-spec.pdf",
+          mediaType: "application/pdf",
+          role: "tender.document",
+        },
+      ])
+      .resource(({ content }) => ({
+        type: "link",
+        key: `tender:${content.tenderId}:link:reference`,
+        name: "Reference URL",
+        description: "External reference URL for this tender.",
+        url: "https://example.com/reference",
+        role: "reference",
+      }))
+      .description((content) => `Technical evaluation context for ${content.tenderId}.`)
+      .goal((content) => `Evaluate evidence for ${content.orgId}.`)
+      .actions(() => ({}))
+      .reactor(async (params) => {
+        observedSystemPrompt = params.systemPrompt
+        observedResourceNames = params.resources.map((resource) => resource.name)
+        return {
+          assistantEvent: {
+            id: params.eventId,
+            type: "output",
+            channel: "web",
+            createdAt: new Date().toISOString(),
+            content: {
+              parts: [{ type: "text", text: "Contract observed." }],
+            },
+          },
+          actionRequests: [],
+          messagesForModel: [],
+        }
+      })
+      .shouldContinue(() => false)
+      .build()
+
+    const shell = await contractContext.react(createTriggerEvent("evaluate contract"), {
+      runtime,
+      context: { key: contextKey },
+      durable: false,
+      options: {
+        maxIterations: 1,
+        maxModelSteps: 1,
+      },
+    })
+
+    const result = await shell.run!
+    const snapshot = await currentDb().query({
+      event_contexts: {
+        $: { where: { key: contextKey }, limit: 1 },
+      },
+    })
+    const contextRow = readRows(snapshot, "event_contexts")[0]
+    const contextResources = Array.isArray(contextRow.resources)
+      ? (contextRow.resources as Record<string, unknown>[])
+      : []
+    const content = asRecord(contextRow.content)
+
+    expect(readString(contextRow, "status")).toBe("closed")
+    expect(content?.orgId).toBe("org_context_tests")
+    expect(content?.tenderId).toBe("tender_contract")
+    expect(readString(contextRow, "description")).toBe(
+      "Technical evaluation context for tender_contract.",
+    )
+    expect(readString(contextRow, "goal")).toBe("Evaluate evidence for org_context_tests.")
+    expect(content?.files).toBeUndefined()
+    expect(contextResources).toHaveLength(2)
+    expect(contextResources.map((row) => readString(row, "type")).sort()).toEqual([
+      "file",
+      "link",
+    ])
+    expect(contextResources.map((row) => readString(row, "name")).sort()).toEqual([
+      "Reference URL",
+      "Technical specification",
+    ])
+    expect(contextResources.map((row) => readString(row, "description")).sort()).toEqual([
+      "External reference URL for this tender.",
+      "Tender technical specification used as context evidence.",
+    ])
+    expect(result.context.description).toBe(
+      "Technical evaluation context for tender_contract.",
+    )
+    expect(result.context.goal).toBe("Evaluate evidence for org_context_tests.")
+    expect(result.context.resources?.map((resource) => resource.name).sort()).toEqual([
+      "Reference URL",
+      "Technical specification",
+    ])
+    expect(observedResourceNames.sort()).toEqual([
+      "Reference URL",
+      "Technical specification",
+    ])
+    expect(observedSystemPrompt).toContain("Content:")
+    expect(observedSystemPrompt).toContain("Resources:")
+    expect(observedSystemPrompt).toContain("Technical evaluation context for tender_contract.")
+    expect(observedSystemPrompt).toContain("Evaluate evidence for org_context_tests.")
+    expect(observedSystemPrompt.indexOf("Content:")).toBeLessThan(
+      observedSystemPrompt.indexOf("Resources:"),
+    )
+    expect(observedSystemPrompt.indexOf("Resources:")).toBeLessThan(
+      observedSystemPrompt.indexOf("Description:"),
+    )
+    expect(observedSystemPrompt.indexOf("Description:")).toBeLessThan(
+      observedSystemPrompt.indexOf("Goal:"),
+    )
+  }, 5 * 60 * 1000)
+
   itInstant("marks execution as failed when scripted steps are exhausted in non-durable mode", async () => {
     const timer = createStageTimer()
     const contextKey = `context-scripted-fail-context:${Date.now()}`
@@ -307,7 +437,6 @@ describeInstant("context scripted reactor + Instant runtime", () => {
         durable: false,
         __benchmark: timer,
         options: {
-          silent: true,
           maxIterations: 3,
           maxModelSteps: 1,
         },
@@ -430,7 +559,6 @@ describeInstant("context scripted reactor + Instant runtime", () => {
       context: { key: contextKey },
       durable: false,
       options: {
-        silent: true,
         maxIterations: 1,
         maxModelSteps: 1,
       },

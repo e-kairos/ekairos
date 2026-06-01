@@ -1,26 +1,26 @@
 import {
   getDatasetOutputPath,
-  getDatasetSourcesDir,
+  getDatasetResourcesDir,
   getDatasetStandardDirs,
 } from "../datasetFiles.js"
 import { datasetReadOutputJsonlStep } from "../dataset/steps.js"
 import { runDatasetSandboxCommandStep, writeDatasetSandboxFilesStep } from "../sandbox/steps.js"
-import { generateSourcePreview } from "./filepreview.js"
+import { generateInputPreview } from "./filepreview.js"
 import { buildTransformDatasetPrompt } from "./prompts.js"
 import type {
   TransformPromptContext,
   TransformSandboxState,
-  TransformSourcePreviewContext,
+  TransformInputPreviewContext,
 } from "./transform-dataset.types.js"
 
-export async function ensureTransformSourcesInSandboxStep(params: {
+export async function ensureTransformInputsInSandboxStep(params: {
   runtime: any
   sandboxId: string
   datasetId: string
-  sourceDatasetIds: string[]
+  inputDatasetIds: string[]
   state: TransformSandboxState
 }): Promise<{
-  sourcePaths: Array<{ datasetId: string; path: string }>
+  inputPaths: Array<{ datasetId: string; path: string }>
   outputPath: string
   state: TransformSandboxState
 }> {
@@ -28,7 +28,7 @@ export async function ensureTransformSourcesInSandboxStep(params: {
 
   if (params.state.initialized) {
     return {
-      sourcePaths: params.state.sourcePaths,
+      inputPaths: params.state.inputPaths,
       outputPath: getDatasetOutputPath(params.datasetId),
       state: params.state,
     }
@@ -41,57 +41,57 @@ export async function ensureTransformSourcesInSandboxStep(params: {
     args: ["-p", ...getDatasetStandardDirs(params.datasetId)],
   })
 
-  const sourcePaths: Array<{ datasetId: string; path: string }> = []
+  const inputPaths: Array<{ datasetId: string; path: string }> = []
 
-  for (const sourceDatasetId of params.sourceDatasetIds) {
-    const sourcePath = `${getDatasetSourcesDir(params.datasetId)}/source_${sourceDatasetId}.jsonl`
+  for (const inputDatasetId of params.inputDatasetIds) {
+    const inputPath = `${getDatasetResourcesDir(params.datasetId)}/resource_${inputDatasetId}.jsonl`
 
-    const source = await datasetReadOutputJsonlStep({
+    const input = await datasetReadOutputJsonlStep({
       runtime: params.runtime,
-      datasetId: sourceDatasetId,
+      datasetId: inputDatasetId,
     })
     await writeDatasetSandboxFilesStep({
       runtime: params.runtime,
       sandboxId: params.sandboxId,
-      files: [{ path: sourcePath, contentBase64: source.contentBase64 }],
+      files: [{ path: inputPath, contentBase64: input.contentBase64 }],
     })
 
-    sourcePaths.push({ datasetId: sourceDatasetId, path: sourcePath })
+    inputPaths.push({ datasetId: inputDatasetId, path: inputPath })
   }
 
   return {
-    sourcePaths,
+    inputPaths,
     outputPath: getDatasetOutputPath(params.datasetId),
     state: {
       initialized: true,
-      sourcePaths,
+      inputPaths,
     },
   }
 }
 
-export async function generateTransformSourcePreviewsStep(params: {
+export async function generateTransformInputPreviewsStep(params: {
   runtime: any
   sandboxId: string
   datasetId: string
-  sourcePaths: Array<{ datasetId: string; path: string }>
-}): Promise<Array<{ datasetId: string; preview: TransformSourcePreviewContext }>> {
+  inputPaths: Array<{ datasetId: string; path: string }>
+}): Promise<Array<{ datasetId: string; preview: TransformInputPreviewContext }>> {
   "use step"
 
-  const sourcePreviews: Array<{ datasetId: string; preview: TransformSourcePreviewContext }> = []
-  for (const sourcePath of params.sourcePaths) {
+  const inputPreviews: Array<{ datasetId: string; preview: TransformInputPreviewContext }> = []
+  for (const inputPath of params.inputPaths) {
     try {
-      const preview = await generateSourcePreview(
+      const preview = await generateInputPreview(
         params.runtime,
         params.sandboxId,
-        sourcePath.path,
+        inputPath.path,
         params.datasetId,
       )
-      sourcePreviews.push({ datasetId: sourcePath.datasetId, preview })
+      inputPreviews.push({ datasetId: inputPath.datasetId, preview })
     } catch {
-      // Source preview is optional; transformation can still read the JSONL files.
+      // Input preview is optional; transformation can still read the JSONL files.
     }
   }
-  return sourcePreviews
+  return inputPreviews
 }
 
 export async function buildTransformDatasetPromptStep(params: {

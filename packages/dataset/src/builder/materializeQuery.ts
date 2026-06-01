@@ -1,13 +1,13 @@
 import { materializeRowsToDataset } from "./persistence.js"
-import { getDomainDescriptor, normalizeQueryRows } from "./sourceRows.js"
+import { getDomainDescriptor, normalizeQueryRows } from "./rows.js"
 import type {
   AnyDatasetRuntime,
   DatasetBuilderState,
   DatasetSchemaInput,
-  InternalSource,
+  InternalDatasetResource,
 } from "./types.js"
 
-async function readQuerySourceRowsStep(params: {
+async function readQueryResourceRowsStep(params: {
   runtime: any
   query: Record<string, any>
 }): Promise<{ rows: any[] }> {
@@ -17,9 +17,9 @@ async function readQuerySourceRowsStep(params: {
   return { rows: normalizeQueryRows(result) }
 }
 
-export async function materializeQuerySource<Runtime extends AnyDatasetRuntime>(
+export async function materializeQueryResource<Runtime extends AnyDatasetRuntime>(
   runtime: DatasetBuilderState<Runtime>["runtime"],
-  source: Extract<InternalSource, { kind: "query" }>,
+  resource: Extract<InternalDatasetResource, { kind: "query" }>,
   params: {
     datasetId: string
     sandboxId?: string
@@ -27,32 +27,24 @@ export async function materializeQuerySource<Runtime extends AnyDatasetRuntime>(
     title?: string
     instructions?: string
     first?: boolean
+    contextId: string
   },
 ) {
-  const { rows } = await readQuerySourceRowsStep({
+  const { rows } = await readQueryResourceRowsStep({
     runtime,
-    query: source.query as any,
+    query: resource.query as any,
   })
-  const domainDescriptor = getDomainDescriptor(source.domain)
+  const domainDescriptor = getDomainDescriptor(resource.domain)
 
   return await materializeRowsToDataset(runtime, {
     datasetId: params.datasetId,
     sandboxId: params.sandboxId,
-    title: params.title ?? source.title,
+    title: params.title ?? resource.title,
     instructions: params.instructions,
-    sources: [
-      {
-        kind: "query",
-        query: source.query,
-        title: source.title,
-        explanation: source.explanation,
-        ...domainDescriptor,
-      },
-    ],
-    sourceKinds: ["query"],
+    contextId: params.contextId,
     analysis: {
-      query: source.query,
-      explanation: source.explanation,
+      query: resource.query,
+      explanation: resource.explanation,
       ...domainDescriptor,
     },
     rows,

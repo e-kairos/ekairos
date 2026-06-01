@@ -49,7 +49,7 @@ describe("dataset builder workflow integration", () => {
       orgId: "org_dataset_workflow",
       dbKey: `dataset-workflow-${Date.now()}`,
       requireStepDb: true,
-      sourceRows: [
+      resourceRows: [
         { id: "item_a", sku: "SKU-A", qty: 2 },
         { id: "item_b", sku: "SKU-B", qty: 5 },
       ],
@@ -71,7 +71,7 @@ describe("dataset builder workflow integration", () => {
     expect(result.readRows).toEqual(result.previewRows)
   })
 
-  it("prepares file dataset sources through semantic workflow steps before the context reaction", async () => {
+  it("prepares file dataset resources through semantic workflow steps before the context reaction", async () => {
     const previousLocalSandbox = process.env.DATASET_TEST_LOCAL_SANDBOX
     const previousWorkdirBase = process.env.DATASET_SANDBOX_WORKDIR_BASE
     process.env.DATASET_TEST_LOCAL_SANDBOX = "1"
@@ -86,7 +86,7 @@ describe("dataset builder workflow integration", () => {
         orgId: "org_dataset_workflow_file",
         dbKey: `dataset-workflow-file-${Date.now()}`,
         requireStepDb: true,
-        sourceRows: [],
+        resourceRows: [],
       })
       const db = await (runtime as any).db()
       const upload = await db.storage.uploadFile(
@@ -116,13 +116,15 @@ describe("dataset builder workflow integration", () => {
         { code: "A1", qty: 2 },
         { code: "B2", qty: 5 },
       ])
-      expect(functionNames.slice(0, 3)).toEqual([
-        "initializeDatasetStep",
-        "prepareDatasetSourcesStep",
-        "initializeDatasetContextStep",
-      ])
+      const stepIndex = (name: string) => functionNames.indexOf(name)
+      expect(stepIndex("createDatasetResourceContextStep")).toBeGreaterThanOrEqual(0)
+      expect(stepIndex("initializeDatasetStep")).toBeGreaterThan(stepIndex("createDatasetResourceContextStep"))
+      expect(stepIndex("prepareDatasetResourcesStep")).toBeGreaterThan(stepIndex("initializeDatasetStep"))
+      expect(stepIndex("readInstantFileStep")).toBeGreaterThan(stepIndex("prepareDatasetResourcesStep"))
+      expect(stepIndex("writeDatasetSandboxFilesStep")).toBeGreaterThan(stepIndex("readInstantFileStep"))
+      expect(stepIndex("initializeDatasetContextStep")).toBeGreaterThan(stepIndex("writeDatasetSandboxFilesStep"))
       expect(functionNames).toContain("completeDatasetStep")
-      expect(functionNames).not.toContain("initializeFileParseSandboxStep")
+      expect(functionNames).toContain("initializeFileParseSandboxStep")
       expect(functionNames.filter((name) => name === "runDatasetSandboxCommandStep").length).toBeLessThanOrEqual(3)
       expect(functionNames.length).toBeLessThanOrEqual(35)
     } finally {

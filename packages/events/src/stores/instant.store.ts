@@ -16,7 +16,9 @@ import type { ModelMessage } from "ai"
 import type {
   ContextItem,
   ContextIdentifier,
+  ContextResource,
   ContextStatus,
+  StoredContextResource,
   StoredContext,
   ContextStore,
 } from "../context.store.js"
@@ -212,6 +214,9 @@ export class InstantStore implements ContextStore {
             ? new Date(row.updatedAt)
             : undefined,
       content: (row?.content as C) ?? null,
+      description: typeof row?.description === "string" ? row.description : null,
+      goal: typeof row?.goal === "string" ? row.goal : null,
+      resources: this.normalizeContextResources(row?.resources),
       reactor:
         row?.reactor && typeof row.reactor === "object"
           ? (row.reactor as { kind: string; state?: Record<string, unknown> | null })
@@ -251,6 +256,9 @@ export class InstantStore implements ContextStore {
         key,
         status: "open_idle",
         content: {},
+        description: undefined,
+        goal: undefined,
+        resources: [],
         reactor: undefined,
       }),
     ])
@@ -325,6 +333,33 @@ export class InstantStore implements ContextStore {
     return updated
   }
 
+  async updateContextDefinition<C>(
+    contextIdentifier: ContextIdentifier,
+    definition: { description?: string | null; goal?: string | null },
+  ): Promise<StoredContext<C>> {
+    const context = await this.getContext<C>(contextIdentifier)
+    if (!context?.id) throw new Error("InstantStore: context not found")
+
+    const update: Record<string, unknown> = {
+      updatedAt: new Date(),
+    }
+    if (definition.description !== undefined) {
+      update.description =
+        typeof definition.description === "string" ? definition.description : undefined
+    }
+    if (definition.goal !== undefined) {
+      update.goal = typeof definition.goal === "string" ? definition.goal : undefined
+    }
+
+    await this.db.transact([
+      this.db.tx.event_contexts[context.id].update(update),
+    ])
+
+    const updated = await this.getContext<C>({ id: context.id })
+    if (!updated) throw new Error("InstantStore: context not found after definition update")
+    return updated
+  }
+
   async updateContextReactor<C>(
     contextIdentifier: ContextIdentifier,
     reactor: { kind: string; state?: Record<string, unknown> | null },
@@ -366,6 +401,81 @@ export class InstantStore implements ContextStore {
     const context = await this.getContext<C>(contextIdentifier)
     if (!context?.id) throw new Error("InstantStore: context not found")
     return context
+  }
+
+  private normalizeContextResource(resource: unknown): StoredContextResource | null {
+    if (!resource || typeof resource !== "object") return null
+    const record = resource as Record<string, unknown>
+    const key = typeof record.key === "string" ? record.key.trim() : ""
+    const type = typeof record.type === "string" ? record.type.trim() : ""
+    const name = typeof record.name === "string" ? record.name.trim() : ""
+    const description =
+      typeof record.description === "string" ? record.description.trim() : ""
+    if (!key || !type || !name || !description) return null
+
+    return {
+      ...(record as any),
+      key,
+      type,
+      name,
+      description,
+    } as StoredContextResource
+  }
+
+  private normalizeContextResources(value: unknown): StoredContextResource[] {
+    if (!Array.isArray(value)) return []
+    return value.flatMap((resource) => {
+      const normalized = this.normalizeContextResource(resource)
+      return normalized ? [normalized] : []
+    })
+  }
+
+  async getContextResources(
+    contextIdentifier: ContextIdentifier,
+  ): Promise<StoredContextResource[]> {
+    const context = await this.resolveContext(contextIdentifier)
+    return context.resources ?? []
+  }
+
+  async upsertContextResources(
+    contextIdentifier: ContextIdentifier,
+    resources: ContextResource[],
+  ): Promise<StoredContextResource[]> {
+    const context = await this.resolveContext(contextIdentifier)
+    const now = new Date()
+    const storedResources: StoredContextResource[] = []
+
+    for (const resource of resources) {
+      const resourceKey = typeof resource.key === "string" ? resource.key.trim() : ""
+      const type = typeof resource.type === "string" ? resource.type.trim() : ""
+      const name = typeof resource.name === "string" ? resource.name.trim() : ""
+      const description =
+        typeof resource.description === "string" ? resource.description.trim() : ""
+      if (!resourceKey || !type || !name || !description) {
+        throw new Error(
+          "InstantStore: context resources require key, type, name, and description.",
+        )
+      }
+
+      const sanitizedResource = sanitizeInstantValue(resource)
+      const storedResource = {
+        ...(sanitizedResource as any),
+        key: resourceKey,
+        type,
+        name,
+        description,
+      } as StoredContextResource
+      storedResources.push(storedResource)
+    }
+
+    await this.db.transact([
+      this.db.tx.event_contexts[context.id].update({
+        resources: storedResources as any,
+        updatedAt: now,
+      }),
+    ])
+
+    return await this.getContextResources({ id: context.id })
   }
 
   async saveItem(

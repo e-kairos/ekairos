@@ -1,29 +1,29 @@
 import type { ContextReactor } from "@ekairos/events"
-import type { TransformSourcePreviewContext } from "./filepreview.js"
+import type { TransformInputPreviewContext } from "./filepreview.js"
 
-export type { TransformSourcePreviewContext } from "./filepreview.js"
+export type { TransformInputPreviewContext } from "./filepreview.js"
 
 export type TransformSandboxState = {
   initialized: boolean
-  sourcePaths: Array<{ datasetId: string; path: string }>
+  inputPaths: Array<{ datasetId: string; path: string }>
 }
 
 export type TransformDatasetContext = {
   datasetId: string
-  sourceDatasetIds: string[]
+  inputDatasetIds: string[]
   outputSchema: any
   sandboxConfig: {
-    sourcePaths: Array<{ datasetId: string; path: string }>
+    inputPaths: Array<{ datasetId: string; path: string }>
     outputPath: string
   }
-  sourcePreviews?: Array<{ datasetId: string; preview: TransformSourcePreviewContext }>
+  inputPreviews?: Array<{ datasetId: string; preview: TransformInputPreviewContext }>
   errors: string[]
   iterationCount: number
   instructions?: string
 }
 
 export type TransformDatasetAgentParams = {
-  sourceDatasetIds?: string[]
+  inputDatasetIds?: string[]
   outputSchema?: any
   instructions?: string
   datasetId?: string
@@ -31,7 +31,7 @@ export type TransformDatasetAgentParams = {
   sandboxId?: string
   reactor?: ContextReactor<any, any>
   sandboxState?: TransformSandboxState
-  sourcePreviews?: Array<{ datasetId: string; preview: TransformSourcePreviewContext }>
+  inputPreviews?: Array<{ datasetId: string; preview: TransformInputPreviewContext }>
 }
 
 export type TransformDatasetRunOptions = {
@@ -54,13 +54,13 @@ export type TransformDatasetResult = {
 
 export type TransformPromptContext = {
   datasetId: string
-  sourceDatasetIds: string[]
+  inputDatasetIds: string[]
   outputSchema: any
   sandboxConfig: {
-    sourcePaths: Array<{ datasetId: string; path: string }>
+    inputPaths: Array<{ datasetId: string; path: string }>
     outputPath: string
   }
-  sourcePreviews?: Array<{
+  inputPreviews?: Array<{
     datasetId: string
     preview: {
       totalRows: number

@@ -136,8 +136,8 @@ async function createDatasetRows(
     datasetId: string
     title: string
     rows: any[]
-    sources?: any[]
-    sourceKinds?: string[]
+    resources?: any[]
+    resourceKinds?: string[]
     analysis?: any
     schema?: any
     sandboxId?: string
@@ -147,9 +147,11 @@ async function createDatasetRows(
     id: params.datasetId,
     title: params.title,
     status: "completed",
-    sources: params.sources ?? [],
-    sourceKinds: params.sourceKinds ?? [],
-    analysis: params.analysis ?? {},
+    analysis: {
+      resources: params.resources ?? [],
+      resourceKinds: params.resourceKinds ?? [],
+      ...(params.analysis ?? {}),
+    },
     schema:
       params.schema ??
       ({
@@ -308,7 +310,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
           "You are an Ekairos Dataset pipeline worker.",
           "The domain is a semantic space. You must use the domain schema as formal context.",
           "Run the pipeline in this exact order: research, resolve, build.",
-          "Research creates verified source datasets.",
+          "Research creates verified resource datasets.",
           "Resolve creates the formal definition and the validated result dataset.",
           "Build creates the final MDX/component report.",
           "Call complete_research, then complete_resolution, then complete_build.",
@@ -316,7 +318,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
       )
       .actions(() => ({
         complete_research: tool({
-          description: "Materialize verified source datasets for the sales domain.",
+          description: "Materialize verified resource datasets for the sales domain.",
           inputSchema: z.object({ summary: z.string() }),
           execute: async (input) => {
             calls.push("research")
@@ -326,19 +328,19 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
             const paidOrders = orders.filter((order) => order.status === "paid")
             await createDatasetRows(service, {
               datasetId: `${pipelineId}_orders_paid`,
-              title: "Paid orders source",
+              title: "Paid orders resource",
               rows: paidOrders,
-              sources: [{ kind: "domain", domainName: "sales", entity: "sales_orders" }],
-              sourceKinds: ["domain"],
+              resources: [{ kind: "domain", domainName: "sales", entity: "sales_orders" }],
+              resourceKinds: ["domain"],
               analysis: { summary: input.summary, citation: "sales.sales_orders" },
               sandboxId,
             })
             await createDatasetRows(service, {
               datasetId: `${pipelineId}_regions`,
-              title: "Regions source",
+              title: "Regions resource",
               rows: regions,
-              sources: [{ kind: "domain", domainName: "sales", entity: "sales_regions" }],
-              sourceKinds: ["domain"],
+              resources: [{ kind: "domain", domainName: "sales", entity: "sales_regions" }],
+              resourceKinds: ["domain"],
               analysis: { summary: "Region lookup", citation: "sales.sales_regions" },
               sandboxId,
             })
@@ -352,7 +354,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
           },
         }),
         complete_resolution: tool({
-          description: "Create the resolved dataset from researched source datasets.",
+          description: "Create the resolved dataset from researched resource datasets.",
           inputSchema: z.object({
             explanation: z.string(),
             latex: z.string(),
@@ -383,11 +385,11 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
               datasetId: `${pipelineId}_weekly_sales_by_region`,
               title: "Weekly sales by region",
               rows: rowsOut,
-              sources: [
+              resources: [
                 { kind: "dataset", datasetId: `${pipelineId}_orders_paid` },
                 { kind: "dataset", datasetId: `${pipelineId}_regions` },
               ],
-              sourceKinds: ["dataset"],
+              resourceKinds: ["dataset"],
               analysis: {
                 explanation: input.explanation,
                 latex: input.latex,
@@ -450,7 +452,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
         runtime,
         context: { key: `${pipelineId}:semantic` },
         durable: false,
-        options: { maxIterations: 3, maxModelSteps: 1, silent: false },
+        options: { maxIterations: 3, maxModelSteps: 1 },
         env: { ...runtime.env, runtime } as any,
       } as any,
     )
@@ -496,13 +498,13 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
       .narrative(() =>
         [
           "You are the research worker for Ekairos Dataset.",
-          "The domain is a semantic space. Use domain schema and concrete rows to produce verified source datasets.",
-          "Call complete_research once the source datasets are materialized.",
+          "The domain is a semantic space. Use domain schema and concrete rows to produce verified resource datasets.",
+          "Call complete_research once the resource datasets are materialized.",
         ].join("\n"),
       )
       .actions((_, env) => ({
         complete_research: tool({
-          description: "Materialize verified source datasets for the sales domain.",
+          description: "Materialize verified resource datasets for the sales domain.",
           inputSchema: z.object({ summary: z.string() }),
           execute: async (input) => {
             calls.push("research")
@@ -512,19 +514,19 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
             const paidOrders = orders.filter((order) => order.status === "paid")
             await createDatasetRows(service, {
               datasetId: `${pipelineId}_orders_paid`,
-              title: "Paid orders source",
+              title: "Paid orders resource",
               rows: paidOrders,
-              sources: [{ kind: "domain", domainName: "sales", entity: "sales_orders" }],
-              sourceKinds: ["domain"],
+              resources: [{ kind: "domain", domainName: "sales", entity: "sales_orders" }],
+              resourceKinds: ["domain"],
               analysis: { summary: input.summary, citation: "sales.sales_orders" },
               sandboxId,
             })
             await createDatasetRows(service, {
               datasetId: `${pipelineId}_regions`,
-              title: "Regions source",
+              title: "Regions resource",
               rows: regions,
-              sources: [{ kind: "domain", domainName: "sales", entity: "sales_regions" }],
-              sourceKinds: ["domain"],
+              resources: [{ kind: "domain", domainName: "sales", entity: "sales_regions" }],
+              resourceKinds: ["domain"],
               analysis: { summary: "Region lookup", citation: "sales.sales_regions" },
               sandboxId,
             })
@@ -550,7 +552,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
     const researchShell = await researchContext.react(
       createUserEvent(
         [
-          "Research source datasets for weekly paid sales by region.",
+          "Research resource datasets for weekly paid sales by region.",
           "Domain schema:",
           "sales_orders(orderId, regionId, week, amount, status)",
           "sales_regions(regionId, name, country)",
@@ -561,7 +563,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
         runtime,
         context: { key: `${pipelineId}:research` },
         durable: false,
-        options: { maxIterations: 1, maxModelSteps: 1, silent: false },
+        options: { maxIterations: 1, maxModelSteps: 1 },
         env: { ...runtime.env, runtime } as any,
       } as any,
     )
@@ -578,7 +580,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
       )
       .actions(() => ({
         complete_resolution: tool({
-          description: "Create the resolved dataset from researched source datasets.",
+          description: "Create the resolved dataset from researched resource datasets.",
           inputSchema: z.object({
             explanation: z.string(),
             latex: z.string(),
@@ -611,11 +613,11 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
               datasetId: `${pipelineId}_weekly_sales_by_region`,
               title: "Weekly sales by region",
               rows: rowsOut,
-              sources: [
+              resources: [
                 { kind: "dataset", datasetId: `${pipelineId}_orders_paid` },
                 { kind: "dataset", datasetId: `${pipelineId}_regions` },
               ],
-              sourceKinds: ["dataset"],
+              resourceKinds: ["dataset"],
               analysis: {
                 explanation: input.explanation,
                 latex: input.latex,
@@ -644,7 +646,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
     const resolveShell = await resolveContext.react(
       createUserEvent(
         [
-          `Use source datasets ${pipelineId}_orders_paid and ${pipelineId}_regions.`,
+          `Use resource datasets ${pipelineId}_orders_paid and ${pipelineId}_regions.`,
           "Resolve the dataset weekly sales by region.",
           "Call complete_resolution with a formal latex definition.",
         ].join("\n"),
@@ -653,7 +655,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
         runtime,
         context: { key: `${pipelineId}:resolve` },
         durable: false,
-        options: { maxIterations: 1, maxModelSteps: 1, silent: false },
+        options: { maxIterations: 1, maxModelSteps: 1 },
         env: { ...runtime.env, runtime } as any,
       } as any,
     )
@@ -710,7 +712,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
         runtime,
         context: { key: `${pipelineId}:build` },
         durable: false,
-        options: { maxIterations: 1, maxModelSteps: 1, silent: false },
+        options: { maxIterations: 1, maxModelSteps: 1 },
         env: { ...runtime.env, runtime } as any,
       } as any,
     )

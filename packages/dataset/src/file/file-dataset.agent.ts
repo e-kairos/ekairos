@@ -277,7 +277,7 @@ export function createFileParseContext<Env extends { orgId: string }>(
             {
               type: "file",
               fileId,
-              filename: opts?.filename ?? "source-file",
+              filename: opts?.filename ?? "resource-file",
               mediaType: opts?.mediaType ?? "application/octet-stream",
             },
           ],
@@ -285,7 +285,7 @@ export function createFileParseContext<Env extends { orgId: string }>(
       } as any
       params.sourceEventId = triggerEvent.id
       params.sourcePartIndex = 1
-      params.filename = opts?.filename ?? "source-file"
+      params.filename = opts?.filename ?? "resource-file"
       params.mediaType = opts?.mediaType ?? "application/octet-stream"
 
       const shell = await context.react(triggerEvent, {
@@ -293,7 +293,6 @@ export function createFileParseContext<Env extends { orgId: string }>(
         context: { key: `dataset:${datasetId}` },
         durable: options.durable ?? false,
         options: {
-          silent: true,
           preventClose: true,
           sendFinish: false,
           maxIterations: 20,
@@ -305,7 +304,7 @@ export function createFileParseContext<Env extends { orgId: string }>(
           fileId,
           sourceEventId: triggerEvent.id,
           sourcePartIndex: 1,
-          filename: opts?.filename ?? "source-file",
+          filename: opts?.filename ?? "resource-file",
           mediaType: opts?.mediaType ?? "application/octet-stream",
           instructions: opts?.instructions ?? "",
           sandboxId: opts?.sandboxId ?? "",

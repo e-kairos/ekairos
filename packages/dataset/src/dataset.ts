@@ -3,59 +3,60 @@ import type { ContextReactor } from "@ekairos/events"
 import type { ValidQuery } from "@instantdb/core"
 
 import { buildObjectOutputInstructions } from "./builder/instructions.js"
+import { resolveDatasetResourceContext } from "./builder/context.js"
 import { createDatasetId } from "./id.js"
 import {
   completeDatasetStep,
   materializeDerivedDataset,
-  materializeSingleFileLikeSource,
+  materializeSingleFileLikeResource,
 } from "./builder/materialize.js"
-import { materializeQuerySource } from "./builder/materializeQuery.js"
+import { materializeQueryResource } from "./builder/materializeQuery.js"
 import {
   createDatasetBuildResult,
   finalizeBuildResult,
 } from "./builder/persistence.js"
 import type {
   AnyDatasetRuntime,
-  CompatibleSourceDomain,
+  CompatibleQueryDomain,
   DatasetBuilder,
   DatasetBuilderOptions,
   DatasetBuildOptions,
   DatasetBuildResult,
   DatasetBuilderState,
-  DatasetExistingSourceInput,
-  DatasetFileSourceInput,
+  DatasetExistingResourceInput,
+  DatasetFileResourceInput,
   DatasetOutput,
-  DatasetQuerySourceOptions,
+  DatasetQueryResourceOptions,
   DatasetRuntimeEnv,
   DatasetRuntimeHandle,
   DatasetSchemaInput,
-  DatasetSourceInput,
-  DatasetTextSourceInput,
-  InternalSource,
+  DatasetResourceInput,
+  DatasetTextResourceInput,
+  InternalDatasetResource,
 } from "./builder/types.js"
 
 export type {
   AnyDatasetRuntime,
-  CompatibleSourceDomain,
+  CompatibleQueryDomain,
   DatasetBuilder,
   DatasetBuilderOptions,
   DatasetBuildOptions,
   DatasetBuildResult,
-  DatasetExistingSource,
-  DatasetExistingSourceInput,
-  DatasetFileSource,
-  DatasetFileSourceInput,
+  DatasetExistingResource,
+  DatasetExistingResourceInput,
+  DatasetFileResource,
+  DatasetFileResourceInput,
   DatasetMode,
   DatasetOutput,
-  DatasetQuerySourceInput,
+  DatasetQueryResourceInput,
   DatasetReader,
   DatasetReaderResult,
   DatasetRuntimeEnv,
   DatasetRuntimeHandle,
   DatasetSchemaInput,
-  DatasetTextSource,
-  DatasetSourceInput,
-  DatasetTextSourceInput,
+  DatasetTextResource,
+  DatasetResourceInput,
+  DatasetTextResourceInput,
 } from "./builder/types.js"
 
 export function dataset<Runtime extends AnyDatasetRuntime>(
@@ -67,7 +68,7 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
   const state: DatasetBuilderState<Runtime> = {
     runtime: typedRuntime,
     env: typedRuntime.env as Runtime["env"] & DatasetRuntimeEnv,
-    sources: [],
+    resources: [],
     output: "rows",
     inferSchema: false,
     durable: options.durable,
@@ -77,36 +78,45 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
   const api: DatasetBuilder<Runtime> = {
     datasetId,
 
-    fromFile(source: DatasetFileSourceInput) {
-      state.sources.push({ kind: "file", ...source } as InternalSource)
+    fromFile(resource: DatasetFileResourceInput) {
+      state.resources.push({ kind: "file", ...resource } as InternalDatasetResource)
       return api
     },
 
-    fromText(source: DatasetTextSourceInput) {
-      state.sources.push({ kind: "text", ...source } as InternalSource)
+    fromText(resource: DatasetTextResourceInput) {
+      state.resources.push({ kind: "text", ...resource } as InternalDatasetResource)
       return api
     },
 
-    fromDataset(source: DatasetExistingSourceInput) {
-      state.sources.push({ kind: "dataset", ...source } as InternalSource)
+    fromDataset(resource: DatasetExistingResourceInput) {
+      state.resources.push({ kind: "dataset", ...resource } as InternalDatasetResource)
       return api
     },
 
-    from(...sources: DatasetSourceInput[]) {
-      for (const source of sources) {
-        if ("kind" in source) {
-          state.sources.push(source as InternalSource)
+    fromContext(context) {
+      state.resources.push({ kind: "context", ...context } as InternalDatasetResource)
+      return api
+    },
+
+    from(...resources: DatasetResourceInput[]) {
+      for (const resource of resources) {
+        if ("kind" in resource) {
+          state.resources.push(resource as InternalDatasetResource)
           continue
         }
-        if ("fileId" in source) {
-          state.sources.push({ kind: "file", ...source } as InternalSource)
+        if ("fileId" in resource) {
+          state.resources.push({ kind: "file", ...resource } as InternalDatasetResource)
           continue
         }
-        if ("datasetId" in source) {
-          state.sources.push({ kind: "dataset", ...source } as InternalSource)
+        if ("datasetId" in resource) {
+          state.resources.push({ kind: "dataset", ...resource } as InternalDatasetResource)
           continue
         }
-        state.sources.push({ kind: "text", ...source } as InternalSource)
+        if ("id" in resource || "key" in resource) {
+          state.resources.push({ kind: "context", ...resource } as InternalDatasetResource)
+          continue
+        }
+        state.resources.push({ kind: "text", ...resource } as InternalDatasetResource)
       }
       return api
     },
@@ -115,10 +125,10 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
       D extends DomainSchemaResult,
       Q extends ValidQuery<Q, DomainInstantSchema<D>>,
     >(
-      domain: CompatibleSourceDomain<Runtime, D>,
-      source: DatasetQuerySourceOptions<D, Q>,
+      domain: CompatibleQueryDomain<Runtime, D>,
+      resource: DatasetQueryResourceOptions<D, Q>,
     ) {
-      state.sources.push({ kind: "query", domain, ...source } as InternalSource)
+      state.resources.push({ kind: "query", domain, ...resource } as InternalDatasetResource)
       return api
     },
 
@@ -177,8 +187,8 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
     },
 
     async build(options?: DatasetBuildOptions): Promise<DatasetBuildResult> {
-      if (state.sources.length === 0) {
-        throw new Error("dataset_sources_required")
+      if (state.resources.length === 0) {
+        throw new Error("dataset_resources_required")
       }
 
       const targetDatasetId = options?.datasetId
@@ -188,6 +198,13 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
         ...state,
         durable: options?.durable ?? state.durable,
       }
+      const context = await resolveDatasetResourceContext(
+        typedRuntime,
+        targetDatasetId,
+        stateWithBuildOptions.resources,
+      )
+      stateWithBuildOptions.resources = context.resources
+      stateWithBuildOptions.contextId = context.contextId
       const effectiveState: DatasetBuilderState<Runtime> =
         stateWithBuildOptions.output === "object"
           ? {
@@ -196,18 +213,19 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
               instructions: buildObjectOutputInstructions(stateWithBuildOptions.instructions),
             }
           : stateWithBuildOptions
-      const onlySource = effectiveState.sources[0]
-      const isSingleSource = effectiveState.sources.length === 1
+      const onlyResource = effectiveState.resources[0]
+      const isSingleResource = effectiveState.resources.length === 1
       const hasInstructions = Boolean(String(effectiveState.instructions ?? "").trim())
 
-      if (isSingleSource && onlySource.kind === "query" && !hasInstructions) {
-        await materializeQuerySource(effectiveState.runtime, onlySource, {
+      if (isSingleResource && onlyResource.kind === "query" && !hasInstructions) {
+        await materializeQueryResource(effectiveState.runtime, onlyResource, {
           datasetId: targetDatasetId,
           sandboxId: effectiveState.sandboxId,
           schema: effectiveState.outputSchema,
-          title: effectiveState.title ?? onlySource.title,
+          title: effectiveState.title ?? onlyResource.title,
           instructions: effectiveState.instructions,
           first: effectiveState.first,
+          contextId: effectiveState.contextId ?? "",
         })
         return finalizeOutputResult(
           await finalizeBuildResult(effectiveState.runtime, targetDatasetId, effectiveState.first),
@@ -215,13 +233,13 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
         )
       }
 
-      if (isSingleSource && (onlySource.kind === "file" || onlySource.kind === "text")) {
+      if (isSingleResource && (onlyResource.kind === "file" || onlyResource.kind === "text")) {
         if (!effectiveState.reactor) {
           throw new Error("dataset_reactor_required")
         }
-        await materializeSingleFileLikeSource(
+        await materializeSingleFileLikeResource(
           effectiveState,
-          onlySource as any,
+          onlyResource as any,
           targetDatasetId,
         )
         const completed = await completeDatasetStep({

@@ -7,22 +7,22 @@ import {
   datasetReadRowsStep,
 } from "../dataset/steps.js"
 import { inferDatasetSchema, validateRows } from "./schemaInference.js"
-import { rowsToJsonl } from "./sourceRows.js"
+import { rowsToJsonl } from "./rows.js"
 import type {
   AnyDatasetRuntime,
   DatasetBuildResult,
   DatasetReader,
-  DatasetTextSourceInput,
+  DatasetTextResourceInput,
   MaterializeRowsParams,
 } from "./types.js"
 
-export function defaultTextSourceName(source: DatasetTextSourceInput): string {
-  if (source.name?.trim()) return source.name.trim()
-  const mimeType = String(source.mimeType ?? "").toLowerCase()
-  if (mimeType.includes("csv")) return "source.csv"
-  if (mimeType.includes("json")) return "source.json"
-  if (mimeType.includes("yaml") || mimeType.includes("yml")) return "source.yaml"
-  return "source.txt"
+export function defaultTextResourceName(resource: DatasetTextResourceInput): string {
+  if (resource.name?.trim()) return resource.name.trim()
+  const mimeType = String(resource.mimeType ?? "").toLowerCase()
+  if (mimeType.includes("csv")) return "resource.csv"
+  if (mimeType.includes("json")) return "resource.json"
+  if (mimeType.includes("yaml") || mimeType.includes("yml")) return "resource.yaml"
+  return "resource.txt"
 }
 
 export async function getDatasetDb<Runtime extends AnyDatasetRuntime>(
@@ -39,14 +39,16 @@ export async function createOrUpdateDatasetMetadata<Runtime extends AnyDatasetRu
     sandboxId?: string
     title?: string
     instructions?: string
-    sources: any[]
-    sourceKinds: string[]
+    contextId: string
     analysis?: any
     schema?: any
     status?: string
   },
 ) {
   "use step"
+  if (!params.contextId.trim()) {
+    throw new Error("dataset_context_required")
+  }
   const db = await getDatasetDb(runtime)
   const service = new DatasetService(db)
   const result = await service.createDataset({
@@ -54,8 +56,7 @@ export async function createOrUpdateDatasetMetadata<Runtime extends AnyDatasetRu
     sandboxId: params.sandboxId,
     title: params.title ?? params.datasetId,
     instructions: params.instructions ?? "",
-    sources: params.sources,
-    sourceKinds: params.sourceKinds,
+    contextId: params.contextId,
     analysis: params.analysis,
     schema: params.schema,
     status: params.status ?? "building",
@@ -91,8 +92,7 @@ export async function materializeRowsToDataset<Runtime extends AnyDatasetRuntime
     sandboxId: params.sandboxId,
     title: params.title,
     instructions: params.instructions,
-    sources: params.sources,
-    sourceKinds: params.sourceKinds,
+    contextId: params.contextId,
     analysis: params.analysis,
     schema: resolvedSchema,
     status: "building",
@@ -121,23 +121,23 @@ export async function materializeRowsToDataset<Runtime extends AnyDatasetRuntime
   return params.datasetId
 }
 
-export async function uploadInlineTextSource<Runtime extends AnyDatasetRuntime>(
+export async function uploadInlineTextResource<Runtime extends AnyDatasetRuntime>(
   runtime: Runtime,
   datasetId: string,
-  source: DatasetTextSourceInput,
+  resource: DatasetTextResourceInput,
 ) {
   "use step"
 
   const db = await getDatasetDb(runtime)
-  const fileName = defaultTextSourceName(source)
-  const storagePath = `/dataset/source/${datasetId}/${Date.now()}-${fileName}`
-  const uploadResult = await db.storage.uploadFile(storagePath, Buffer.from(source.text, "utf-8"), {
-    contentType: source.mimeType ?? "text/plain",
+  const fileName = defaultTextResourceName(resource)
+  const storagePath = `/dataset/resource/${datasetId}/${Date.now()}-${fileName}`
+  const uploadResult = await db.storage.uploadFile(storagePath, Buffer.from(resource.text, "utf-8"), {
+    contentType: resource.mimeType ?? "text/plain",
     contentDisposition: fileName,
   })
   const fileId = uploadResult?.data?.id
   if (!fileId) {
-    throw new Error("dataset_text_source_upload_failed")
+    throw new Error("dataset_text_resource_upload_failed")
   }
   return fileId as string
 }

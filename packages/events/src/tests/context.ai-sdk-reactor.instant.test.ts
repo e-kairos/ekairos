@@ -191,7 +191,6 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
         durable: false,
         __benchmark: timer,
         options: {
-          silent: false,
           maxIterations: 3,
           maxModelSteps: 1,
           writable: writable as WritableStream<UIMessageChunk>,
@@ -325,7 +324,6 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
         durable: false,
         __benchmark: timer,
         options: {
-          silent: true,
           maxIterations: 2,
           maxModelSteps: 1,
         },

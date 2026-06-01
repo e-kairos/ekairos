@@ -1,9 +1,7 @@
 import { i } from "@instantdb/core"
 import {
   domain,
-  type CompatibleSchemaForDomain,
   type IncludedDomainNamesOf,
-  type SchemaOf,
 } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
 
@@ -51,8 +49,6 @@ class UnrelatedRuntime extends EkairosRuntime<Env, typeof unrelatedDomain, any> 
 const compatibleRuntime = new DatasetAppRuntime({ orgId: "org_1" })
 const unrelatedRuntime = new UnrelatedRuntime({ orgId: "org_1" })
 const includedName: IncludedDomainNamesOf<typeof appDomain> = "dataset"
-const compatibleSchema: CompatibleSchemaForDomain<SchemaOf<typeof appDomain>, typeof datasetDomain> =
-  appDomain.instantSchema()
 
 // given: dataset persistence is owned by datasetDomain, and the app runtime
 // includes datasetDomain at its root.
@@ -60,7 +56,8 @@ const compatibleSchema: CompatibleSchemaForDomain<SchemaOf<typeof appDomain>, ty
 // then: the builder is accepted and every later dataset read/write can use
 // runtime.use(datasetDomain) without falling back to an env-global resolver.
 compatibleRuntime.use(datasetDomain)
-dataset(compatibleRuntime).fromDataset({ datasetId: "source_dataset_1" })
+dataset(compatibleRuntime).fromDataset({ datasetId: "resource_dataset_1" })
+dataset(compatibleRuntime).fromContext({ id: "context_1" })
 
 // given: a runtime whose root domain has no datasetDomain schema.
 // when: callers try to create a dataset builder from that runtime.

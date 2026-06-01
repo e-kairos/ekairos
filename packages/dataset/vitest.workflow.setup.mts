@@ -42,16 +42,12 @@ export async function setup() {
     async build() {
       const inputFiles = await this.getInputFiles()
       await mkdir(this.outDir, { recursive: true })
-      await this.createWorkflowsBundle({
-        outfile: join(this.outDir, "workflows.mjs"),
+      await this.createCombinedBundle({
+        stepsOutfile: join(this.outDir, "__step_registrations.mjs"),
+        flowOutfile: join(this.outDir, "combined.mjs"),
+        externalizeNonSteps: true,
+        bundleTransitiveLocalStepDependencies: true,
         bundleFinalOutput: false,
-        format: "esm",
-        inputFiles,
-      })
-      await this.createStepsBundle({
-        outfile: join(this.outDir, "steps.mjs"),
-        externalizeNonSteps: false,
-        rewriteTsExtensions: true,
         format: "esm",
         inputFiles,
       })

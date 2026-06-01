@@ -39,6 +39,16 @@ export type ContextContentUpdatedEvent = ContextStreamEventBase & {
   contextId: string
 }
 
+export type ContextDefinitionUpdatedEvent = ContextStreamEventBase & {
+  type: "context.definition_updated"
+  contextId: string
+}
+
+export type ContextResourcesUpdatedEvent = ContextStreamEventBase & {
+  type: "context.resources_updated"
+  contextId: string
+}
+
 export type ExecutionCreatedEvent = ContextStreamEventBase & {
   type: "execution.created"
   executionId: string
@@ -173,6 +183,8 @@ export type ContextLifecycleEvent =
   | ContextResolvedEvent
   | ContextStatusChangedEvent
   | ContextContentUpdatedEvent
+  | ContextDefinitionUpdatedEvent
+  | ContextResourcesUpdatedEvent
 
 export type ExecutionEvent =
   | ExecutionCreatedEvent
@@ -255,6 +267,14 @@ export function parseContextStreamEvent(value: unknown): ContextStreamEvent {
     case "context.content_updated": {
       assertString(value.contextId, `${type}.contextId`)
       return value as ContextContentUpdatedEvent
+    }
+    case "context.definition_updated": {
+      assertString(value.contextId, `${type}.contextId`)
+      return value as ContextDefinitionUpdatedEvent
+    }
+    case "context.resources_updated": {
+      assertString(value.contextId, `${type}.contextId`)
+      return value as ContextResourcesUpdatedEvent
     }
     case "execution.created":
     case "execution.completed":

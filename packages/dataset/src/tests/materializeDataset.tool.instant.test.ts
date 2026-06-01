@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it } from "vitest"
 import { config as dotenvConfig } from "dotenv"
 import path from "path"
 import { readFile } from "fs/promises"
@@ -9,15 +9,18 @@ import { configureRuntime, EkairosRuntime } from "@ekairos/domain/runtime"
 import { createScriptedReactor, eventsDomain } from "@ekairos/events"
 import { sandboxDomain, SandboxService } from "@ekairos/sandbox"
 import { createMaterializeDatasetTool } from "../materializeDataset.tool"
-import { getDatasetOutputPath, getDatasetSourcesDir } from "../datasetFiles"
 import { datasetDomain } from "../schema"
 import { describeInstant, hasInstantAdmin, setupInstantTestEnv } from "./_env"
-import { attachMockInstantStreams } from "./_streams"
 
-dotenvConfig({ path: path.resolve(__dirname, "..", "..", "..", "..", ".env.local") })
-dotenvConfig({ path: path.resolve(__dirname, "..", "..", "..", "..", ".env") })
+const repoRoot = path.resolve(__dirname, "..", "..", "..", "..")
+const workspaceRoot = path.resolve(repoRoot, "..")
+const esolbayEnvPath = path.resolve(workspaceRoot, "client", "esolbay", "esolbay-platform", ".env.local")
 
-const registryVercelCwd = path.resolve(__dirname, "..", "..", "..", "registry")
+dotenvConfig({ path: esolbayEnvPath })
+dotenvConfig({ path: path.resolve(repoRoot, ".env.local") })
+dotenvConfig({ path: path.resolve(repoRoot, ".env") })
+
+const DAYTONA_NO_AVAILABLE_RUNNERS_RETRY_DELAYS_MS = [1_000, 2_500, 5_000, 10_000] as const
 
 const sampleDomain = domain("sample").schema({
   entities: {
@@ -51,10 +54,6 @@ const adminDb =
         schema: appDomain.toInstantSchema(),
       } as any)
     : null
-
-if (adminDb) {
-  attachMockInstantStreams(adminDb)
-}
 
 if (adminDb) {
   configureRuntime({
@@ -123,22 +122,43 @@ async function seedRows(categorySuffix?: string) {
 
 async function createTestSandbox() {
   const service = new SandboxService(adminDb as any)
-  const created = await service.createSandbox({
-    provider: "vercel",
-    runtime: "python3.13",
-    timeoutMs: 10 * 60 * 1000,
-    purpose: "dataset.tool.tests",
-    vercel: {
-      cwd: registryVercelCwd,
-      scope: "ekairos-dev",
-      environment: "development",
-    },
-    env: { orgId: "test-org" },
-    domain: appDomain,
-    dataset: { enabled: true },
-  })
-  if (!created.ok) throw new Error(created.error)
-  return created.data.sandboxId
+  const snapshot = String(process.env.DATASET_DAYTONA_SNAPSHOT_NAME ?? "").trim()
+  const maxAttempts = DAYTONA_NO_AVAILABLE_RUNNERS_RETRY_DELAYS_MS.length + 1
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const created = await service.createSandbox({
+        provider: "daytona",
+        runtime: "python3.13",
+        timeoutMs: 10 * 60 * 1000,
+        resources: { vcpus: 2 },
+        purpose: "dataset.tool.tests",
+        daytona: {
+          language: "python",
+          ...(snapshot ? { snapshot } : {}),
+          ephemeral: true,
+          autoStopIntervalMin: 5,
+          volumes: [],
+          labels: {
+            ekairos_dataset: "1",
+            dataset_tool_tests: "1",
+          },
+        },
+        params: {
+          orgId: "test-org",
+          datasetProvider: "daytona",
+          ...(snapshot ? { daytonaSnapshotName: snapshot } : {}),
+        },
+      } as any)
+      if (!created.ok) throw new Error(created.error)
+      return created.data.sandboxId
+    } catch (error) {
+      if (!isDaytonaNoAvailableRunnersError(error) || attempt >= maxAttempts) throw error
+      await wait(DAYTONA_NO_AVAILABLE_RUNNERS_RETRY_DELAYS_MS[attempt - 1])
+    }
+  }
+
+  throw new Error("Dataset Daytona sandbox creation exhausted runner retries.")
 }
 
 async function stopTestSandbox(sandboxId?: string) {
@@ -173,17 +193,30 @@ function scriptedToolStep(toolName: string, input: Record<string, unknown>, text
   }
 }
 
+async function wait(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isDaytonaNoAvailableRunnersError(error: unknown) {
+  return String(error instanceof Error ? error.message : error ?? "")
+    .toLowerCase()
+    .includes("no available runners")
+}
+
 describeInstant("createMaterializeDatasetTool()", () => {
   let suiteSandboxId: string | undefined
-
-  beforeAll(async () => {
-    suiteSandboxId = await createTestSandbox()
-  }, 120000)
 
   afterAll(async () => {
     await stopTestSandbox(suiteSandboxId)
     suiteSandboxId = undefined
   }, 120000)
+
+  async function getSuiteSandboxId() {
+    if (!suiteSandboxId) {
+      suiteSandboxId = await createTestSandbox()
+    }
+    return suiteSandboxId
+  }
 
   it("materializes a query snapshot and returns only datasetId", async () => {
     const { electronicsCategory } = await seedRows(`tool-snapshot-${Date.now()}`)
@@ -194,9 +227,8 @@ describeInstant("createMaterializeDatasetTool()", () => {
 
     const output = await (materializeTool as any).execute({
       datasetId: "tool_query_snapshot_v1",
-      sources: [
+      queries: [
         {
-          kind: "query",
           query: {
             sample_items: {
               $: {
@@ -238,10 +270,12 @@ describeInstant("createMaterializeDatasetTool()", () => {
           {
             scriptName: "parse_csv_to_jsonl",
             pythonCode: [
-              "import csv, glob, json",
-              `sources_dir = ${JSON.stringify(getDatasetSourcesDir("tool_file_v1"))}`,
-              `output_path = ${JSON.stringify(getDatasetOutputPath("tool_file_v1"))}`,
-              "source_path = glob.glob(sources_dir + '/*.csv')[0]",
+              "import csv, json",
+              "from pathlib import Path",
+              "workspace_root = Path(__file__).resolve().parents[1]",
+              "manifest = json.loads((workspace_root / 'manifest.json').read_text(encoding='utf-8'))",
+              "source_path = manifest['files'][0]['path']",
+              "output_path = workspace_root / 'output' / 'output.jsonl'",
               "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
               "  reader = csv.DictReader(src)",
               "  for row in reader:",
@@ -260,10 +294,11 @@ describeInstant("createMaterializeDatasetTool()", () => {
       reactor,
       queryDomain: sampleDomain,
     })
+    const sandboxId = await getSuiteSandboxId()
 
     const output = await (materializeTool as any).execute({
       datasetId: "tool_file_v1",
-      sandboxId: suiteSandboxId!,
+      sandboxId,
       schema: {
         title: "ProductRecord",
         description: "One product row",
@@ -278,7 +313,7 @@ describeInstant("createMaterializeDatasetTool()", () => {
           required: ["code", "description", "price"],
         },
       },
-      sources: [{ kind: "file", fileId, description: "source csv" }],
+      files: [{ fileId, description: "input csv" }],
     })
 
     expect(output).toEqual({ datasetId: "tool_file_v1" })
@@ -296,13 +331,18 @@ describeInstant("createMaterializeDatasetTool()", () => {
 
     const materializeTool = createMaterializeDatasetTool({
       runtime: testRuntime,
+      reactor: createScriptedReactor({
+        steps: [
+          scriptedToolStep("completeDataset", { summary: "should not run without sandbox" }),
+        ],
+      }),
       queryDomain: sampleDomain,
     })
 
     await expect(
       (materializeTool as any).execute({
         datasetId: "tool_file_no_sandbox_v1",
-        sources: [{ kind: "file", fileId }],
+        files: [{ fileId }],
       }),
     ).rejects.toThrow("dataset_sandbox_required")
   })
@@ -320,12 +360,13 @@ describeInstant("createMaterializeDatasetTool()", () => {
       runtime: testRuntime,
       queryDomain: sampleDomain,
     })
+    const sandboxId = await getSuiteSandboxId()
 
     await expect(
       (materializeTool as any).execute({
         datasetId: "tool_file_no_reactor_v1",
-        sandboxId: suiteSandboxId!,
-        sources: [{ kind: "file", fileId }],
+        sandboxId,
+        files: [{ fileId }],
       }),
     ).rejects.toThrow("dataset_reactor_required")
   })
@@ -341,9 +382,8 @@ describeInstant("createMaterializeDatasetTool()", () => {
       (materializeTool as any).execute({
         datasetId: "tool_first_fail_v1",
         first: true,
-        sources: [
+        queries: [
           {
-            kind: "query",
             query: {
               sample_items: {
                 $: {

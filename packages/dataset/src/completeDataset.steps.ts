@@ -425,7 +425,7 @@ function buildValidationFailureSummary(params: {
 
 function buildRepairInstructions(summary: ValidationFailureSummary): string[] {
     const instructions = [
-        "Rewrite output.jsonl using the schema as the source of truth. Do not use source file headers as JSON keys unless they exactly match schema property names.",
+        "Rewrite output.jsonl using the schema as the authority. Do not use input file headers as JSON keys unless they exactly match schema property names.",
         "Each non-empty line must be a JSON object shaped as {\"type\":\"row\",\"data\":{...}}.",
         "Populate every required top-level and nested required path from failureSummary.requiredPaths.",
         "For enum fields, emit exactly one allowed literal from failureSummary.enumConstraints or failureSummary.enumFailures.",

@@ -1,6 +1,6 @@
 import { runDatasetSandboxCommandStep } from "../sandbox/steps.js"
 
-export type TransformSourcePreviewContext = {
+export type TransformInputPreviewContext = {
     totalRows: number
     metadata?: {
         description: string
@@ -58,14 +58,14 @@ async function runPythonSnippet(
     }
 }
 
-export async function generateSourcePreview(
+export async function generateInputPreview(
     runtime: any,
     sandboxId: string,
-    sourcePath: string,
+    inputPath: string,
     datasetId: string,
     options: PreviewOptions = {}
-): Promise<TransformSourcePreviewContext> {
-    const context: TransformSourcePreviewContext = {
+): Promise<TransformInputPreviewContext> {
+    const context: TransformInputPreviewContext = {
         totalRows: 0,
     }
 
@@ -96,7 +96,7 @@ except Exception as e:
         datasetId,
         "jsonl_count",
         countScript,
-        [sourcePath],
+        [inputPath],
         "Counts number of JSONL records with type='row'"
     )
     context.metadata = meta
@@ -142,7 +142,7 @@ except Exception as e:
         datasetId,
         "jsonl_head",
         headScript,
-        [sourcePath, String(headLines)],
+        [inputPath, String(headLines)],
         `Reads the first ${headLines} JSONL row records`
     )
     context.head = head

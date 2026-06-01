@@ -4,7 +4,6 @@ import { domain } from "@ekairos/domain"
 import { eventsDomain } from "@ekairos/events"
 import { datasetDomain } from "../schema"
 import { sandboxDomain } from "@ekairos/sandbox"
-import { attachMockInstantStreams } from "./_streams"
 
 export async function configureDatasetTestRuntime() {
   process.env.SANDBOX_PROVIDER = "daytona"
@@ -26,7 +25,6 @@ export async function configureDatasetTestRuntime() {
     adminToken,
     schema: appDomain.toInstantSchema(),
   } as any)
-  attachMockInstantStreams(db)
 
   configureRuntime({
     runtime: async () => ({ db } as any),

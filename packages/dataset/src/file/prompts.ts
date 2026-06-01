@@ -17,15 +17,15 @@ function buildRole(): string {
 function buildGoal(): string {
     let xml = create()
         .ele("Goal")
-        .txt("Convert the source file into a validated JSONL dataset (output.jsonl) where each line is a JSON object conforming to a generated schema. The schema describes ONE data record structure. Extract ONLY data records; exclude any header sections, metadata, or summary information from the file.")
+        .txt("Convert the input file into a validated JSONL dataset (output.jsonl) where each line is a JSON object conforming to a generated schema. The schema describes ONE data record structure. Extract ONLY data records; exclude any header sections, metadata, or summary information from the file.")
         .up()
 
     return xml.end({ prettyPrint: true, headless: true })
 }
 
-function buildSourceInfo(context: FileParseContext): any {
+function buildResourceInfo(context: FileParseContext): any {
     let xml = create()
-        .ele("Source")
+        .ele("FileResource")
         .ele("Type").txt("file").up()
         .ele("FileId").txt(context.fileId).up()
         .ele("DatasetId").txt(context.datasetId).up()
@@ -123,7 +123,7 @@ function buildErrorsSection(errors: string[]): any | null {
 
     let xml = create()
         .ele("PreviousErrors")
-        .ele("Instruction").txt("Treat these as repair feedback from the previous validation attempt. Rewrite output.jsonl from the schema contract; do not patch source column names into schema keys piecemeal.").up()
+        .ele("Instruction").txt("Treat these as repair feedback from the previous validation attempt. Rewrite output.jsonl from the schema contract; do not patch input column names into schema keys piecemeal.").up()
 
     for (const error of errors) {
         xml = xml.ele("Error").txt(error).up()
@@ -137,8 +137,8 @@ function buildContextSection(context: FileParseContext): string {
     let xml = create()
         .ele("Context")
 
-    const sourceXml = buildSourceInfo(context)
-    xml = xml.import(sourceXml.first())
+    const resourceXml = buildResourceInfo(context)
+    xml = xml.import(resourceXml.first())
 
     if (context.filePreview) {
         const previewXml = buildFilePreviewSection(context.filePreview)
@@ -264,9 +264,9 @@ function buildSchemaSection(context: FileParseContext): string {
     xml = xml
         .ele("SchemaContract")
         .ele("Purpose").txt("Compact output contract derived from JSON Schema. Use this before writing output.jsonl.").up()
-        .ele("Rule").txt("Use only schema property keys in data objects. Source headers are input labels, not output keys.").up()
+        .ele("Rule").txt("Use only schema property keys in data objects. Input headers are input labels, not output keys.").up()
         .ele("Rule").txt("Required paths are required everywhere, including nested objects and array items.").up()
-        .ele("Rule").txt("Enum fields must use exactly one of the listed literal values. Normalize source labels to the closest valid enum literal; never emit a value outside the enum.").up()
+        .ele("Rule").txt("Enum fields must use exactly one of the listed literal values. Normalize input labels to the closest valid enum literal; never emit a value outside the enum.").up()
 
     xml = appendLimitedList(xml, "RequiredPaths", "Path", contract.requiredPaths, 120)
     xml = appendLimitedList(xml, "PropertyPaths", "Path", contract.propertyPaths, 160)
@@ -320,10 +320,10 @@ function buildInstructions(context: FileParseContext): string {
             .ele("Requirements")
             .ele("Requirement").txt("Every output row must conform exactly to the provided schema").up()
             .ele("Requirement").txt("Every data object MUST use the exact property names from the provided JSON Schema required/properties keys").up()
-            .ele("Requirement").txt("Build a schema-first mapping from source columns to schema fields before writing output.jsonl. Do not use raw source headers as JSON keys unless they are exactly schema keys").up()
+            .ele("Requirement").txt("Build a schema-first mapping from input columns to schema fields before writing output.jsonl. Do not use raw input headers as JSON keys unless they are exactly schema keys").up()
             .ele("Requirement").txt("For nested required fields, populate the required child keys inside each nested object or array item; top-level validity is not enough").up()
             .ele("Requirement").txt("For enum fields, emit exactly one allowed enum literal from SchemaContract; normalize labels or abbreviations into allowed literals").up()
-            .ele("Requirement").txt("Do not translate, localize, rename, camelize differently, or infer alternative field names. Field names are a technical contract; only field values may preserve the source language").up()
+            .ele("Requirement").txt("Do not translate, localize, rename, camelize differently, or infer alternative field names. Field names are a technical contract; only field values may preserve the input language").up()
             .ele("Requirement").txt("Do not call generateSchema when a schema is already provided").up()
             .up()
             .up()
@@ -361,8 +361,8 @@ function buildInstructions(context: FileParseContext): string {
         .up()
         .ele("Rules")
         .ele("Rule").txt("Schema defines ONE DATA RECORD structure (not array, not header)").up()
-        .ele("Rule").txt("Schema property names are authoritative. Never translate or rename keys such as itemName, quantity, or unit into the source language").up()
-        .ele("Rule").txt("Original/source language applies to extracted values only, not to JSON object keys").up()
+        .ele("Rule").txt("Schema property names are authoritative. Never translate or rename keys such as itemName, quantity, or unit into the input language").up()
+        .ele("Rule").txt("Original/input language applies to extracted values only, not to JSON object keys").up()
         .ele("Rule").txt("Datasets contain ONLY data records; exclude all header sections and file metadata").up()
         .ele("Rule").txt("JSONL format: each line = separate JSON object representing one data record").up()
         .ele("Rule").txt("FilePreview shows raw file content - use Script to understand data extraction").up()

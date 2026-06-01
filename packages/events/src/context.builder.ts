@@ -21,9 +21,25 @@ import type {
   ContextRuntimeHandleForDomain,
 } from "./context.runtime.js"
 import type { ContextReactor } from "./context.reactor.js"
-import type { ContextItem, StoredContext } from "./context.store.js"
+import type {
+  ContextItem,
+  ContextResource,
+  StoredContext,
+  StoredContextResource,
+} from "./context.store.js"
 import { registerContext, type ContextKey } from "./context.registry.js"
 import { eventsDomain } from "./schema.js"
+
+export type ContextResourcesParams<
+  Context,
+  Env extends ContextEnvironment = ContextEnvironment,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
+> = {
+  content: Context
+  context: StoredContext<Context>
+  env: Env
+  runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>
+}
 
 export interface ContextConfig<
   Context,
@@ -41,11 +57,29 @@ export interface ContextConfig<
     env: Env,
     runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
   ) => Promise<ContextItem[]> | ContextItem[]
-  narrative: (
+  narrative?: (
     context: StoredContext<Context>,
     env: Env,
     runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
   ) => Promise<string> | string
+  description?: (
+    content: Context,
+    context: StoredContext<Context>,
+    env: Env,
+    runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+  ) => Promise<string> | string
+  goal?: (
+    content: Context,
+    context: StoredContext<Context>,
+    env: Env,
+    runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+  ) => Promise<string> | string
+  resources?: (
+    params: ContextResourcesParams<Context, Env, RequiredDomain>,
+  ) =>
+    | Promise<ContextResource[] | StoredContextResource[]>
+    | ContextResource[]
+    | StoredContextResource[]
   skills?: (
     context: StoredContext<Context>,
     env: Env,
@@ -106,6 +140,34 @@ function isDynamicModelSelector<
   return typeof model === "function" && model.length >= 1
 }
 
+function stringifyContextContent(content: unknown) {
+  try {
+    return JSON.stringify(content ?? null, null, 2)
+  } catch {
+    return String(content)
+  }
+}
+
+function buildDefaultContextPrompt(params: {
+  content: unknown
+  resources?: StoredContextResource[] | null
+  description?: string | null
+  goal?: string | null
+}) {
+  const sections: string[] = []
+  sections.push(`Content:\n${stringifyContextContent(params.content)}`)
+  if (params.resources?.length) {
+    sections.push(`Resources:\n${stringifyContextContent(params.resources)}`)
+  }
+  if (params.description) {
+    sections.push(`Description:\n${params.description}`)
+  }
+  if (params.goal) {
+    sections.push(`Goal:\n${params.goal}`)
+  }
+  return sections.join("\n\n")
+}
+
 export function context<
   Context,
   Env extends ContextEnvironment = ContextEnvironment,
@@ -142,7 +204,53 @@ export function context<
       runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
     ) {
       if (config.narrative) return config.narrative(contextValue, env, runtime)
-      throw new Error("Context config is missing narrative()")
+      const content = contextValue.content as Context
+      const description =
+        contextValue.description ??
+        (config.description
+          ? await config.description(content, contextValue, env, runtime)
+          : null)
+      const goal =
+        contextValue.goal ??
+        (config.goal
+          ? await config.goal(content, contextValue, env, runtime)
+          : null)
+      return buildDefaultContextPrompt({
+        content,
+        resources: contextValue.resources ?? [],
+        description,
+        goal,
+      })
+    }
+
+    protected async describeContext(
+      content: Context,
+      contextValue: StoredContext<Context>,
+      env: Env,
+      runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+    ) {
+      if (!config.description) return null
+      return config.description(content, contextValue, env, runtime)
+    }
+
+    protected async defineGoal(
+      content: Context,
+      contextValue: StoredContext<Context>,
+      env: Env,
+      runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+    ) {
+      if (!config.goal) return null
+      return config.goal(content, contextValue, env, runtime)
+    }
+
+    protected async defineResources(
+      content: Context,
+      contextValue: StoredContext<Context>,
+      env: Env,
+      runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+    ) {
+      if (!config.resources) return []
+      return config.resources({ content, context: contextValue, env, runtime })
     }
 
     protected async buildSkills(
@@ -207,6 +315,51 @@ type BuilderSystemPrompt<
   env: Env,
   runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
 ) => Promise<string> | string
+
+type BuilderDescription<
+  Context,
+  Env extends ContextEnvironment,
+  RequiredDomain extends DomainLike,
+> = (
+  content: Context,
+  context: StoredContext<Context>,
+  env: Env,
+  runtime: ContextRuntimeHandleForDomain<Env, RequiredDomain>,
+) => Promise<string> | string
+
+type BuilderGoal<
+  Context,
+  Env extends ContextEnvironment,
+  RequiredDomain extends DomainLike,
+> = BuilderDescription<Context, Env, RequiredDomain>
+
+type BuilderResources<
+  Context,
+  Env extends ContextEnvironment,
+  RequiredDomain extends DomainLike,
+> = (
+  params: ContextResourcesParams<Context, Env, RequiredDomain>,
+) =>
+  | Promise<ContextResource[] | StoredContextResource[] | null>
+  | ContextResource[]
+  | StoredContextResource[]
+  | null
+
+type BuilderResource<
+  Context,
+  Env extends ContextEnvironment,
+  RequiredDomain extends DomainLike,
+> =
+  | ContextResource
+  | StoredContextResource
+  | ((
+      params: ContextResourcesParams<Context, Env, RequiredDomain>,
+    ) =>
+      | Promise<ContextResource | StoredContextResource | null | undefined>
+      | ContextResource
+      | StoredContextResource
+      | null
+      | undefined)
 
 type BuilderSkills<
   Context,
@@ -275,6 +428,10 @@ type FluentContextBuilder<
   expandEvents(fn: BuilderExpandEvents<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
   narrative(fn: BuilderSystemPrompt<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
   system(fn: BuilderSystemPrompt<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
+  description(fn: BuilderDescription<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
+  goal(fn: BuilderGoal<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
+  resources(fn: BuilderResources<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
+  resource(resource: BuilderResource<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
   skills(fn: BuilderSkills<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
   actions(fn: BuilderTools<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
   tools(fn: BuilderTools<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
@@ -317,6 +474,9 @@ type CreateContextEntry<
   Env extends ContextEnvironment,
   RequiredDomain extends DomainLike,
 > = {
+  content<Initializer extends AnyContextInitializer<Env, RequiredDomain>>(
+    initializer: Initializer,
+  ): FluentContextBuilder<InferContextFromInitializer<Initializer>, Env, RequiredDomain>
   context<Initializer extends AnyContextInitializer<Env, RequiredDomain>>(
     initializer: Initializer,
   ): FluentContextBuilder<InferContextFromInitializer<Initializer>, Env, RequiredDomain>
@@ -333,10 +493,10 @@ function assertConfigComplete<
   config: Partial<ContextConfig<Context, Env, RequiredDomain>>,
 ): asserts config is ContextConfig<Context, Env, RequiredDomain> {
   if (!config.context) {
-    throw new Error("createContext: you must define context() before building the Context.")
+    throw new Error("createContext: you must define content() before building the Context.")
   }
-  if (!config.narrative) {
-    throw new Error("createContext: you must define narrative() before building the Context.")
+  if (!config.narrative && (!config.description || !config.goal)) {
+    throw new Error("createContext: you must define description() and goal() before building the Context.")
   }
   if (!config.actions && !config.tools) {
     throw new Error("createContext: you must define actions() before building the Context.")
@@ -382,6 +542,21 @@ export function createContext<
       context: typedInitializer,
     }
 
+    const resourceFactories: BuilderResources<Context, Env, RequiredDomain>[] = []
+
+    const refreshResourcesConfig = () => {
+      fluentState.resources = async (params) => {
+        const resources: StoredContextResource[] = []
+        for (const factory of resourceFactories) {
+          const result = await factory(params)
+          if (!result) continue
+          const list = Array.isArray(result) ? result : [result]
+          resources.push(...(list as StoredContextResource[]))
+        }
+        return resources
+      }
+    }
+
     let cached: ContextInstance<Context, Env, RequiredDomain> | null = null
 
     const getOrBuild = () => {
@@ -409,6 +584,30 @@ export function createContext<
       },
       system(system) {
         fluentState.narrative = system
+        return builder
+      },
+      description(description) {
+        fluentState.description = description
+        return builder
+      },
+      goal(goal) {
+        fluentState.goal = goal
+        return builder
+      },
+      resources(resources) {
+        resourceFactories.push(resources)
+        refreshResourcesConfig()
+        return builder
+      },
+      resource(resource) {
+        resourceFactories.push(async (params) => {
+          if (typeof resource === "function") {
+            const resolved = await resource(params)
+            return resolved ? [resolved] : []
+          }
+          return [resource]
+        })
+        refreshResourcesConfig()
         return builder
       },
       skills(skillsFactory) {
@@ -467,6 +666,7 @@ export function createContext<
   }
 
   return {
+    content: initializeBuilder,
     context: initializeBuilder,
     initialize: initializeBuilder,
   }

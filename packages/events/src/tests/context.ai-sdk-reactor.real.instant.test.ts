@@ -144,7 +144,6 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
         durable: false,
         __benchmark: timer,
         options: {
-          silent: false,
           maxIterations: 3,
           maxModelSteps: 1,
           writable,

@@ -7,12 +7,12 @@ import { getStepMetadata, getWorkflowMetadata } from "workflow"
 
 import { dataset } from "../../index.ts"
 import { resolveDatasetAgentDurable } from "../../builder/materialize.ts"
-import { getDatasetOutputPath, getDatasetSourcesDir } from "../../datasetFiles.ts"
+import { getDatasetOutputPath, getDatasetResourcesDir } from "../../datasetFiles.ts"
 import { datasetDomain } from "../../schema.ts"
 
-const sourceDomain = domain("dataset-workflow-source").schema({
+const queryDomain = domain("dataset-workflow-query").schema({
   entities: {
-    source_items: i.entity({
+    query_items: i.entity({
       sku: i.string(),
       qty: i.number(),
     }),
@@ -23,14 +23,14 @@ const sourceDomain = domain("dataset-workflow-source").schema({
 
 const appDomain = domain("dataset-workflow-test-app")
   .includes(datasetDomain)
-  .includes(sourceDomain)
+  .includes(queryDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
 
 type DatasetWorkflowRuntimeEnv = {
   orgId: string
   dbKey: string
   requireStepDb: boolean
-  sourceRows: Array<{ id: string; sku: string; qty: number }>
+  resourceRows: Array<{ id: string; sku: string; qty: number }>
 }
 
 type StoredDataset = Record<string, any> & {
@@ -47,7 +47,7 @@ type StoredFile = {
 }
 
 type DatasetWorkflowStore = {
-  sourceRows: Array<{ id: string; sku: string; qty: number }>
+  resourceRows: Array<{ id: string; sku: string; qty: number }>
   datasets: Map<string, StoredDataset>
   files: Map<string, StoredFile>
   entities: Map<string, Map<string, Record<string, any>>>
@@ -67,14 +67,14 @@ function stores() {
 function getStore(env: DatasetWorkflowRuntimeEnv): DatasetWorkflowStore {
   const existing = stores().get(env.dbKey)
   if (existing) {
-    if (existing.sourceRows.length === 0 && env.sourceRows.length > 0) {
-      existing.sourceRows = env.sourceRows
+    if (existing.resourceRows.length === 0 && env.resourceRows.length > 0) {
+      existing.resourceRows = env.resourceRows
     }
     return existing
   }
 
   const created: DatasetWorkflowStore = {
-    sourceRows: env.sourceRows,
+    resourceRows: env.resourceRows,
     datasets: new Map(),
     files: new Map(),
     entities: new Map(),
@@ -241,8 +241,8 @@ function createDb(env: DatasetWorkflowRuntimeEnv) {
     },
     async query(query: Record<string, any>) {
       await assertDbCallIsStep(env)
-      if (query.source_items) {
-        return { source_items: store.sourceRows.map((row) => ({ ...row })) }
+      if (query.query_items) {
+        return { query_items: store.resourceRows.map((row) => ({ ...row })) }
       }
 
       if (query.dataset_datasets) {
@@ -262,7 +262,7 @@ function createDb(env: DatasetWorkflowRuntimeEnv) {
 
       const result: Record<string, any[]> = {}
       for (const [entity, spec] of Object.entries(query)) {
-        if (entity === "$files" || entity === "dataset_datasets" || entity === "source_items") {
+        if (entity === "$files" || entity === "dataset_datasets" || entity === "query_items") {
           continue
         }
         result[entity] = queryGenericEntity(store, entity, spec as Record<string, any>)
@@ -362,10 +362,14 @@ export async function workflowFileDatasetReactor(params: any) {
   const datasetId = String(params.context?.content?.datasetId ?? "")
   const pythonCode = [
     "import csv, glob, json",
-    `sources_dir = ${JSON.stringify(getDatasetSourcesDir(datasetId))}`,
-    `output_path = ${JSON.stringify(getDatasetOutputPath(datasetId))}`,
-    "source_path = glob.glob(sources_dir + '/*')[0]",
-    "with open(source_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
+    "from pathlib import Path",
+    "workspace = Path(__file__).resolve().parents[1]",
+    "manifest = json.loads((workspace / 'manifest.json').read_text(encoding='utf-8'))",
+    `resources_dir = ${JSON.stringify(getDatasetResourcesDir(datasetId))}`,
+    "output_path = str(Path(manifest['outputDir']) / 'output.jsonl')",
+    "Path(output_path).parent.mkdir(parents=True, exist_ok=True)",
+    "resource_path = glob.glob(resources_dir + '/*')[0]",
+    "with open(resource_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
     "  reader = csv.DictReader(src)",
     "  for row in reader:",
     "    out.write(json.dumps({'type': 'row', 'data': {'code': row['code'], 'qty': int(row['qty'])}}) + '\\n')",
@@ -431,16 +435,16 @@ export async function datasetQueryBuilderWorkflow(
   "use workflow";
 
   const result = await dataset(input.runtime)
-    .fromQuery(sourceDomain, {
+    .fromQuery(queryDomain, {
       query: {
-        source_items: {},
+        query_items: {},
       },
-      title: "Workflow Source Items",
-      explanation: "Workflow-safe query source smoke.",
+      title: "Workflow Query Items",
+      explanation: "Workflow-safe query resource smoke.",
     })
     .schema({
-      title: "WorkflowSourceItem",
-      description: "One workflow source item.",
+      title: "WorkflowQueryItem",
+      description: "One workflow query item.",
       schema: {
         type: "object",
         additionalProperties: false,
@@ -475,7 +479,7 @@ export async function datasetFileBuilderWorkflow(
     .reactor(workflowFileDatasetReactor as ContextReactor<any, any>)
     .schema({
       title: "WorkflowFileRow",
-      description: "One row from a workflow file source.",
+      description: "One row from a workflow file resource.",
       schema: {
         type: "object",
         additionalProperties: false,

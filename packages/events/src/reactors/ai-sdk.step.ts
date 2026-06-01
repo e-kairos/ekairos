@@ -113,7 +113,6 @@ export async function executeAiSdkReaction<Env extends ContextEnvironment = Cont
   iteration?: number
   maxSteps: number
   sendStart?: boolean
-  silent?: boolean
   contextStepStream?: WritableStream<string>
   writable?: WritableStream<UIMessageChunk>
   executionId?: string

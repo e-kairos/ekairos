@@ -9,9 +9,9 @@ type Env = Record<string, unknown> & {
   orgId: string
 }
 
-const sourceDomain = domain("dataset-query-typing-source").schema({
+const queryDomain = domain("dataset-query-typing-resource").schema({
   entities: {
-    source_items: i.entity({
+    query_items: i.entity({
       title: i.string().indexed(),
       quantity: i.number().indexed(),
     }),
@@ -22,7 +22,7 @@ const sourceDomain = domain("dataset-query-typing-source").schema({
 
 const appDomain = domain("dataset-query-typing-app")
   .includes(datasetDomain)
-  .includes(sourceDomain)
+  .includes(queryDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
 
 class AppRuntime extends EkairosRuntime<Env, typeof appDomain, any> {
@@ -37,13 +37,13 @@ class AppRuntime extends EkairosRuntime<Env, typeof appDomain, any> {
 
 const runtime = new AppRuntime({ orgId: "org_1" })
 
-// given: sourceDomain exposes source_items with title and quantity fields.
+// given: queryDomain exposes query_items with title and quantity fields.
 // when: callers write an InstaQL query through dataset.fromQuery.
 // then: the query parameter accepts the same entity and where-field shape that
 // InstantDB accepts for db.query with this domain schema.
-dataset(runtime).fromQuery(sourceDomain, {
+dataset(runtime).fromQuery(queryDomain, {
   query: {
-    source_items: {
+    query_items: {
       $: {
         where: {
           title: "Ready",
@@ -58,25 +58,25 @@ dataset(runtime).fromQuery(sourceDomain, {
   },
 })
 
-// given: query validation is scoped to sourceDomain, not datasetDomain.
-// when: callers query an entity that is not declared by sourceDomain.
+// given: query validation is scoped to queryDomain, not datasetDomain.
+// when: callers query an entity that is not declared by queryDomain.
 // then: TypeScript rejects the query object before it can be passed to InstantDB.
-dataset(runtime).fromQuery(sourceDomain, {
-  // @ts-expect-error unknown_entities is not part of sourceDomain
+dataset(runtime).fromQuery(queryDomain, {
+  // @ts-expect-error unknown_entities is not part of queryDomain
   query: {
     unknown_entities: {},
   },
 })
 
-// given: source_items has title and quantity fields, but no missingField.
-// when: callers filter source_items by an unknown field.
+// given: query_items has title and quantity fields, but no missingField.
+// when: callers filter query_items by an unknown field.
 // then: the same ValidQuery constraint used by InstantDB rejects the where
 // clause through the dataset builder.
-dataset(runtime).fromQuery(sourceDomain, {
+dataset(runtime).fromQuery(queryDomain, {
   query: {
-    source_items: {
+    query_items: {
       $: {
-        // @ts-expect-error missingField is not a source_items field
+        // @ts-expect-error missingField is not a query_items field
         where: {
           missingField: "value",
         },

@@ -29,17 +29,13 @@ const esolbayRoot = path.resolve(
   "esolbay-platform",
 )
 const esolbayEnvPath = path.resolve(esolbayRoot, ".env.local")
-const esolbayVercelProjectPath = path.resolve(
-  esolbayRoot,
-  ".vercel",
-  "project.json",
-)
 
 dotenvConfig({ path: esolbayEnvPath, quiet: true })
 dotenvConfig({ path: path.resolve(repoRoot, ".env.local"), quiet: true })
 dotenvConfig({ path: path.resolve(repoRoot, ".env"), quiet: true })
 
 const TEST_TIMEOUT_MS = 20 * 60 * 1000
+const DAYTONA_NO_AVAILABLE_RUNNERS_RETRY_DELAYS_MS = [1_000, 2_500, 5_000, 10_000] as const
 
 function readTrimmedEnv(name: string): string {
   return String(process.env[name] ?? "").trim()
@@ -58,6 +54,8 @@ function hasReproEnv(): boolean {
   return Boolean(
     readTrimmedEnv("EKAIROS_DATASET_AZURE_WORKFLOW_REPRO") === "1" &&
       hasAzureResponsesEnv() &&
+      (readTrimmedEnv("DAYTONA_API_URL") || readTrimmedEnv("DAYTONA_SERVER_URL")) &&
+      readTrimmedEnv("DAYTONA_API_KEY") &&
       readTrimmedEnv("INSTANT_PERSONAL_ACCESS_TOKEN"),
   )
 }
@@ -68,45 +66,6 @@ function getInstantProvisionToken(): string {
     throw new Error("INSTANT_PERSONAL_ACCESS_TOKEN is required")
   }
   return token
-}
-
-async function readEsolbayVercelProject() {
-  const raw = await readFile(esolbayVercelProjectPath, "utf8")
-  const parsed = JSON.parse(raw) as {
-    orgId?: string
-    projectId?: string
-    projectName?: string
-  }
-  if (!parsed.orgId || !parsed.projectId) {
-    throw new Error("Esolbay .vercel/project.json is missing orgId/projectId")
-  }
-  return parsed
-}
-
-function getStableVercelToken(): string {
-  const token =
-    readTrimmedEnv("SANDBOX_VERCEL_TOKEN") ||
-    readTrimmedEnv("VERCEL_TOKEN")
-  return token
-}
-
-function clearLocalVercelRuntimeEnv(): () => void {
-  const names = ["VERCEL", "VERCEL_ENV", "VERCEL_URL", "VERCEL_OIDC_TOKEN"]
-  const previous = new Map<string, string | undefined>()
-  for (const name of names) {
-    previous.set(name, process.env[name])
-    delete process.env[name]
-  }
-
-  return () => {
-    for (const [name, value] of previous.entries()) {
-      if (value === undefined) {
-        delete process.env[name]
-      } else {
-        process.env[name] = value
-      }
-    }
-  }
 }
 
 function createCsvFixture(): Buffer {
@@ -120,6 +79,64 @@ function createCsvFixture(): Buffer {
     ].join("\n"),
     "utf8",
   )
+}
+
+async function wait(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isDaytonaNoAvailableRunnersError(error: unknown) {
+  return String(error instanceof Error ? error.message : error ?? "")
+    .toLowerCase()
+    .includes("no available runners")
+}
+
+async function createDaytonaSandbox(params: {
+  db: any
+  runtime: DatasetAzureWorkflowReproRuntime
+  datasetId: string
+  fileId: string
+}) {
+  const service = new SandboxService(params.db as any)
+  const snapshot = String(process.env.DATASET_DAYTONA_SNAPSHOT_NAME ?? "").trim()
+  const maxAttempts = DAYTONA_NO_AVAILABLE_RUNNERS_RETRY_DELAYS_MS.length + 1
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const createdSandbox = await service.createSandbox({
+        provider: "daytona",
+        runtime: "python3.13",
+        timeoutMs: 20 * 60 * 1000,
+        resources: { vcpus: 2 },
+        purpose: "dataset.azure.workflow.repro",
+        daytona: {
+          language: "python",
+          ...(snapshot ? { snapshot } : {}),
+          ephemeral: true,
+          autoStopIntervalMin: 5,
+          volumes: [],
+          labels: {
+            ekairos_dataset: "1",
+            azure_workflow_repro: "1",
+          },
+        },
+        params: {
+          orgId: params.runtime.env.orgId,
+          datasetId: params.datasetId,
+          fileId: params.fileId,
+          datasetProvider: "daytona",
+          ...(snapshot ? { daytonaSnapshotName: snapshot } : {}),
+        },
+      })
+      if (!createdSandbox.ok) throw new Error(createdSandbox.error)
+      return createdSandbox.data.sandboxId
+    } catch (error) {
+      if (!isDaytonaNoAvailableRunnersError(error) || attempt >= maxAttempts) throw error
+      await wait(DAYTONA_NO_AVAILABLE_RUNNERS_RETRY_DELAYS_MS[attempt - 1])
+    }
+  }
+
+  throw new Error("Dataset Daytona sandbox creation exhausted runner retries.")
 }
 
 async function readWorkflowRunFile(runId: string): Promise<Record<string, any>> {
@@ -195,35 +212,10 @@ describeRepro("dataset Azure file workflow repro", () => {
       })
 
       const service = new SandboxService(db as any)
-      const vercelProject = await readEsolbayVercelProject()
       const persist = readTrimmedEnv("EKAIROS_DATASET_REPRO_PERSIST") === "1"
       let sandboxId = ""
-      const restoreVercelRuntimeEnv = clearLocalVercelRuntimeEnv()
 
       try {
-        const stableVercelToken = getStableVercelToken()
-        const createdSandbox = await service.createSandbox({
-          provider: "vercel",
-          runtime: "python3.13",
-          timeoutMs: 20 * 60 * 1000,
-          resources: { vcpus: 2 },
-          purpose: "dataset.azure.workflow.repro",
-          vercel: {
-            cwd: esolbayRoot,
-            orgId: vercelProject.orgId,
-            projectId: vercelProject.projectId,
-            environment: "development",
-            profile: "ephemeral",
-            deleteOnStop: !persist,
-            ...(stableVercelToken ? { token: stableVercelToken } : {}),
-          },
-          env: runtime.env,
-          domain: datasetAzureWorkflowReproDomain,
-          dataset: { enabled: true },
-        })
-        if (!createdSandbox.ok) throw new Error(createdSandbox.error)
-        sandboxId = createdSandbox.data.sandboxId
-
         const uploaded = await db.storage.uploadFile(
           `/tests/dataset/${Date.now()}-requisition-items.csv`,
           createCsvFixture(),
@@ -236,6 +228,12 @@ describeRepro("dataset Azure file workflow repro", () => {
         expect(fileId).toBeTruthy()
 
         const datasetId = `dataset_azure_workflow_repro_${randomUUID()}`
+        sandboxId = await createDaytonaSandbox({
+          db,
+          runtime,
+          datasetId,
+          fileId,
+        })
         const startedAt = Date.now()
         const run = await start(datasetAzureFileWorkflowRepro, [
           {
@@ -247,6 +245,14 @@ describeRepro("dataset Azure file workflow repro", () => {
         ])
         const result = await run.returnValue
         const totalDurationMs = Date.now() - startedAt
+        const datasetSnapshot = await db.query({
+          dataset_datasets: {
+            $: { where: { datasetId: result.datasetId }, limit: 1 },
+            context: {},
+          } as any,
+        })
+        const datasetRow = datasetSnapshot.dataset_datasets?.[0]
+        const context = datasetRow?.context
 
         const workflowRunId = String(run.runId)
         const runFile = await readWorkflowRunFile(workflowRunId)
@@ -259,6 +265,8 @@ describeRepro("dataset Azure file workflow repro", () => {
         const reportPath = await writeReproReport({
           appId: app.appId,
           datasetId: result.datasetId,
+          contextId: context?.id,
+          contextResourceTypes: context?.resources?.map((resource: any) => resource.type),
           sandboxId,
           fileId,
           workflowRunId,
@@ -277,6 +285,9 @@ describeRepro("dataset Azure file workflow repro", () => {
         expect(result.datasetId).toBe(datasetId)
         expect(result.workflowRunId).toBe(workflowRunId)
         expect(result.rowCount).toBeGreaterThan(0)
+        expect(datasetRow?.resourceKinds).toBeUndefined()
+        expect(context?.id).toBeTruthy()
+        expect(context?.resources?.map((resource: any) => resource.type)).toEqual(["file"])
         expect(steps.length).toBeGreaterThan(0)
         expect(reportPath).toContain("dataset-azure-workflow-repro")
       } finally {
@@ -291,8 +302,8 @@ describeRepro("dataset Azure file workflow repro", () => {
               token: getInstantProvisionToken(),
             }).catch(() => {})
           }
-        } finally {
-          restoreVercelRuntimeEnv()
+        } catch {
+          // Best-effort cleanup; repro artifacts are reported separately.
         }
       }
     },

@@ -250,7 +250,7 @@ describe.skip("DatasetAgent (moved to src/tests)", () => {
         const sandbox = await createSandbox()
 
         const transformAgent = createTransformDatasetContext({
-            sourceDatasetIds: [sourceDataset.id],
+            inputDatasetIds: [sourceDataset.id],
             outputSchema: targetSchema,
             sandboxId: sandbox.sandboxId,
         })

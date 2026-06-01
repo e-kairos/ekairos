@@ -1,9 +1,9 @@
-import type { AnyDatasetRuntime, DatasetBuilderState, InternalSource } from "./types.js"
+import type { AnyDatasetRuntime, DatasetBuilderState, InternalDatasetResource } from "./types.js"
 
 export type DatasetAgentMaterializers = {
-  materializeSingleFileLikeSource<Runtime extends AnyDatasetRuntime>(
+  materializeSingleFileLikeResource<Runtime extends AnyDatasetRuntime>(
     state: DatasetBuilderState<Runtime>,
-    source: Extract<InternalSource, { kind: "file" | "text" }>,
+    resource: Extract<InternalDatasetResource, { kind: "file" | "text" }>,
     targetDatasetId: string,
   ): Promise<string>
   materializeDerivedDataset<Runtime extends AnyDatasetRuntime>(

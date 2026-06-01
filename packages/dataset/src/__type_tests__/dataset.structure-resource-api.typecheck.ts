@@ -8,7 +8,7 @@ type Env = Record<string, unknown> & {
   orgId: string
 }
 
-const appDomain = domain("dataset-structure-source-api")
+const appDomain = domain("dataset-structure-resource-api")
   .includes(datasetDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
 
@@ -25,9 +25,9 @@ class AppRuntime extends EkairosRuntime<Env, typeof appDomain, any> {
 const runtime = new AppRuntime({ orgId: "org_1" })
 
 // given: structure callers pass explicit kind-tagged file, text, and dataset
-// sources to `.from(...)`.
-// when: the same source shape is used with dataset.
-// then: dataset accepts the structure-compatible source shape without requiring
+// resources to `.from(...)`.
+// when: the same resource shape is used with dataset.
+// then: dataset accepts the structure-compatible resource shape without requiring
 // callers to switch to fromFile/fromText/fromDataset.
 dataset(runtime).from(
   { kind: "file", fileId: "file_1", description: "uploaded csv" },
@@ -35,20 +35,20 @@ dataset(runtime).from(
   { kind: "dataset", datasetId: "dataset_1", description: "existing dataset" },
 )
 
-// given: dataset also keeps the more ergonomic source-specific methods.
-// when: callers omit the explicit source kind in `.from(...)`.
-// then: the builder still accepts file, text, and existing dataset sources.
+// given: dataset also keeps the more ergonomic resource-specific methods.
+// when: callers omit the explicit resource kind in `.from(...)`.
+// then: the builder still accepts file, text, and existing dataset resources.
 dataset(runtime).from(
   { fileId: "file_1" },
   { text: "plain text", name: "input.txt" },
   { datasetId: "dataset_1" },
 )
 
-// given: query sources require a second domain and runtime compatibility check.
-// when: callers try to sneak a query source through structure-style `.from(...)`.
-// then: the public source union rejects it so query materialization must go
-// through `.fromQuery(sourceDomain, ...)`.
+// given: query resources require a second domain and runtime compatibility check.
+// when: callers try to sneak a query resource through structure-style `.from(...)`.
+// then: the public resource union rejects it so query materialization must go
+// through `.fromQuery(queryDomain, ...)`.
 dataset(runtime).from(
-  // @ts-expect-error query sources must use fromQuery(sourceDomain, source)
+  // @ts-expect-error query resources must use fromQuery(queryDomain, resource)
   { kind: "query", query: { any_entity: {} } },
 )

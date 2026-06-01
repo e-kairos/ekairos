@@ -1,5 +1,6 @@
 import { i } from "@instantdb/core"
 import { domain, type DomainSchemaResult } from "@ekairos/domain"
+import { eventsDomain } from "@ekairos/events"
 
 const entities = {
   dataset_datasets: i.entity({
@@ -10,8 +11,6 @@ const entities = {
     updatedAt: i.number().optional(),
     organizationId: i.string().optional().indexed(),
     title: i.string().optional(),
-    sources: i.json().optional(),
-    sourceKinds: i.json().optional(),
     instructions: i.string().optional(),
     analysis: i.json().optional(),
     schema: i.json().optional(),
@@ -34,20 +33,24 @@ const links = {
     forward: { on: "dataset_datasets", has: "one", label: "dataFile" },
     reverse: { on: "$files", has: "many", label: "datasets" },
   },
+  dataset_datasetsContext: {
+    forward: { on: "dataset_datasets", has: "one", label: "context" },
+    reverse: { on: "event_contexts", has: "many", label: "datasets" },
+  },
 } as const
 
 const rooms = {} as const
 
-export const datasetDomain: DomainSchemaResult<
+export const datasetDomain = domain("dataset").includes(eventsDomain).withSchema({
+  entities,
+  links,
+  rooms,
+}) as unknown as DomainSchemaResult<
   typeof entities,
   typeof links,
   typeof rooms,
   {},
   "dataset",
   "dataset"
-> = domain("dataset").withSchema({
-  entities,
-  links,
-  rooms,
-})
+>
 

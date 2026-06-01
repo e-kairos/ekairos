@@ -12,6 +12,64 @@ export type ContextIdentifier = { id: string; key?: never } | { key: string; id?
 
 export type { ContextStatus } from "./context.contract.js"
 
+export type ContextResourceBase = {
+  key: string
+  type: string
+  name: string
+  description: string
+  role?: string | null
+  metadata?: Record<string, unknown> | null
+}
+
+export type ContextFileResource = ContextResourceBase & {
+  type: "file"
+  fileId?: string
+  documentId?: string
+  url?: string
+  filename?: string
+  mediaType?: string
+  size?: number
+}
+
+export type ContextLinkResource = ContextResourceBase & {
+  type: "link"
+  url: string
+}
+
+export type ContextRepositoryResource = ContextResourceBase & {
+  type: "repository"
+  provider?: string
+  repository: string
+  ref?: string
+  paths?: string[]
+  commitSha?: string
+}
+
+export type ContextDatasetResource = ContextResourceBase & {
+  type: "dataset"
+  datasetId: string
+}
+
+export type ContextExternalResource = ContextResourceBase & {
+  type: "external"
+  uri?: string
+}
+
+export type ContextResource =
+  | ContextFileResource
+  | ContextLinkResource
+  | ContextRepositoryResource
+  | ContextDatasetResource
+  | ContextExternalResource
+  | (ContextResourceBase & Record<string, unknown>)
+
+export type StoredContextResource = ContextResource & {
+  id?: string
+  storageKey?: string
+  createdAt?: Date
+  updatedAt?: Date
+}
+
 export type StoredContext<Context> = {
   id: string
   key: string | null
@@ -20,6 +78,9 @@ export type StoredContext<Context> = {
   createdAt: Date
   updatedAt?: Date
   content: Context | null
+  description?: string | null
+  goal?: string | null
+  resources?: StoredContextResource[] | null
   reactor?: { kind: string; state?: Record<string, unknown> | null } | null
 }
 
@@ -58,6 +119,15 @@ export interface ContextStore {
   getOrCreateContext<C>(contextIdentifier: ContextIdentifier | null): Promise<StoredContext<C>>
   getContext<C>(contextIdentifier: ContextIdentifier): Promise<StoredContext<C> | null>
   updateContextContent<C>(contextIdentifier: ContextIdentifier, content: C): Promise<StoredContext<C>>
+  updateContextDefinition<C>(
+    contextIdentifier: ContextIdentifier,
+    definition: { description?: string | null; goal?: string | null },
+  ): Promise<StoredContext<C>>
+  upsertContextResources(
+    contextIdentifier: ContextIdentifier,
+    resources: ContextResource[],
+  ): Promise<StoredContextResource[]>
+  getContextResources(contextIdentifier: ContextIdentifier): Promise<StoredContextResource[]>
   updateContextReactor<C>(
     contextIdentifier: ContextIdentifier,
     reactor: { kind: string; state?: Record<string, unknown> | null },

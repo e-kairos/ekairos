@@ -14,7 +14,6 @@ import {
   runDatasetSandboxCommandStep,
 } from "../sandbox/steps"
 import { datasetDomain } from "../schema"
-import { attachMockInstantStreams } from "./_streams"
 
 const shouldRun = process.env.RUN_ESOLBAY_DATASET_REPRO === "1"
 const maybeDescribe = shouldRun ? describe : describe.skip
@@ -76,7 +75,6 @@ const adminDb = shouldRun
   : null
 
 if (adminDb) {
-  attachMockInstantStreams(adminDb)
   configureRuntime({
     domain: { domain: appDomain },
     runtime: async () => ({ db: adminDb } as any),

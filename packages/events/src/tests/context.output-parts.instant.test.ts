@@ -246,7 +246,6 @@ describeInstant("context output parts + Instant runtime", () => {
       context: { key: contextKey },
       durable: false,
       options: {
-        silent: true,
         maxIterations: 2,
         maxModelSteps: 1,
       },
@@ -381,7 +380,6 @@ describeInstant("context output parts + Instant runtime", () => {
       context: { key: contextKey },
       durable: false,
       options: {
-        silent: true,
         maxIterations: 2,
         maxModelSteps: 1,
       },

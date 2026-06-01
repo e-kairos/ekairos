@@ -18,7 +18,6 @@ import { DatasetService } from "../service"
 import { buildDatasetSkillPackage } from "../skill"
 import { createRealCodexCommandReactor, setupRealCodexRunner, type RealCodexRunner } from "./codex.real"
 import { createTestApp, destroyTestApp } from "../../../ekairos-test/src/provision.ts"
-import { attachMockInstantStreams } from "./_streams"
 
 const fileDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(fileDir, "..", "..", "..", "..")
@@ -32,9 +31,9 @@ const TRACE_REPORT = process.env.EKAIROS_DATASET_CODEX_TRACE_REPORT === "1"
 const benchmarkEntries: Array<Record<string, unknown>> = []
 
 function benchmarkLog(stage: string, data: Record<string, unknown>) {
-  benchmarkEntries.push({ source: "dataset.skill", stage, ...data })
+  benchmarkEntries.push({ origin: "dataset.skill", stage, ...data })
   if (!BENCHMARK_TIMINGS) return
-  console.log(`[dataset-codex-benchmark] ${JSON.stringify({ source: "dataset.skill", stage, ...data })}`)
+  console.log(`[dataset-codex-benchmark] ${JSON.stringify({ origin: "dataset.skill", stage, ...data })}`)
 }
 
 async function benchmarkAsync<T>(stage: string, run: () => Promise<T>): Promise<T> {
@@ -364,7 +363,6 @@ describe("dataset skill + codex real", () => {
         adminToken: app.adminToken,
         schema: appDomain.toInstantSchema(),
       } as any)
-      attachMockInstantStreams(db as any)
 
       configureRuntime({
         runtime: async () => ({ db } as any),
@@ -441,7 +439,7 @@ describe("dataset skill + codex real", () => {
         env,
         context: { key: `dataset-skill:${Date.now()}:${Math.random().toString(36).slice(2)}` },
         durable: false,
-        options: { maxIterations: 1, maxModelSteps: 1, silent: true },
+        options: { maxIterations: 1, maxModelSteps: 1 },
       })
       return await shell.run!
     })
@@ -530,31 +528,31 @@ describe("dataset skill + codex real", () => {
   )
 
   realIt(
-    "multi-source -> transform -> dataset final",
+    "multi-resource -> transform -> dataset final",
     { timeout: TEST_TIMEOUT_MS },
     async () => {
       await writeManifest("multi")
       const repoPath = await createRepo("multi")
 
-      const sourceDatasetId = "codex_skill_source_v1"
+      const resourceDatasetId = "codex_skill_resource_v1"
       const service = new DatasetService(db as any)
-      const sourceJsonl = [
+      const resourceJsonl = [
         JSON.stringify({ type: "row", data: { name: "Widget", price: 10, currency: "USD" } }),
         JSON.stringify({ type: "row", data: { name: "Gadget", price: 20, currency: "EUR" } }),
       ].join("\n") + "\n"
-      await benchmarkAsync("multi.seedSourceDataset", async () => {
+      await benchmarkAsync("multi.seedResourceDataset", async () => {
         await service.createDataset({
-          id: sourceDatasetId,
-          title: "Source dataset",
+          id: resourceDatasetId,
+          title: "Resource dataset",
           status: "completed",
           organizationId: "test-org",
         })
         await service.uploadDatasetOutputFile({
-          datasetId: sourceDatasetId,
-          fileBuffer: Buffer.from(sourceJsonl, "utf8"),
+          datasetId: resourceDatasetId,
+          fileBuffer: Buffer.from(resourceJsonl, "utf8"),
         })
         await service.updateDatasetStatus({
-          datasetId: sourceDatasetId,
+          datasetId: resourceDatasetId,
           status: "completed",
           calculatedTotalRows: 2,
           actualGeneratedRowCount: 2,
@@ -572,7 +570,7 @@ describe("dataset skill + codex real", () => {
         repoPath,
         benchmarkLabel: "multi",
         prompt: [
-          `Create and persist a dataset with id codex_skill_multi_v1 by joining source dataset ${sourceDatasetId} with sample_fx_rates.`,
+          `Create and persist a dataset with id codex_skill_multi_v1 by joining resource dataset ${resourceDatasetId} with sample_fx_rates.`,
           "Output rows must contain name and priceUsd.",
         ].join(" "),
       })

@@ -11,6 +11,9 @@ export const eventsDomain = domain("events")
                 name: i.string().optional(),
                 status: i.string().optional().indexed(), // open_idle | open_streaming | closed
                 content: i.any().optional(),
+                description: i.string().optional(),
+                goal: i.string().optional(),
+                resources: i.any().optional(),
                 reactor: i.json().optional(),
             }),
             event_items: i.entity({

@@ -70,7 +70,7 @@ function readPositiveIntEnv(name: string, fallback: number): number {
 
 function benchmarkLog(label: string, data: Record<string, unknown>) {
   if (!BENCHMARK_TIMINGS) return
-  console.log(`[dataset-codex-benchmark] ${JSON.stringify({ source: "codex.real", stage: label, ...data })}`)
+  console.log(`[dataset-codex-benchmark] ${JSON.stringify({ origin: "codex.real", stage: label, ...data })}`)
 }
 
 function inferTurnLabel(instruction: string): string {
@@ -224,9 +224,9 @@ export async function setupRealCodexRunner(params?: {
   mkdirSync(join(codexHome, "skills"), { recursive: true })
   writeTempCodexConfig(codexHome)
   for (const fileName of ["auth.json", ".credentials.json"]) {
-    const source = join(currentCodexHome, fileName)
-    if (!existsSync(source)) continue
-    copyFileSync(source, join(codexHome, fileName))
+    const inputPath = join(currentCodexHome, fileName)
+    if (!existsSync(inputPath)) continue
+    copyFileSync(inputPath, join(codexHome, fileName))
   }
 
   const installSkills = (skills: ContextSkillPackage[] | undefined) => {
