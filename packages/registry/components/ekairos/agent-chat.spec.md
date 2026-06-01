@@ -76,3 +76,4 @@ Context chat components do not expose provider-specific auth, IPC, or reactor co
 - The shared UI reads and renders agnostic events, steps, parts, actions, attachments, and status only.
 - Provider login, model/runtime selection, sandbox controls, and raw reactor wiring stay outside the component surface unless an explicit debug/workshop adapter owns them.
 - Scripted product workbenches should not keep provider-specific bridge objects in the browser global surface just because an older reactor path used them.
+- Scripted product packages should not ship unused provider binaries, bridge helpers, or IPC clients; keeping those artifacts around makes the active runtime ambiguous.
