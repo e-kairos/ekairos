@@ -22,9 +22,11 @@ The registry prompt composer is the shared baseline for context agents.
 Message artifacts can queue virtual prompt context without coupling the message renderer to storage.
 
 - Artifact renderers emit a typed payload through the prompt bridge.
+- Message-owned previews use `MessageArtifact` as the adapter-owned visual shell.
 - `PromptBar` renders that payload as a removable attachment chip.
 - On submit, the queued payload is sent as a standard `file` part with domain-specific metadata, alongside any text part.
 - Product adapters may choose the payload shape, but the event part remains agnostic.
+- Artifact actions must be user-initiated; generated attachments still enter events as standard file parts.
 
 ## Review Transcript
 

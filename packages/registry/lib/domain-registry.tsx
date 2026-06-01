@@ -291,6 +291,21 @@ export function TenderAgent({ db, contextKey }) {
       group: "Renderers",
     },
     {
+      id: "message-artifact",
+      label: "MessageArtifact",
+      description:
+        "Agnostic artifact shell for message-owned previews, diagrams, generated files, and prompt-bridge attachments.",
+      href: "/events/components#message-artifact",
+      registryName: "message-artifact",
+      registryPath: "/r/message-artifact.json",
+      target: "components/ekairos/events/context-agent/ui/message-artifact.tsx",
+      dependency: "@ekairos/events@beta",
+      packageImport: "@ekairos/events/react",
+      status: "source",
+      kind: "component",
+      group: "Renderers",
+    },
+    {
       id: "temporal-evidence-list",
       label: "TemporalEvidenceList",
       description:
