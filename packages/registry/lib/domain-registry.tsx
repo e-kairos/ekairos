@@ -96,7 +96,7 @@ export const eventsDomainEntry: DomainRegistryEntry = {
   heroLabel: "Context runtime",
   heroTitle: "The interaction layer for AI workflows.",
   heroBody:
-    "Events owns the durable conversation and execution trail. UI components render that surface, while the package keeps context state, model reactions, tools, and replay out of the registry.",
+    "Events owns the durable conversation and execution trail. UI components render that surface, while the package keeps context state, model reactions, domain actions, and replay out of the registry.",
   schemaEntities: [
     {
       name: "event_contexts",
@@ -104,7 +104,7 @@ export const eventsDomainEntry: DomainRegistryEntry = {
     },
     {
       name: "event_items",
-      description: "Stored user, assistant, and tool items that make up the turn history.",
+      description: "Stored user and assistant items that make up the turn history.",
     },
     {
       name: "event_executions",
@@ -116,7 +116,7 @@ export const eventsDomainEntry: DomainRegistryEntry = {
     },
     {
       name: "event_parts",
-      description: "Canonical output and replay surface for text, tools, data, and streamed chunks.",
+      description: "Canonical output and replay surface for text, actions, data, and streamed chunks.",
     },
   ],
   actions: [
@@ -126,11 +126,11 @@ export const eventsDomainEntry: DomainRegistryEntry = {
     },
     {
       name: "defineAction",
-      description: "Declares typed domain tools that a context reaction can call.",
+      description: "Declares typed domain actions that a context reaction can call.",
     },
     {
       name: "createAiSdkReactor",
-      description: "Adapts AI SDK model/tool output into canonical event items and parts.",
+      description: "Adapts AI SDK model action-call output into canonical event items and parts.",
     },
     {
       name: "runContextReactionDirect",
@@ -189,7 +189,7 @@ export function TenderAgent({ db, contextKey }) {
       id: "context-agent",
       label: "ContextAgent",
       description:
-        "Full app-facing agent shell that composes context state, message rendering, prompt input, history, and tool components.",
+        "Full app-facing agent shell that composes context state, message rendering, prompt input, history, and action components.",
       href: "/events/components#context-agent",
       registryName: "context-agent",
       registryPath: "/r/context-agent.json",
@@ -234,7 +234,7 @@ export function TenderAgent({ db, contextKey }) {
       id: "context-step-list",
       label: "ContextStepList",
       description:
-        "Step list for rendered context turns, including tool parts, reasoning visibility, and domain action output.",
+        "Step list for rendered context turns, including action parts, reasoning visibility, and domain action output.",
       href: "/events/components#context-step-list",
       registryName: "context-step-list",
       registryPath: "/r/context-step-list.json",
@@ -264,7 +264,7 @@ export function TenderAgent({ db, contextKey }) {
       id: "message-list",
       label: "MessageList",
       description:
-        "Message renderer that maps context events and event steps into conversational output and tool renderers.",
+        "Message renderer that maps context events and event steps into conversational output and action renderers.",
       href: "/events/components#message-list",
       registryName: "message-list",
       registryPath: "/r/message-list.json",
@@ -279,7 +279,7 @@ export function TenderAgent({ db, contextKey }) {
       id: "message-parts",
       label: "MessageParts",
       description:
-        "Part-level renderer for text, reasoning, sources, structured action output, attachments, and custom tool components.",
+        "Part-level renderer for text, reasoning, sources, structured action output, attachments, and custom action components.",
       href: "/events/components#message-parts",
       registryName: "message-parts",
       registryPath: "/r/message-parts.json",
@@ -294,7 +294,7 @@ export function TenderAgent({ db, contextKey }) {
       id: "event-steps",
       label: "EventSteps",
       description:
-        "Operational renderer for persisted event_steps, replay state, current event payload, and step-specific tool views.",
+        "Operational renderer for persisted event_steps, replay state, current event payload, and step-specific action views.",
       href: "/events/components#event-steps",
       registryName: "ekairos-events-event-steps",
       registryPath: "/r/ekairos-events-event-steps.json",
@@ -622,7 +622,7 @@ export const datasetDomainEntry: DomainRegistryEntry = {
     },
     {
       name: "materializeDataset",
-      description: "Tool-level wrapper for agents that need to produce datasets.",
+      description: "Action-level wrapper for agents that need to produce datasets.",
     },
   ],
   usageTitle: "Materialize a domain query into rows.",
