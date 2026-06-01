@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, type ReactNode } from "react";
 import {
   INPUT_TEXT_ITEM_TYPE,
   type ContextEventForUI,
@@ -16,6 +16,7 @@ import {
 } from "../context-event-parts";
 
 export type ContextReviewTranscriptProps = {
+  actions?: ReactNode;
   className?: string;
   context: Pick<ContextValue, "contextStatus" | "events" | "sendStatus">;
   density?: "default" | "compact";
@@ -50,6 +51,7 @@ type ReviewAnalysisPayload = {
 };
 
 export function ContextReviewTranscript({
+  actions,
   className,
   context,
   density = "default",
@@ -117,6 +119,7 @@ export function ContextReviewTranscript({
             <span>{context.sendStatus}</span>
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
+            {actions}
             <button
               className="min-h-7 rounded-sm border border-border bg-background px-2 font-mono text-[10px] text-muted-foreground hover:border-accent hover:text-accent disabled:opacity-50"
               data-testid="copy-context-review-markdown"
