@@ -352,7 +352,7 @@ function normalizeActionPart(part: Record<string, unknown>) {
   ];
 }
 
-function normalizeLegacyToolPart(part: Record<string, unknown>) {
+function normalizeProviderActionPart(part: Record<string, unknown>) {
   const type = asText(part.type);
   if (!type.startsWith("tool-")) return [];
 
@@ -399,10 +399,10 @@ function normalizeLegacyToolPart(part: Record<string, unknown>) {
   return parts;
 }
 
-function normalizeLegacyToolCallPart(part: Record<string, unknown>) {
-  const toolName = asText(part.toolName);
-  const toolCallId = asText(part.toolCallId);
-  if (!toolName || !toolCallId) return [];
+function normalizeProviderActionCallPart(part: Record<string, unknown>) {
+  const providerActionName = asText(part.toolName);
+  const providerActionCallId = asText(part.toolCallId);
+  if (!providerActionName || !providerActionCallId) return [];
 
   const content = normalizeBlocks(part.content);
   return [
@@ -410,18 +410,18 @@ function normalizeLegacyToolCallPart(part: Record<string, unknown>) {
       type: "action",
       content: {
         status: "started",
-        actionName: toolName,
-        actionCallId: toolCallId,
+        actionName: providerActionName,
+        actionCallId: providerActionCallId,
         input: blocksToValue(content),
       },
     },
   ];
 }
 
-function normalizeLegacyToolResultPart(part: Record<string, unknown>) {
-  const toolName = asText(part.toolName);
-  const toolCallId = asText(part.toolCallId);
-  if (!toolName || !toolCallId) return [];
+function normalizeProviderActionResultPart(part: Record<string, unknown>) {
+  const providerActionName = asText(part.toolName);
+  const providerActionCallId = asText(part.toolCallId);
+  if (!providerActionName || !providerActionCallId) return [];
 
   const content = normalizeBlocks(part.content);
   const state = asText(part.state).toLowerCase();
@@ -433,8 +433,8 @@ function normalizeLegacyToolResultPart(part: Record<string, unknown>) {
           type: "action",
           content: {
             status: "failed",
-            actionName: toolName,
-            actionCallId: toolCallId,
+            actionName: providerActionName,
+            actionCallId: providerActionCallId,
             error: {
               message: blocksToErrorText(content) || "Action failed.",
             },
@@ -444,8 +444,8 @@ function normalizeLegacyToolResultPart(part: Record<string, unknown>) {
           type: "action",
           content: {
             status: "completed",
-            actionName: toolName,
-            actionCallId: toolCallId,
+            actionName: providerActionName,
+            actionCallId: providerActionCallId,
             output: blocksToValue(content),
           },
         },
@@ -492,15 +492,15 @@ function normalizePart(part: unknown): Record<string, unknown>[] {
   }
 
   if (record.type === "tool-call") {
-    return normalizeLegacyToolCallPart(record);
+    return normalizeProviderActionCallPart(record);
   }
 
   if (record.type === "tool-result") {
-    return normalizeLegacyToolResultPart(record);
+    return normalizeProviderActionResultPart(record);
   }
 
   if (record.type.startsWith("tool-")) {
-    return normalizeLegacyToolPart(record);
+    return normalizeProviderActionPart(record);
   }
 
   if (record.type.startsWith("data-")) {
