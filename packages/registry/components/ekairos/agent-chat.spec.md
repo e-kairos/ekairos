@@ -16,6 +16,7 @@ The registry prompt composer is the shared baseline for context agents.
 - The composer uses an autosizing textarea, not a single-line input.
 - The toolbar owns attach, web search, reasoning, status, send, and stop controls.
 - File, pasted large-text, and virtual-context attachments render as removable chips above the textarea.
+- Attachment chips expose `data-prompt-attachment`, `data-attachment-kind`, `data-attachment-status`, `data-attachment-name`, `data-attachment-media-type`, `data-attachment-size`, `data-attachment-has-file-part`, `data-attachment-has-return-action`, `data-prompt-attachment-main`, and `data-prompt-attachment-remove` so products can verify queued prompt context without reading provider payloads.
 - Sending is valid when there is text or at least one ready non-text part.
 - The rendered prompt surface exposes `data-prompt-surface`, `data-prompt-status`, `data-prompt-status-label`, `data-prompt-busy`, `data-prompt-density`, and `data-prompt-attachment-count` so Workshop and product smoke tests can inspect composer state without product-specific selectors.
 - The visible prompt status label is a polite live status region (`role="status"`, `aria-live="polite"`), so send/upload/stream changes are accessible without raw event debug.

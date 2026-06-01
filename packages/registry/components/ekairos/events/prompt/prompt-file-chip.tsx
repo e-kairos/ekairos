@@ -52,6 +52,8 @@ function FileNameTooltip({ name }: { name: string }) {
 export function PromptFileChip({ file, onRemove }: { file: PromptAttachment; onRemove?: (id: string) => void }) {
   const isArtifactContext = file.kind === "artifact-context"
   const interactive = typeof file.onPress === "function"
+  const attachmentKind = file.kind ?? "file"
+  const mediaType = file.type || file.artifactPayload?.mediaType || ""
 
   const mainClass = cn(
     "inline-flex min-w-0 max-w-full items-center gap-2 px-2.5 py-1.5 text-left",
@@ -75,6 +77,14 @@ export function PromptFileChip({ file, onRemove }: { file: PromptAttachment; onR
 
   return (
     <div
+      data-attachment-has-file-part={file.url || file.artifactPayload ? "true" : "false"}
+      data-attachment-has-return-action={interactive ? "true" : "false"}
+      data-attachment-kind={attachmentKind}
+      data-attachment-media-type={mediaType || undefined}
+      data-attachment-name={file.name}
+      data-attachment-size={file.size || undefined}
+      data-attachment-status={file.status}
+      data-prompt-attachment
       className={cn(
         "mr-2 inline-flex max-w-full items-center gap-0 rounded-xl border text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.05)]",
         isArtifactContext
@@ -86,18 +96,20 @@ export function PromptFileChip({ file, onRemove }: { file: PromptAttachment; onR
         <button
           type="button"
           className={mainClass}
+          data-prompt-attachment-main
           onClick={() => file.onPress?.()}
           aria-label={`${file.name} — ver en el hilo`}
         >
           {mainBody}
         </button>
       ) : (
-        <div className={mainClass}>{mainBody}</div>
+        <div className={mainClass} data-prompt-attachment-main>{mainBody}</div>
       )}
       {onRemove ? (
         <button
           type="button"
           className="rounded-r-xl px-1.5 py-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+          data-prompt-attachment-remove
           onClick={(e) => {
             e.stopPropagation()
             onRemove(file.id)
