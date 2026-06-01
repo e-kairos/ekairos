@@ -20,6 +20,7 @@ The registry prompt composer is the shared baseline for context agents.
 - Sending is valid when there is text or at least one ready non-text part.
 - The rendered prompt surface exposes `data-prompt-surface`, `data-prompt-status`, `data-prompt-status-label`, `data-prompt-busy`, `data-prompt-density`, and `data-prompt-attachment-count` so Workshop and product smoke tests can inspect composer state without product-specific selectors.
 - `ContextAgent` root `data-context-prompt-density` must match the rendered prompt `data-prompt-density`.
+- The persistent composer wrapper exposes `data-agent-prompt-shell` and `data-prompt-density` so products can locate the prompt rail without binding to layout classes.
 - The visible prompt status label is a polite live status region (`role="status"`, `aria-live="polite"`), so send/upload/stream changes are accessible without raw event debug.
 - Clicking non-interactive space inside the prompt surface focuses the textarea; interactive controls and attachment chips keep their own click behavior.
 - Consumers may adapt storage, upload, or virtual attachment adapters, but the rendered event part contract stays agnostic: text parts and file parts are passed to `context.append(...)`.
