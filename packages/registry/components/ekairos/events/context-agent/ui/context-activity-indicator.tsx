@@ -308,6 +308,8 @@ export function ContextActivityIndicator({
 
   if (!displayActivity) return null;
 
+  const activityPhase =
+    displayActivity.phase ?? (displayActivity.tone === "error" ? "error" : "live");
   const toneClassName =
     displayActivity.tone === "error"
       ? "text-destructive"
@@ -322,6 +324,15 @@ export function ContextActivityIndicator({
         density === "compact" && "max-w-none",
         isFadingOut && "-translate-x-3 opacity-0",
       )}
+      data-activity-animated={displayActivity.animated === false ? "false" : "true"}
+      data-activity-density={density}
+      data-activity-fading={isFadingOut ? "true" : "false"}
+      data-activity-label={displayActivity.label}
+      data-activity-pattern={displayActivity.pattern}
+      data-activity-phase={activityPhase}
+      data-activity-title={displayActivity.title || undefined}
+      data-activity-tone={displayActivity.tone ?? "neutral"}
+      data-context-activity
     >
       <TooltipProvider delayDuration={260}>
         <Tooltip>

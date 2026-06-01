@@ -6,6 +6,7 @@ The context agent prompt owns live activity presentation.
 - `ContextAgent` should not render a second standalone activity indicator in the conversation rail.
 - Consumers can still import `ContextActivityIndicator` for explicit custom layouts, but the registry default chat UI keeps status attached to the input surface.
 - `getContextActivityState({ context, isUploading })` owns upload, send, stream, reasoning, action, terminal, and idle activity derivation; product adapters should pass upload state instead of inventing a second status label.
+- `ContextActivityIndicator` exposes `data-context-activity`, `data-activity-phase`, `data-activity-label`, `data-activity-title`, `data-activity-tone`, `data-activity-pattern`, `data-activity-density`, `data-activity-animated`, and `data-activity-fading` for workbench and product smoke assertions.
 - The default live states are: `Enviando`, `Iniciando`, `Preparando`, `Pensando`, `Respondiendo`, `Trabajando`, `Finalizando`, `Listo`, and `Error`.
 
 ## Prompt Composer Contract
