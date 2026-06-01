@@ -41,26 +41,10 @@ Message artifacts can queue virtual prompt context without coupling the message 
 - Product adapters may choose the payload shape, but the event part remains agnostic.
 - Artifact actions must be user-initiated; generated attachments still enter events as standard file parts.
 
-## Review Transcript
+## Temporal Evidence
 
-Workbench and product review surfaces can render an agnostic turn transcript before dropping into raw debug.
+Product review surfaces can expose time-coded cues without adding a separate transcript layer.
 
-- `ContextReviewTranscript` accepts a `ContextValue`-like object and derives input/output turns from events, steps, and parts.
-- The transcript renders user input, assistant output, action counts, action errors, file/artifact attachments, and structured JSON answer summaries when available.
-- The transcript exposes copy/download Markdown review actions and `buildContextReviewMarkdown(...)` for adapter-controlled export flows.
-- The transcript root exposes `data-context-review-transcript`, `data-review-event-count`, `data-review-turn-count`, `data-review-status`, `data-review-send-status`, `data-review-max-turns`, `data-review-link-count`, and `data-review-markdown-ready`.
-- Review turn cards expose `data-review-turn`, `data-review-turn-id`, `data-review-turn-status`, `data-action-count`, `data-action-error-count`, `data-attachment-count`, and `data-has-analysis`.
-- Review message panels expose `data-review-message`, `data-kind`, `data-text-length`, `data-attachment-count`, `data-has-action-errors`, and `data-has-analysis`.
-- Structured analysis summaries expose `data-review-analysis`, `data-analysis-comment-count`, `data-analysis-evidence-count`, `data-analysis-control-count`, `data-analysis-snapshot-count`, `data-analysis-cue-count`, and `data-analysis-has-imagegen`; linked evidence/snapshot cues expose `data-review-cue-list`, `data-review-cue`, `data-cue-kind`, `data-cue-index`, and `data-cue-time`.
-- Markdown buttons expose `data-review-action="copy-markdown"` / `data-review-action="download-markdown"`; copy also exposes `data-review-copy-state`.
-- Review transcript defaults to the latest six turns and renders text through Markdown with HTML skipped, so workbench `.md` review and in-app transcript stay aligned.
-- Markdown export titles and download filenames stay generic (`Ekairos Context Review`, `context-review.md`); product identity belongs in `reviewLinks`, attachments, and adapter-owned surrounding chrome.
-- Consumers may pass `reviewLinks` so copied/downloaded Markdown preserves product or Workshop review URLs needed to reproduce a run.
-- Consumers may pass `actions` for explicit inspect/debug controls such as toggling message metadata; those controls must be user-initiated.
-- Consumers may pass `resolveCueHref` to make evidence or snapshot cues navigable; the component must treat href generation as adapter-owned.
-- The component preserves the event contract: files remain files, actions remain actions, and product-specific payloads only affect optional display summaries.
-- Raw ids, step payloads, and part trees stay in Workshop/debug surfaces; the transcript is a review layer, not a replacement for event inspection.
-- Use `density="compact"` when the transcript lives inside a product rail or workbench side panel; keep the default density for full-width Workshop review.
 - `TemporalEvidenceList` renders source-agnostic timed cues with optional `href`; products decide whether a cue opens a replay timestamp, document source, trace row, or workbench panel.
 - `TemporalEvidenceList` exposes `data-temporal-evidence-list`, `data-evidence-count`, `data-visible-evidence-count`, `data-max-items`, and per-cue `data-temporal-evidence-cue`, `data-cue-kind`, `data-cue-time`, and `data-cue-selected` attributes.
 - `TemporalEvidenceList` may render cues as links or adapter-owned selection buttons through `onSelectItem`; selected state is keyed by the adapter, not by event internals.
