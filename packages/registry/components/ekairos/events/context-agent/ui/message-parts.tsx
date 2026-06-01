@@ -187,6 +187,16 @@ function summarizeActionPart(view: ActionView): string {
   return "";
 }
 
+function actionStateStatus(state: string): "started" | "completed" | "failed" {
+  if (state === "output-error") {
+    return "failed";
+  }
+  if (state === "output-available") {
+    return "completed";
+  }
+  return "started";
+}
+
 function formatCount(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
@@ -372,6 +382,14 @@ const MessageParts = memo(function MessageParts({
         className={cn(
           isStepSurface && "mb-0 border-border/70 bg-background"
         )}
+        data-action-call-id={actionCallId}
+        data-action-name={actionName}
+        data-action-state={state}
+        data-action-status={actionStateStatus(state)}
+        data-context-action
+        data-has-error={errorText ? "true" : "false"}
+        data-has-input={input !== undefined ? "true" : "false"}
+        data-has-output={output !== undefined ? "true" : "false"}
       >
         <ActionHeader
           type={actionName as any}
