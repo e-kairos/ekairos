@@ -25,6 +25,7 @@ type MessageListProps = {
   actionComponents: Record<string, any>;
   classNames?: AgentClassNames;
   showReasoning: boolean;
+  showMessageMetadata?: boolean;
   renderMessageActions?: (params: {
     message: any;
     status: "streaming" | "ready";
@@ -37,6 +38,7 @@ const MessageList = memo(function MessageList({
   actionComponents,
   classNames,
   showReasoning,
+  showMessageMetadata = false,
   renderMessageActions,
 }: MessageListProps) {
   const { events, contextStatus, sendStatus } = context;
@@ -112,7 +114,7 @@ const MessageList = memo(function MessageList({
             key={String(message?.id)}
             className={classNames?.message?.container}
           >
-            <MessageHeader message={message} />
+            <MessageHeader message={message} showMetadata={showMessageMetadata} />
             {!hasSteps ? (
               <MessageParts
                 message={message}
@@ -143,7 +145,13 @@ const MessageList = memo(function MessageList({
 
 export { MessageList };
 
-function MessageHeader({ message }: { message: any }) {
+function MessageHeader({
+  message,
+  showMetadata,
+}: {
+  message: any;
+  showMetadata: boolean;
+}) {
   const metadata = message?.metadata ?? {};
   const chips = [
     { label: "event", value: shortIdentifier(metadata.eventId) },
@@ -156,7 +164,7 @@ function MessageHeader({ message }: { message: any }) {
       <div className="text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">
         {message?.role === "user" ? "User" : "Assistant"}
       </div>
-      {chips.length > 0 ? (
+      {showMetadata && chips.length > 0 ? (
         <div
           aria-label="Event metadata"
           className="flex min-w-0 flex-wrap justify-end gap-1"

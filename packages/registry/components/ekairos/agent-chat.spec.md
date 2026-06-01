@@ -50,7 +50,7 @@ Product workbenches can show live source monitoring without baking polling rules
 
 The default chat thread is user-facing; raw event metadata belongs in Workshop and explicit debug surfaces.
 
-- Message lists should not render `event`, `status`, or `channel` chips by default.
+- Message lists should not render `event`, `status`, or `channel` chips by default; consumers must opt in with `showMessageMetadata` for explicit inspect/debug layouts.
 - Step lists should not render raw `event_step`, iteration, or execution labels by default.
 - Event ids, context ids, part payloads, and execution details stay available to adapters and Workshop.
 - Product UIs may provide an explicit inspect/open-workshop action, but the message content should remain the primary visual signal.
