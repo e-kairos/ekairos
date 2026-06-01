@@ -67,3 +67,12 @@ The default chat thread is user-facing; raw event metadata belongs in Workshop a
 - Step lists should not render raw `event_step`, iteration, or execution labels by default.
 - Event ids, context ids, part payloads, and execution details stay available to adapters and Workshop.
 - Product UIs may provide an explicit inspect/open-workshop action, but the message content should remain the primary visual signal.
+
+## Runtime Surface Boundary
+
+Context chat components do not expose provider-specific auth, IPC, or reactor controls.
+
+- Product shells pass context API URLs, request preparation, attachments, and action renderers into the shared chat UI.
+- The shared UI reads and renders agnostic events, steps, parts, actions, attachments, and status only.
+- Provider login, model/runtime selection, sandbox controls, and raw reactor wiring stay outside the component surface unless an explicit debug/workshop adapter owns them.
+- Scripted product workbenches should not keep provider-specific bridge objects in the browser global surface just because an older reactor path used them.
