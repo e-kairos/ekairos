@@ -3,7 +3,7 @@ export type { AgentProps as ContextAgentProps } from "./types";
 export { ContextHistory } from "./ui/context-history";
 export { ContextNewButton } from "./ui/context-new-button";
 export { ContextReviewTranscript } from "./ui/context-review-transcript";
-export type { ContextReviewTranscriptProps } from "./ui/context-review-transcript";
+export type { ContextReviewTranscriptProps, ReviewLink } from "./ui/context-review-transcript";
 export { SourceWatchStatus } from "./ui/source-watch-status";
 export type {
   SourceWatchPhase,

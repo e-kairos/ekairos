@@ -22,10 +22,16 @@ export type ContextReviewTranscriptProps = {
   density?: "default" | "compact";
   maxTurns?: number;
   onSelectTurn?: (eventId: string) => void;
+  reviewLinks?: ReviewLink[];
   resolveCueHref?: (
     item: unknown,
     kind: "evidence" | "snapshot"
   ) => string | null | undefined;
+};
+
+export type ReviewLink = {
+  href: string;
+  label: string;
 };
 
 type ReviewTurn = {
@@ -61,12 +67,13 @@ export function ContextReviewTranscript({
   density = "default",
   maxTurns = 6,
   onSelectTurn,
+  reviewLinks,
   resolveCueHref,
 }: ContextReviewTranscriptProps) {
   const turns = buildReviewTurns(context.events).slice(-maxTurns);
   const reviewMarkdown = useMemo(
-    () => buildContextReviewMarkdown(context, maxTurns),
-    [context, maxTurns],
+    () => buildContextReviewMarkdown(context, maxTurns, { reviewLinks }),
+    [context, maxTurns, reviewLinks],
   );
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
@@ -180,8 +187,10 @@ export function ContextReviewTranscript({
 export function buildContextReviewMarkdown(
   context: Pick<ContextValue, "contextStatus" | "events" | "sendStatus">,
   maxTurns = 6,
+  options: { reviewLinks?: ReviewLink[] } = {},
 ): string {
   const turns = buildReviewTurns(context.events).slice(-maxTurns);
+  const reviewLinks = normalizeReviewLinks(options.reviewLinks);
   const lines = [
     "# Ekairos Context Review",
     "",
@@ -191,6 +200,14 @@ export function buildContextReviewMarkdown(
     `- Turns: ${turns.length}`,
     "",
   ];
+
+  if (reviewLinks.length) {
+    lines.push("Links:", "");
+    for (const link of reviewLinks) {
+      lines.push(`- [${escapeMarkdownLinkText(link.label)}](${link.href})`);
+    }
+    lines.push("");
+  }
 
   if (!turns.length) {
     lines.push("No execution transcript yet.");
@@ -257,6 +274,19 @@ export function buildContextReviewMarkdown(
   }
 
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
+
+function normalizeReviewLinks(links: ReviewLink[] | undefined): ReviewLink[] {
+  return (links ?? [])
+    .map((link) => ({
+      href: String(link.href ?? "").trim(),
+      label: String(link.label ?? "").trim(),
+    }))
+    .filter((link) => link.href.length > 0 && link.label.length > 0);
+}
+
+function escapeMarkdownLinkText(value: string): string {
+  return value.replace(/[[\]]/g, "\\$&");
 }
 
 function ReviewTurnCard({

@@ -14,6 +14,7 @@ export type {
   ContextHistoryItem,
   ContextReviewTranscriptProps,
   MessageArtifactProps,
+  ReviewLink,
   SourceWatchPhase,
   SourceWatchStatusLabels,
   SourceWatchStatusProps,
