@@ -45,8 +45,12 @@ export function humanizeActionName(actionName: string): string {
     linkBidItem: "Vincular ítem con lo solicitado",
     createPricingRule: "Crear regla de precio",
     removePricingRule: "Eliminar regla de precio",
+    read_dataset_rows: "Read dataset rows",
+    sandbox_run_command: "Run command",
+    turnMetadata: "Turn metadata",
 
     // Control / escalation
+    createMessage: "Mensaje",
     requestDirection: "Escalar a soporte interno",
     end: "Finalizar",
 
@@ -117,6 +121,23 @@ function summarizeActionPart(view: ActionView): string {
     const msg =
       typeof outputRecord.message === "string" ? outputRecord.message : "";
 
+    if (actionName === "read_dataset_rows" && Array.isArray(outputRecord.rows)) {
+      return formatCount(outputRecord.rows.length, "row");
+    }
+
+    if (actionName === "sandbox_run_command") {
+      const status = typeof outputRecord.status === "string" ? outputRecord.status : "";
+      const exitCode =
+        typeof outputRecord.exitCode === "number"
+          ? `exit ${outputRecord.exitCode}`
+          : "";
+      return [status, exitCode].filter(Boolean).join(" / ") || "Command output";
+    }
+
+    if (actionName === "turnMetadata") {
+      return "Turn metadata";
+    }
+
     if (actionName === "createBid") {
       const bidId =
         typeof outputRecord.bidId === "string" ? outputRecord.bidId : "";
@@ -147,6 +168,15 @@ function summarizeActionPart(view: ActionView): string {
       return "Ítems agregados";
     }
 
+    if (typeof outputRecord.rowCount === "number") {
+      return formatCount(outputRecord.rowCount, "row");
+    }
+    if (Array.isArray(outputRecord.rows)) {
+      return formatCount(outputRecord.rows.length, "row");
+    }
+    if (Array.isArray(outputRecord.datasets)) {
+      return formatCount(outputRecord.datasets.length, "dataset");
+    }
     if (success === true && msg) return msg;
     if (success === false && msg) return msg;
   }
@@ -155,6 +185,10 @@ function summarizeActionPart(view: ActionView): string {
   if (state === "input-available") return "Ejecutando…";
   if (state === "input-streaming") return "Pendiente…";
   return "";
+}
+
+function formatCount(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
 const MessageParts = memo(function MessageParts({
