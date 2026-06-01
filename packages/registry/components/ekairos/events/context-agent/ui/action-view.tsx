@@ -105,14 +105,27 @@ export type ActionInputProps = ComponentProps<"div"> & {
   input: unknown;
 };
 
-export const ActionInput = ({ className, input, ...props }: ActionInputProps) => (
-  <div className={cn("space-y-2 overflow-hidden p-3", className)} {...props}>
-    <h4 className="text-xs font-medium uppercase text-muted-foreground">
-      Detalles tecnicos (parametros)
-    </h4>
-    <VisualJsonValue value={input} height={220} />
-  </div>
-);
+export const ActionInput = ({
+  className,
+  input,
+  ...props
+}: ActionInputProps) => {
+  const valueLength = serializedValueLength(input);
+  return (
+    <div
+      className={cn("space-y-2 overflow-hidden p-3", className)}
+      data-action-detail="input"
+      data-action-detail-empty={valueLength === 0 ? "true" : "false"}
+      data-action-detail-length={valueLength}
+      {...props}
+    >
+      <h4 className="text-xs font-medium uppercase text-muted-foreground">
+        Detalles tecnicos (parametros)
+      </h4>
+      <VisualJsonValue value={input} height={220} />
+    </div>
+  );
+};
 
 export type ActionOutputProps = ComponentProps<"div"> & {
   output?: unknown;
@@ -129,8 +142,17 @@ export const ActionOutput = ({
     return null;
   }
 
+  const detailKind = errorText ? "error" : "output";
+  const valueLength = serializedValueLength(errorText ?? output);
+
   return (
-    <div className={cn("space-y-2 p-3", className)} {...props}>
+    <div
+      className={cn("space-y-2 p-3", className)}
+      data-action-detail={detailKind}
+      data-action-detail-empty={valueLength === 0 ? "true" : "false"}
+      data-action-detail-length={valueLength}
+      {...props}
+    >
       <h4 className="text-xs font-medium uppercase text-muted-foreground">
         {errorText ? "Error" : "Detalles tecnicos (resultado)"}
       </h4>
@@ -144,3 +166,13 @@ export const ActionOutput = ({
     </div>
   );
 };
+
+function serializedValueLength(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === "string") return value.length;
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
