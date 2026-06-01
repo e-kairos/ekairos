@@ -24,6 +24,7 @@ Message artifacts can queue virtual prompt context without coupling the message 
 
 - Artifact renderers emit a typed payload through the prompt bridge.
 - Message-owned previews use `MessageArtifact` as the adapter-owned visual shell.
+- Product-specific preview classes and controls belong inside `MessageArtifact.children` or `MessageArtifact.actions`; the outer shell remains source-agnostic.
 - `MessageArtifact.actionCallId` marks `data-ek-artifact-anchor` so prompt chips can jump back to the originating artifact.
 - `PromptBar` renders that payload as a removable attachment chip.
 - On submit, the queued payload is sent as a standard `file` part with domain-specific metadata, alongside any text part.
