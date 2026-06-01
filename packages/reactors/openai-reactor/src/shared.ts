@@ -3,6 +3,18 @@ export type AnyRecord = Record<string, unknown>
 
 export const SANDBOX_RUN_COMMAND_ACTION_NAME = "sandbox_run_command" as const
 
+export type CodexDynamicActionDetails = {
+  actionCallId?: string
+  actionName?: string
+  input?: unknown
+  output?: unknown
+  success?: boolean
+  errorText?: string
+  providerThreadId?: string
+  providerTurnId?: string
+  providerResponse?: AnyRecord
+}
+
 export function asString(value: unknown): string {
   if (typeof value === "string") return value
   if (value === null || value === undefined) return ""
@@ -20,6 +32,103 @@ function asArray<T = unknown>(value: unknown): T[] {
 
 function cleanRecord(value: AnyRecord): AnyRecord {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const text = asString(value).trim()
+    if (text) return text
+  }
+  return undefined
+}
+
+function firstDefined(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+
+function parseJsonText(value: string): { parsed: true; value: unknown } | { parsed: false; value: string } {
+  const text = value.trim()
+  if (!text) return { parsed: false, value }
+  if (!/^[\[{"]|^-?\d|^(true|false|null)$/i.test(text)) return { parsed: false, value }
+  try {
+    return { parsed: true, value: JSON.parse(text) }
+  } catch {
+    return { parsed: false, value }
+  }
+}
+
+function parseMaybeJson(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  const parsed = parseJsonText(value)
+  return parsed.parsed ? parsed.value : value
+}
+
+export function readCodexDynamicActionDetails(params: AnyRecord): CodexDynamicActionDetails {
+  const item = asRecord(params.item)
+  const result = asRecord(params.result)
+  const turn = asRecord(params.turn)
+  const error = asRecord(params.error)
+  const resultError = asRecord(result.error)
+  const itemError = asRecord(item.error)
+  const actionCallId = firstString(
+    params.callId,
+    params.toolCallId,
+    params.itemId,
+    params.id,
+    item.callId,
+    item.toolCallId,
+    item.itemId,
+    item.id,
+  )
+  const actionName = firstString(
+    params.actionName,
+    params.tool,
+    params.toolName,
+    params.name,
+    item.actionName,
+    item.tool,
+    item.toolName,
+    item.name,
+  )
+  const input = parseMaybeJson(
+    firstDefined(params.arguments, params.input, params.args, item.arguments, item.input, item.args),
+  )
+  const output = parseMaybeJson(
+    firstDefined(params.output, result.output, result.value, result.contentItems, item.output, item.result),
+  )
+  const errorText = firstString(
+    params.errorText,
+    params.error,
+    error.message,
+    result.errorText,
+    result.error,
+    resultError.message,
+    item.errorText,
+    item.error,
+    itemError.message,
+  )
+  const explicitSuccess = firstDefined(params.success, result.success, item.success)
+  const success =
+    explicitSuccess === false || errorText
+      ? false
+      : explicitSuccess === true
+        ? true
+        : undefined
+
+  return cleanRecord({
+    actionCallId,
+    actionName,
+    input,
+    output,
+    success,
+    errorText,
+    providerThreadId: firstString(params.threadId, item.threadId, turn.threadId),
+    providerTurnId: firstString(params.turnId, item.turnId, turn.id),
+    providerResponse: Object.keys(result).length > 0 ? result : undefined,
+  }) as CodexDynamicActionDetails
 }
 
 function codexProviderMetadata(params: {
@@ -54,11 +163,34 @@ function codexProviderMetadata(params: {
 
 function normalizeCodexToolOutputContent(value: unknown): AnyRecord[] {
   if (value === undefined || value === null) return []
-  if (typeof value === "string") return [{ type: "text", text: value }]
+  if (typeof value === "string") {
+    const parsed = parseJsonText(value)
+    return parsed.parsed ? [{ type: "json", value: parsed.value }] : [{ type: "text", text: value }]
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => normalizeCodexToolOutputContent(entry))
+  }
 
   const record = asRecord(value)
   if (!record || Object.keys(record).length === 0) {
     return [{ type: "json", value }]
+  }
+
+  if (Array.isArray(record.contentItems)) {
+    return record.contentItems.flatMap((entry) => normalizeCodexToolOutputContent(entry))
+  }
+
+  if (
+    record.type === "inputText" ||
+    record.type === "outputText" ||
+    record.type === "text" ||
+    record.type === "input_text"
+  ) {
+    const text = asString(record.text || record.input_text)
+    if (!text) return []
+    const parsed = parseJsonText(text)
+    return parsed.parsed ? [{ type: "json", value: parsed.value }] : [{ type: "text", text }]
   }
 
   if (record.type === "content" && Array.isArray(record.value)) {
@@ -351,6 +483,14 @@ export function buildCodexParts(params: {
     {
       input?: AnyRecord
       output?: AnyRecord
+      actionName?: string
+      actionInput?: unknown
+      actionOutput?: unknown
+      success?: boolean
+      errorText?: string
+      providerThreadId?: string
+      providerTurnId?: string
+      providerResponse?: AnyRecord
       sequence?: number
       at?: string
     }
@@ -361,11 +501,16 @@ export function buildCodexParts(params: {
     const method = asString(data.method)
     const paramsRecord = asRecord(data.params)
     if (method === "item/tool/call") {
-      const toolCallId = asString(paramsRecord.callId)
+      const actionDetails = readCodexDynamicActionDetails(paramsRecord)
+      const toolCallId = asString(actionDetails.actionCallId)
       if (toolCallId) {
         dynamicTools.set(toolCallId, {
           ...(dynamicTools.get(toolCallId) ?? {}),
           input: paramsRecord,
+          actionName: actionDetails.actionName,
+          actionInput: actionDetails.input,
+          providerThreadId: actionDetails.providerThreadId,
+          providerTurnId: actionDetails.providerTurnId,
           sequence:
             typeof chunk.sequence === "number" ? chunk.sequence : undefined,
           at: asString(chunk.at),
@@ -374,10 +519,18 @@ export function buildCodexParts(params: {
       continue
     }
     if (method === "item/tool/result") {
-      const toolCallId = asString(paramsRecord.callId)
+      const actionDetails = readCodexDynamicActionDetails(paramsRecord)
+      const toolCallId = asString(actionDetails.actionCallId)
       if (toolCallId) {
         const current = dynamicTools.get(toolCallId) ?? {}
         current.output = paramsRecord
+        current.actionName = current.actionName || actionDetails.actionName
+        current.actionOutput = actionDetails.output
+        current.success = actionDetails.success
+        current.errorText = actionDetails.errorText
+        current.providerThreadId = current.providerThreadId || actionDetails.providerThreadId
+        current.providerTurnId = current.providerTurnId || actionDetails.providerTurnId
+        current.providerResponse = actionDetails.providerResponse
         current.sequence =
           typeof chunk.sequence === "number"
             ? Math.max(current.sequence ?? 0, chunk.sequence)
@@ -546,12 +699,24 @@ export function buildCodexParts(params: {
     const input = asRecord(toolCall.input)
     const output = asRecord(toolCall.output)
     const result = asRecord(output.result)
-    const toolName = asString(input.tool).trim() || "dynamicTool"
-    const success = result.success !== false && !asString(output.errorText)
+    const inputDetails = readCodexDynamicActionDetails(input)
+    const outputDetails = readCodexDynamicActionDetails(output)
+    const toolName =
+      asString(toolCall.actionName).trim() ||
+      asString(outputDetails.actionName).trim() ||
+      asString(inputDetails.actionName).trim() ||
+      "dynamicTool"
+    const success =
+      toolCall.success ??
+      outputDetails.success ??
+      (result.success !== false && !asString(output.errorText))
     const callSequence = toolCall.sequence ?? 0
-    const providerThreadId = asString(input.threadId)
-    const providerTurnId = asString(input.turnId)
-    const providerResponse = Object.keys(result).length > 0 ? result : undefined
+    const providerThreadId =
+      toolCall.providerThreadId || inputDetails.providerThreadId || outputDetails.providerThreadId
+    const providerTurnId =
+      toolCall.providerTurnId || inputDetails.providerTurnId || outputDetails.providerTurnId
+    const providerResponse =
+      toolCall.providerResponse || outputDetails.providerResponse || (Object.keys(result).length > 0 ? result : undefined)
     const startedReactorMetadata = cleanRecord({
       reactorKind: "codex",
       ...codexProviderMetadata({
@@ -573,14 +738,23 @@ export function buildCodexParts(params: {
           status: "started",
           actionName: toolName,
           actionCallId: toolCallId,
-          input: input.arguments ?? {},
+          input: toolCall.actionInput ?? inputDetails.input ?? {},
         },
         reactorMetadata: startedReactorMetadata,
       },
     })
     if (toolCall.output) {
+      const actionOutput =
+        toolCall.actionOutput ??
+        outputDetails.output ??
+        firstDefined(
+          output.output,
+          result.output,
+          result.contentItems,
+          Object.keys(result).length > 0 ? result : undefined,
+        )
       const resultBlocks = success
-        ? normalizeCodexToolOutputContent(output.output)
+        ? normalizeCodexToolOutputContent(actionOutput)
         : normalizeCodexToolErrorContent(output, result)
       const resultReactorMetadata = cleanRecord({
         reactorKind: "codex",
@@ -594,7 +768,7 @@ export function buildCodexParts(params: {
           providerToolType: "dynamicTool",
           success,
           response: providerResponse,
-          errorText: asString(output.errorText) || undefined,
+          errorText: toolCall.errorText || outputDetails.errorText || asString(output.errorText) || undefined,
         }),
       })
 

@@ -15,7 +15,14 @@ import {
 import type { ContextEnvironment } from "@ekairos/events/runtime"
 import { randomUUID } from "node:crypto"
 
-import { asRecord, asString, buildCodexParts, defaultInstructionFromTrigger, type AnyRecord } from "./shared.js"
+import {
+  asRecord,
+  asString,
+  buildCodexParts,
+  defaultInstructionFromTrigger,
+  readCodexDynamicActionDetails,
+  type AnyRecord,
+} from "./shared.js"
 
 export type CodexConfig = {
   appServerUrl: string
@@ -293,6 +300,10 @@ function toJsonSafe(value: unknown): unknown {
   }
 }
 
+function cleanRecord(value: AnyRecord): AnyRecord {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
+}
+
 export function mapCodexChunkType(providerChunkType: string): ContextStreamChunkType {
   const value = providerChunkType.toLowerCase()
 
@@ -457,11 +468,20 @@ export function mapCodexAppServerNotification(
   const actionRef = resolveActionRef(params, item)
   const providerPartId = resolveProviderPartId(params, item)
   const hasItemError = Boolean(item.error)
+  const actionDetails = readCodexDynamicActionDetails(params)
 
-  const mappedData = toJsonSafe({
-    method,
-    params,
-  })
+  const mappedData = toJsonSafe(
+    cleanRecord({
+      method,
+      params,
+      actionCallId: actionDetails.actionCallId,
+      actionName: actionDetails.actionName,
+      input: actionDetails.input,
+      output: actionDetails.output,
+      success: actionDetails.success,
+      errorText: actionDetails.errorText,
+    }),
+  )
 
   const map = (chunkType: ContextStreamChunkType): CodexChunkMappingResult => {
     const descriptor = withCodexPartDescriptor(chunkType, providerPartId)
@@ -765,10 +785,11 @@ async function executeCodexDynamicToolCall(
   errorText?: string
   response: AnyRecord
 }> {
-  const toolName = asString(params.tool).trim()
-  const callId = asString(params.callId).trim()
+  const actionDetails = readCodexDynamicActionDetails(params)
+  const toolName = asString(actionDetails.actionName).trim()
+  const callId = asString(actionDetails.actionCallId).trim()
   const action = toolName ? (args.actions ?? {})[toolName] : undefined
-  const input = "arguments" in params ? params.arguments : {}
+  const input = actionDetails.input ?? {}
 
   if (!toolName || !isCodexExecutableAction(action)) {
     const errorText = `codex_dynamic_tool_not_found:${toolName || "unknown"}`

@@ -89,6 +89,147 @@ function parseActionInputText(value: string): unknown {
   }
 }
 
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = asString(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function firstDefined(...values: unknown[]): unknown {
+  for (const value of values) {
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function parseMaybeJsonValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  return parseActionInputText(value);
+}
+
+function providerContentItemsToValue(value: unknown): unknown {
+  if (!Array.isArray(value)) {
+    const record = asRecord(value);
+    if (Array.isArray(record.contentItems)) return providerContentItemsToValue(record.contentItems);
+    if (record.output !== undefined) return parseMaybeJsonValue(record.output);
+    return parseMaybeJsonValue(value);
+  }
+  const blocks = value
+    .map((entry) => {
+      const record = asRecord(entry);
+      if (
+        record.type === "inputText" ||
+        record.type === "outputText" ||
+        record.type === "text" ||
+        record.type === "input_text"
+      ) {
+        const text = asString(record.text || record.input_text);
+        return text ? parseMaybeJsonValue(text) : undefined;
+      }
+      return Object.keys(record).length > 0 ? record : undefined;
+    })
+    .filter((entry) => entry !== undefined);
+  if (blocks.length === 0) return undefined;
+  if (blocks.length === 1) return blocks[0];
+  return { type: "content", value: blocks };
+}
+
+function readProviderActionDetails(params: {
+  data: Record<string, unknown>;
+  raw: Record<string, unknown>;
+  rawParams: Record<string, unknown>;
+  rawItem: Record<string, unknown>;
+}) {
+  const result = asRecord(params.rawParams.result);
+  const rawError = asRecord(params.rawParams.error);
+  const resultError = asRecord(result.error);
+  const rawItemError = asRecord(params.rawItem.error);
+  const actionCallId = firstString(
+    params.data.actionCallId,
+    params.raw.actionCallId,
+    params.rawParams.actionCallId,
+    params.data.toolCallId,
+    params.rawParams.callId,
+    params.rawParams.toolCallId,
+    params.rawParams.itemId,
+    params.rawParams.id,
+    params.rawItem.callId,
+    params.rawItem.toolCallId,
+    params.rawItem.itemId,
+    params.rawItem.id,
+    params.raw.toolCallId,
+    params.raw.id,
+  );
+  const actionName = firstString(
+    params.data.actionName,
+    params.raw.actionName,
+    params.rawParams.actionName,
+    params.rawParams.tool,
+    params.rawParams.toolName,
+    params.rawParams.name,
+    params.rawItem.actionName,
+    params.rawItem.tool,
+    params.rawItem.toolName,
+    params.rawItem.name,
+    params.rawItem.command ? "sandbox_run_command" : "",
+    params.raw.toolName,
+    params.raw.name,
+  );
+  const input = parseMaybeJsonValue(
+    firstDefined(
+      params.data.input,
+      params.data.arguments,
+      params.raw.input,
+      params.raw.args,
+      params.raw.arguments,
+      params.rawParams.arguments,
+      params.rawParams.input,
+      params.rawParams.args,
+      params.rawItem.arguments,
+      params.rawItem.input,
+      params.rawItem.args,
+    ),
+  );
+  const output = providerContentItemsToValue(
+    firstDefined(
+      params.data.output,
+      params.data.result,
+      params.rawParams.output,
+      result.output,
+      result.value,
+      result.contentItems,
+      params.raw.output,
+      params.raw.result,
+      params.rawItem.output,
+      params.rawItem.result,
+    ),
+  );
+  const errorText = firstString(
+    params.data.error,
+    asRecord(params.data.error).message,
+    params.rawParams.errorText,
+    params.rawParams.error,
+    rawError.message,
+    result.errorText,
+    result.error,
+    resultError.message,
+    params.rawItem.errorText,
+    params.rawItem.error,
+    rawItemError.message,
+    asRecord(params.raw.error).message,
+  );
+
+  return {
+    actionCallId,
+    actionName,
+    input,
+    output,
+    errorText,
+  };
+}
+
 function readActionInputDelta(params: {
   chunk: Record<string, unknown>;
   data: Record<string, unknown>;
@@ -320,7 +461,7 @@ export function buildLiveEventFromStepChunks(params: {
     {
       startedSequence?: number;
       terminalSequence?: number;
-      toolName: string;
+      actionName: string;
       hasStarted: boolean;
       inputDeltaText: string;
       outputDeltaText: string;
@@ -371,30 +512,21 @@ export function buildLiveEventFromStepChunks(params: {
       const raw = asRecord(chunk.raw);
       const rawParams = asRecord(raw.params);
       const rawItem = asRecord(rawParams.item);
+      const providerAction = readProviderActionDetails({
+        data,
+        raw,
+        rawParams,
+        rawItem,
+      });
       const actionRef =
         asString(chunk.actionRef) ||
         asString(chunk.providerPartId) ||
-        asString(data.actionCallId) ||
-        asString(data.toolCallId) ||
-        asString(data.callId) ||
-        asString(data.itemId) ||
-        asString(data.id) ||
-        asString(rawParams.callId) ||
-        asString(rawParams.itemId) ||
-        asString(rawItem.id) ||
-        asString(raw.toolCallId) ||
-        asString(raw.id);
+        providerAction.actionCallId;
       if (!actionRef) continue;
 
-      const toolName =
-        asString(data.actionName) ||
-        asString(data.toolName) ||
-        asString(rawParams.tool) ||
-        asString(rawItem.command ? "sandbox_run_command" : "") ||
-        asString(raw.actionName) ||
-        asString(raw.toolName) ||
-        asString(raw.name) ||
-        actionParts.get(actionRef)?.toolName ||
+      const actionName =
+        providerAction.actionName ||
+        actionParts.get(actionRef)?.actionName ||
         "reactorAction";
 
       const previous = actionParts.get(actionRef);
@@ -416,12 +548,7 @@ export function buildLiveEventFromStepChunks(params: {
           : previous?.inputDeltaText ?? "";
       const parsedInputDelta = parseActionInputText(nextInputDeltaText);
       const input =
-        data.input ??
-        data.arguments ??
-        raw.input ??
-        raw.args ??
-        raw.arguments ??
-        rawParams.arguments ??
+        providerAction.input ??
         (nextInputDeltaText ? parsedInputDelta : undefined) ??
         previous?.input;
       const nextOutputDeltaText =
@@ -429,11 +556,7 @@ export function buildLiveEventFromStepChunks(params: {
           ? `${previous?.outputDeltaText ?? ""}${outputDeltaText}`
           : previous?.outputDeltaText ?? "";
       const output =
-        data.output ??
-        data.result ??
-        rawParams.result ??
-        raw.output ??
-        raw.result ??
+        providerAction.output ??
         (nextOutputDeltaText
           ? {
               text: nextOutputDeltaText,
@@ -451,7 +574,7 @@ export function buildLiveEventFromStepChunks(params: {
           chunkType === "chunk.action_failed"
             ? sequence
             : previous?.terminalSequence,
-        toolName,
+        actionName,
         hasStarted:
           previous?.hasStarted ||
           chunkType === "chunk.action_started" ||
@@ -472,11 +595,7 @@ export function buildLiveEventFromStepChunks(params: {
           chunkType === "chunk.action_failed"
             ? asString(chunk.text) ||
               asString(data.text) ||
-              asString(data.error) ||
-              asString(asRecord(data.error).message) ||
-              asString(rawParams.error) ||
-              asString(asRecord(rawParams.error).message) ||
-              asString(asRecord(raw.error).message) ||
+              providerAction.errorText ||
               undefined
             : previous?.errorText,
         terminalStatus:
@@ -526,7 +645,7 @@ export function buildLiveEventFromStepChunks(params: {
           type: "action",
           content: {
             status: "started",
-            actionName: action.toolName,
+            actionName: action.actionName,
             actionCallId: toolCallId,
             input: action.input ?? {},
           },
@@ -541,7 +660,7 @@ export function buildLiveEventFromStepChunks(params: {
           type: "action",
           content: {
             status: "completed",
-            actionName: action.toolName,
+            actionName: action.actionName,
             actionCallId: toolCallId,
             output: action.output ?? {},
           },
@@ -556,7 +675,7 @@ export function buildLiveEventFromStepChunks(params: {
           type: "action",
           content: {
             status: "failed",
-            actionName: action.toolName,
+            actionName: action.actionName,
             actionCallId: toolCallId,
             error: {
               message: action.errorText || "Action failed.",

@@ -1269,6 +1269,126 @@ describe("createCodexReactor", () => {
     expect(asRecord(resultProvider.response)).toMatchObject({ success: true })
   })
 
+  it("preserves nested Codex app-server dynamic action identity", async () => {
+    const collected = collectWritableChunks()
+    const actionCallId = "call_read_dataset_rows_001"
+    const providerChunks: Record<string, unknown>[] = [
+      {
+        method: "turn/started",
+        params: {
+          threadId: "thr-nested-dynamic-tool",
+          turn: { id: "turn-nested-dynamic-tool-001", status: "inProgress" },
+        },
+      },
+      {
+        id: "rpc-tool-call-nested-001",
+        method: "item/tool/call",
+        params: {
+          threadId: "thr-nested-dynamic-tool",
+          turnId: "turn-nested-dynamic-tool-001",
+          item: {
+            id: actionCallId,
+            type: "toolCall",
+            name: "read_dataset_rows",
+            arguments: "{\"datasetId\":\"ds-001\",\"limit\":3}",
+          },
+        },
+      },
+      {
+        method: "item/tool/result",
+        params: {
+          threadId: "thr-nested-dynamic-tool",
+          turnId: "turn-nested-dynamic-tool-001",
+          item: {
+            id: actionCallId,
+            type: "toolCall",
+            name: "read_dataset_rows",
+          },
+          result: {
+            success: true,
+            contentItems: [
+              {
+                type: "inputText",
+                text: "{\"rows\":[{\"id\":\"row-001\"}],\"done\":true,\"cursor\":1}",
+              },
+            ],
+          },
+        },
+      },
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thr-nested-dynamic-tool",
+          turn: { id: "turn-nested-dynamic-tool-001", status: "completed" },
+        },
+      },
+    ]
+
+    const mappedCall = defaultMapCodexChunk(providerChunks[1])
+    const mappedCallData = asRecord(mappedCall.data)
+    expect(mappedCall.chunkType).toBe("chunk.action_started")
+    expect(mappedCall.actionRef).toBe(actionCallId)
+    expect(mappedCallData.actionName).toBe("read_dataset_rows")
+    expect(asRecord(mappedCallData.input)).toMatchObject({ datasetId: "ds-001", limit: 3 })
+
+    const reactor = createCodexReactor<TestContext, CodexConfig, TestEnv>({
+      resolveConfig: async () => ({
+        appServerUrl: "http://127.0.0.1:3436",
+        repoPath: "/workspace/repo",
+        providerContextId: "thr-nested-dynamic-tool",
+        model: "openai/gpt-5.2-codex",
+      }),
+      executeTurn: async ({ emitChunk }) => {
+        for (const chunk of providerChunks) {
+          await emitChunk(chunk)
+        }
+        return {
+          providerContextId: "thr-nested-dynamic-tool",
+          turnId: "turn-nested-dynamic-tool-001",
+          assistantText: "",
+        }
+      },
+    })
+
+    const result = await reactor(
+      createParams({
+        writable: collected.writable,
+        contextId: "ctx-nested-dynamic-tool",
+        eventId: "evt-nested-dynamic-tool",
+        executionId: "exe-nested-dynamic-tool",
+        stepId: "step-nested-dynamic-tool",
+      }),
+    )
+
+    const parts = Array.isArray(result.assistantEvent.content?.parts)
+      ? result.assistantEvent.content.parts.map((part) => asRecord(part))
+      : []
+    const actionParts = parts.filter((part) => {
+      const content = asRecord(part.content)
+      return asString(part.type) === "action" && asString(content.actionCallId) === actionCallId
+    })
+    const started = actionParts.find(
+      (part) => asString(asRecord(part.content).status) === "started",
+    )
+    const completed = actionParts.find(
+      (part) => asString(asRecord(part.content).status) === "completed",
+    )
+    const startedContent = asRecord(started?.content)
+    const completedContent = asRecord(completed?.content)
+
+    expect(actionParts).toHaveLength(2)
+    expect(startedContent.actionName).toBe("read_dataset_rows")
+    expect(completedContent.actionName).toBe("read_dataset_rows")
+    expect(startedContent.actionName).not.toBe("call")
+    expect(completedContent.actionName).not.toBe("result")
+    expect(startedContent.input).toMatchObject({ datasetId: "ds-001", limit: 3 })
+    expect(completedContent.output).toMatchObject({
+      rows: [{ id: "row-001" }],
+      done: true,
+      cursor: 1,
+    })
+  })
+
   const realProviderUrl = asString(process.env.CODEX_REACTOR_REAL_URL).trim()
   const realIt = realProviderUrl.length > 0 ? it : it.skip
 
