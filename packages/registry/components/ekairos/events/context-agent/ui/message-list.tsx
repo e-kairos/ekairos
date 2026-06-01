@@ -1,11 +1,20 @@
 "use client";
 
-import React, { memo, useMemo, useState, type ReactNode } from "react";
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   INPUT_TEXT_ITEM_TYPE,
   type ContextEventForUI,
   type ContextValue,
 } from "@ekairos/events/react";
+import { ArrowDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { MessageParts } from "./message-parts";
@@ -26,6 +35,7 @@ type MessageListProps = {
   classNames?: AgentClassNames;
   showReasoning: boolean;
   showMessageMetadata?: boolean;
+  autoScroll?: boolean;
   renderMessageActions?: (params: {
     message: any;
     status: "streaming" | "ready";
@@ -39,6 +49,7 @@ const MessageList = memo(function MessageList({
   classNames,
   showReasoning,
   showMessageMetadata = false,
+  autoScroll = false,
   renderMessageActions,
 }: MessageListProps) {
   const { events, contextStatus, sendStatus } = context;
@@ -71,19 +82,56 @@ const MessageList = memo(function MessageList({
   }, [events]);
 
   const [visibleCount, setVisibleCount] = useState(100);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
   const visibleMessages = useMemo(
     () => messages.slice(Math.max(0, messages.length - visibleCount)),
     [messages, visibleCount]
   );
+  const latestMessageId =
+    visibleMessages.length > 0
+      ? String(visibleMessages[visibleMessages.length - 1]?.id)
+      : "";
 
   const shouldShowTurnIndicator =
     contextStatus === "open_streaming" || sendStatus === "submitting";
   const isTurnStreaming = shouldShowTurnIndicator;
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      const element = scrollRef.current;
+      if (!element) return;
+      if (typeof element.scrollTo === "function") {
+        element.scrollTo({ behavior, top: element.scrollHeight });
+      } else {
+        element.scrollTop = element.scrollHeight;
+      }
+      shouldStickToBottomRef.current = true;
+      setIsAtBottom(true);
+    },
+    []
+  );
+
+  const handleScroll = useCallback(() => {
+    if (!autoScroll) return;
+    const element = scrollRef.current;
+    if (!element) return;
+    const nextIsAtBottom = isNearScrollBottom(element);
+    shouldStickToBottomRef.current = nextIsAtBottom;
+    setIsAtBottom(nextIsAtBottom);
+  }, [autoScroll]);
+
+  useEffect(() => {
+    if (!autoScroll || !shouldStickToBottomRef.current) return;
+    scrollToBottom("auto");
+  }, [autoScroll, latestMessageId, visibleMessages.length, isTurnStreaming, scrollToBottom]);
 
   return (
     <div
+      ref={scrollRef}
+      onScroll={autoScroll ? handleScroll : undefined}
       className={cn(
-        "w-full max-w-3xl mx-auto space-y-6",
+        "relative w-full max-w-3xl mx-auto space-y-6",
         classNames?.messageList
       )}
     >
@@ -139,11 +187,32 @@ const MessageList = memo(function MessageList({
           </div>
         );
       })}
+      {autoScroll && !isAtBottom ? (
+        <button
+          aria-label="Jump to latest message"
+          className={cn(
+            "absolute bottom-3 right-3 z-10 inline-flex size-8 items-center justify-center rounded-full",
+            "border border-border/70 bg-background/90 text-foreground shadow-lg transition-colors",
+            "hover:border-foreground/40 hover:bg-accent"
+          )}
+          onClick={() => scrollToBottom()}
+          type="button"
+        >
+          <ArrowDownIcon className="size-4" />
+        </button>
+      ) : null}
     </div>
   );
 });
 
-export { MessageList };
+export { MessageList, isNearScrollBottom };
+
+function isNearScrollBottom(
+  element: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
+  threshold = 48
+) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+}
 
 function MessageHeader({
   message,
