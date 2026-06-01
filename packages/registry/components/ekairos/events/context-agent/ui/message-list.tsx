@@ -97,6 +97,16 @@ const MessageList = memo(function MessageList({
   const shouldShowTurnIndicator =
     contextStatus === "open_streaming" || sendStatus === "submitting";
   const isTurnStreaming = shouldShowTurnIndicator;
+  const messageListStateAttrs = {
+    "aria-live": isTurnStreaming ? "polite" : "off",
+    "aria-relevant": "additions text",
+    "data-at-bottom": isAtBottom ? "true" : "false",
+    "data-message-count": messages.length,
+    "data-message-list": true,
+    "data-turn-streaming": isTurnStreaming ? "true" : "false",
+    "data-visible-message-count": visibleMessages.length,
+    role: "log",
+  } as const;
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "smooth") => {
       const element = scrollRef.current;
@@ -130,6 +140,7 @@ const MessageList = memo(function MessageList({
     <div
       ref={scrollRef}
       onScroll={autoScroll ? handleScroll : undefined}
+      {...messageListStateAttrs}
       className={cn(
         "relative w-full max-w-3xl mx-auto space-y-6",
         classNames?.messageList
