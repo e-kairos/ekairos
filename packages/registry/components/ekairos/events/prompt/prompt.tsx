@@ -90,8 +90,11 @@ export function Prompt({
   const isDirty =
     normalizedValue.trim().length > 0 || Boolean(hasNonTextSendPayload)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const [isDragging, setIsDragging] = React.useState(false)
   const isBusy = status === "submitted" || status === "streaming"
+  const promptStatus = status ?? "idle"
+  const promptBusy = isBusy || Boolean(isUploading)
   const canStop = status === "streaming" && typeof onStop === "function"
   const controlsDisabled = disabled || isBusy
   const textareaDisabled = inputDisabled ?? controlsDisabled
@@ -189,6 +192,17 @@ export function Prompt({
       )}
     >
       <div
+        aria-busy={promptBusy || undefined}
+        data-prompt-attachment-count={attachmentList.length}
+        data-prompt-busy={promptBusy ? "true" : "false"}
+        data-prompt-density={density}
+        data-prompt-status={promptStatus}
+        data-prompt-surface
+        onClick={(event) => {
+          const target = event.target as HTMLElement | null
+          if (target?.closest("button, [role='button'], input, textarea")) return
+          textareaRef.current?.focus()
+        }}
         className={cn(
           "relative flex w-full flex-col overflow-hidden border bg-background/95 shadow-[0_18px_60px_-36px_rgba(15,23,42,0.55),0_2px_10px_-6px_rgba(15,23,42,0.22)] backdrop-blur-md transition-[background-color,border-color,box-shadow]",
           compact
@@ -209,7 +223,10 @@ export function Prompt({
           <div className={cn(
             "flex flex-wrap gap-2 border-b border-border/45 bg-muted/[0.18]",
             compact ? "gap-1.5 p-2.5" : "gap-2 p-3",
-          )}>
+          )}
+            data-prompt-attachments
+            data-prompt-density={density}
+          >
             {attachmentList.map((f) => (
               <PromptFileChip key={f.id} file={f} onRemove={onRemoveAttachment} />
             ))}
@@ -218,6 +235,7 @@ export function Prompt({
         
         {/* Text Area */}
         <PromptTextarea 
+          ref={textareaRef}
           value={normalizedValue} 
           onChange={handleTextareaChange} 
           onPaste={handlePaste}
@@ -232,10 +250,14 @@ export function Prompt({
         />
         
         {/* Toolbar */}
-        <div className={cn(
-          "flex items-center justify-between gap-2 border-t border-border/35 bg-muted/[0.16]",
-          compact ? "p-2.5 pl-3 pr-2.5" : "p-2.5 pl-3.5 pr-2.5",
-        )}>
+        <div
+          data-prompt-density={density}
+          data-prompt-toolbar
+          className={cn(
+            "flex items-center justify-between gap-2 border-t border-border/35 bg-muted/[0.16]",
+            compact ? "p-2.5 pl-3 pr-2.5" : "p-2.5 pl-3.5 pr-2.5",
+          )}
+        >
           <div className="flex min-w-0 items-center gap-1">
             <input ref={fileInputRef} type="file" className="hidden" multiple onChange={handleFileChange} disabled={controlsDisabled} />
             <PromptAttachButton onClick={handleAttachClick} disabled={controlsDisabled} variant={compact ? "ghost" : "default"} />

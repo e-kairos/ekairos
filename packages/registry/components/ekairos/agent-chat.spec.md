@@ -16,6 +16,7 @@ The registry prompt composer is the shared baseline for context agents.
 - The toolbar owns attach, web search, reasoning, status, send, and stop controls.
 - File, pasted large-text, and virtual-context attachments render as removable chips above the textarea.
 - Sending is valid when there is text or at least one ready non-text part.
+- The rendered prompt surface exposes `data-prompt-surface`, `data-prompt-status`, `data-prompt-busy`, `data-prompt-density`, and `data-prompt-attachment-count` so Workshop and product smoke tests can inspect composer state without product-specific selectors.
 - Consumers may adapt storage, upload, or virtual attachment adapters, but the rendered event part contract stays agnostic: text parts and file parts are passed to `context.append(...)`.
 
 ## Artifact Prompt Bridge
