@@ -32,6 +32,7 @@ Workbench and product review surfaces can render an agnostic turn transcript bef
 
 - `ContextReviewTranscript` accepts a `ContextValue`-like object and derives input/output turns from events, steps, and parts.
 - The transcript renders user input, assistant output, action counts, action errors, file/artifact attachments, and structured JSON answer summaries when available.
+- The transcript exposes copy/download Markdown review actions and `buildContextReviewMarkdown(...)` for adapter-controlled export flows.
 - The component preserves the event contract: files remain files, actions remain actions, and product-specific payloads only affect optional display summaries.
 - Raw ids, step payloads, and part trees stay in Workshop/debug surfaces; the transcript is a review layer, not a replacement for event inspection.
 

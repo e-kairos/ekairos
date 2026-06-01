@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useMemo, useState } from "react";
 import {
   INPUT_TEXT_ITEM_TYPE,
   type ContextEventForUI,
@@ -55,6 +55,38 @@ export function ContextReviewTranscript({
   onSelectTurn,
 }: ContextReviewTranscriptProps) {
   const turns = buildReviewTurns(context.events).slice(-maxTurns);
+  const reviewMarkdown = useMemo(
+    () => buildContextReviewMarkdown(context, maxTurns),
+    [context, maxTurns],
+  );
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+
+  async function handleCopyMarkdown() {
+    if (!reviewMarkdown.trim()) return;
+
+    try {
+      await writeClipboardText(reviewMarkdown);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1400);
+    } catch {
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 1800);
+    }
+  }
+
+  function handleDownloadMarkdown() {
+    if (!reviewMarkdown.trim()) return;
+
+    const blob = new Blob([reviewMarkdown], {
+      type: "text/markdown;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "context-review.md";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <section
@@ -71,11 +103,37 @@ export function ContextReviewTranscript({
           </span>
           <h3 className="mt-0.5 truncate text-sm font-semibold">Transcript</h3>
         </div>
-        <div className="flex flex-wrap justify-end gap-1.5 font-mono text-[10px] text-muted-foreground">
-          <span>{context.events.length} events</span>
-          <span>{turns.length} turns</span>
-          <span>{context.contextStatus}</span>
-          <span>{context.sendStatus}</span>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-1.5 font-mono text-[10px] text-muted-foreground">
+            <span>{context.events.length} events</span>
+            <span>{turns.length} turns</span>
+            <span>{context.contextStatus}</span>
+            <span>{context.sendStatus}</span>
+          </div>
+          <div className="flex flex-wrap justify-end gap-1.5">
+            <button
+              className="min-h-7 rounded-sm border border-border bg-background px-2 font-mono text-[10px] text-muted-foreground hover:border-accent hover:text-accent disabled:opacity-50"
+              data-testid="copy-context-review-markdown"
+              disabled={!reviewMarkdown.trim()}
+              onClick={() => void handleCopyMarkdown()}
+              type="button"
+            >
+              {copyState === "copied"
+                ? "Copied"
+                : copyState === "failed"
+                  ? "Copy failed"
+                  : "Copy .md"}
+            </button>
+            <button
+              className="min-h-7 rounded-sm border border-border bg-background px-2 font-mono text-[10px] text-muted-foreground hover:border-accent hover:text-accent disabled:opacity-50"
+              data-testid="download-context-review-markdown"
+              disabled={!reviewMarkdown.trim()}
+              onClick={handleDownloadMarkdown}
+              type="button"
+            >
+              Download .md
+            </button>
+          </div>
         </div>
       </header>
 
@@ -94,6 +152,88 @@ export function ContextReviewTranscript({
       )}
     </section>
   );
+}
+
+export function buildContextReviewMarkdown(
+  context: Pick<ContextValue, "contextStatus" | "events" | "sendStatus">,
+  maxTurns = 6,
+): string {
+  const turns = buildReviewTurns(context.events).slice(-maxTurns);
+  const lines = [
+    "# Ekairos Context Review",
+    "",
+    `- Status: ${context.contextStatus}`,
+    `- Send status: ${context.sendStatus}`,
+    `- Events: ${context.events.length}`,
+    `- Turns: ${turns.length}`,
+    "",
+  ];
+
+  if (!turns.length) {
+    lines.push("No execution transcript yet.");
+    return lines.join("\n");
+  }
+
+  for (const turn of turns) {
+    lines.push(
+      `## Turn ${turn.id}`,
+      "",
+      `- Status: ${turn.status}`,
+      `- Actions: ${turn.actionParts}`,
+      "",
+      "### Input",
+      "",
+      turn.inputText || "No visible input.",
+      "",
+    );
+
+    if (turn.attachments.length) {
+      lines.push("Attachments:", "");
+      for (const attachment of turn.attachments) {
+        lines.push(`- ${attachment.kind}: ${attachment.filename} (${attachment.mediaType})`);
+      }
+      lines.push("");
+    }
+
+    lines.push("### Output", "");
+    if (turn.analysis) {
+      lines.push(turn.analysis.answer || turn.outputText || "No visible output.", "");
+      lines.push(
+        `- Comments: ${asArray(turn.analysis.comments).length}`,
+        `- Evidence: ${asArray(turn.analysis.evidence).length}`,
+        `- Replay controls: ${asArray(turn.analysis.replayControls).length}`,
+        `- Snapshots: ${asArray(turn.analysis.snapshots).length}`,
+      );
+      const imagegen = asRecord(turn.analysis.imagegen);
+      const imageTitle = asText(imagegen.title);
+      if (imageTitle) {
+        lines.push(`- Imagegen: ${imageTitle}`);
+      }
+      const evidence = asArray(turn.analysis.evidence);
+      if (evidence.length) {
+        lines.push("", "Evidence:");
+        for (const item of evidence.slice(0, 5)) {
+          const record = asRecord(item);
+          const label = asText(record.label) || "evidence";
+          const moment = formatMoment(record.time);
+          lines.push(`- ${label}${moment ? ` (${moment})` : ""}`);
+        }
+      }
+      lines.push("");
+    } else {
+      lines.push(turn.outputText || "No visible output.", "");
+    }
+
+    if (turn.actionErrors.length) {
+      lines.push("Action errors:", "");
+      for (const error of turn.actionErrors) {
+        lines.push(`- ${error}`);
+      }
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 function ReviewTurnCard({
@@ -438,4 +578,24 @@ function formatMoment(value: unknown) {
   return typeof value === "number" && Number.isFinite(value)
     ? `${value.toFixed(1)}s`
     : "";
+}
+
+async function writeClipboardText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("copy failed");
+  }
 }
