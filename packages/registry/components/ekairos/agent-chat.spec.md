@@ -65,6 +65,7 @@ Product workbenches can show live source monitoring without baking polling rules
 
 - `SourceWatchStatus` renders an agnostic source state with phases: `checking`, `waiting`, `loading`, `loaded`, `empty`, and `error`.
 - The component only displays status, count, timestamp, label, path, and optional open action; source-specific polling/autoload rules stay in product logic.
+- `SourceWatchStatus` exposes `data-source-watch-status`, `data-source-phase`, `data-source-count`, `data-source-label`, `data-source-detail`, `data-source-path`, `data-source-checked-at`, `data-source-busy`, and `data-source-has-open-action`.
 - When `pollIntervalMs` is present, the component renders polling cadence, exposes `data-poll-interval-ms`, and marks checking/waiting/loading phases with `aria-busy`.
 - Products may pass phase `labels` and `ariaLabelPrefix`; those are presentation labels, not source-specific state machines.
 - Use `waiting` for a candidate that must stabilize before loading, `loading` for automatic ingestion, and `loaded` for the active latest source.

@@ -65,6 +65,20 @@ export function SourceWatchStatus({
     status.phase === "waiting" ||
     status.phase === "loading";
   const meta = [checkedAt, cadence].filter(Boolean).join(" / ");
+  const checkedAtValue = serializeCheckedAt(status.checkedAt);
+  const sharedDataAttrs = {
+    "data-phase": status.phase,
+    "data-poll-interval-ms": status.pollIntervalMs ?? undefined,
+    "data-source-busy": isBusy ? "true" : "false",
+    "data-source-checked-at": checkedAtValue || undefined,
+    "data-source-count": count,
+    "data-source-detail": detail,
+    "data-source-has-open-action": onOpen ? "true" : "false",
+    "data-source-label": status.sourceLabel || undefined,
+    "data-source-path": status.sourcePath || undefined,
+    "data-source-phase": status.phase,
+    "data-source-watch-status": true,
+  };
 
   const content = (
     <>
@@ -108,9 +122,7 @@ export function SourceWatchStatus({
         aria-label={`${ariaLabelPrefix}: ${label}`}
         aria-busy={isBusy || undefined}
         className={sharedClassName}
-        data-phase={status.phase}
-        data-poll-interval-ms={status.pollIntervalMs ?? undefined}
-        data-source-count={count}
+        {...sharedDataAttrs}
         onClick={onOpen}
         title={title || undefined}
         type="button"
@@ -125,9 +137,7 @@ export function SourceWatchStatus({
       aria-label={`${ariaLabelPrefix}: ${label}`}
       aria-busy={isBusy || undefined}
       className={sharedClassName}
-      data-phase={status.phase}
-      data-poll-interval-ms={status.pollIntervalMs ?? undefined}
-      data-source-count={count}
+      {...sharedDataAttrs}
       title={title || undefined}
     >
       {content}
@@ -169,6 +179,13 @@ function formatCheckedAt(value: SourceWatchStatusValue["checkedAt"]): string {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+function serializeCheckedAt(value: SourceWatchStatusValue["checkedAt"]): string {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString();
 }
 
 function formatPollInterval(value: SourceWatchStatusValue["pollIntervalMs"]): string {
