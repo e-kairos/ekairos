@@ -525,17 +525,48 @@ export function getActionPartInfo(part: unknown): ContextActionPartInfo | null {
   const record = asRecord(part);
   if (!record) return null;
 
+  if (record.type === "tool-call") {
+    const actionName = asText(record.toolName);
+    const actionCallId = asText(record.toolCallId);
+    if (!actionName || !actionCallId) return null;
+
+    return cleanRecord({
+      actionName,
+      actionCallId,
+      status: "started" as const,
+      input: blocksToValue(normalizeBlocks(record.content)),
+    }) as ContextActionPartInfo;
+  }
+
+  if (record.type === "tool-result") {
+    const actionName = asText(record.toolName);
+    const actionCallId = asText(record.toolCallId);
+    if (!actionName || !actionCallId) return null;
+
+    const blocks = normalizeBlocks(record.content);
+    const state = asText(record.state).toLowerCase();
+    const failed = state === "output-error";
+
+    return cleanRecord({
+      actionName,
+      actionCallId,
+      status: failed ? ("failed" as const) : ("completed" as const),
+      output: failed ? undefined : blocksToValue(blocks),
+      errorText: failed ? blocksToErrorText(blocks) || "Action failed." : undefined,
+    }) as ContextActionPartInfo;
+  }
+
   if (typeof record.type === "string" && record.type.startsWith("tool-")) {
     const actionName = record.type.slice("tool-".length);
     const status = normalizeActionStatus(record.state);
-    return {
+    return cleanRecord({
       actionName,
       actionCallId: asText(record.toolCallId) || asText(record.actionCallId) || actionName,
       status,
       input: record.input ?? record.args,
       output: record.output,
-      errorText: readTextPayload(record.errorText ?? record.error),
-    };
+      errorText: readTextPayload(record.errorText ?? record.error) || undefined,
+    }) as ContextActionPartInfo;
   }
 
   if (record.type !== "action" && record.type !== "action_result") {
@@ -557,7 +588,7 @@ export function getActionPartInfo(part: unknown): ContextActionPartInfo | null {
     error !== undefined ? "failed" : output !== undefined ? "completed" : "started",
   );
 
-  return {
+  return cleanRecord({
     actionName,
     actionCallId:
       asText(content.actionCallId) ||
@@ -570,8 +601,8 @@ export function getActionPartInfo(part: unknown): ContextActionPartInfo | null {
     status,
     input: content.input ?? record.input,
     output,
-    errorText: readTextPayload(error),
-  };
+    errorText: readTextPayload(error) || undefined,
+  }) as ContextActionPartInfo;
 }
 
 export function getCreateMessageText(part: unknown): string {
