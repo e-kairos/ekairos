@@ -79,13 +79,14 @@ The default chat thread is user-facing; raw event metadata belongs in Workshop a
 
 - Message lists render as an agnostic transcript log (`role="log"`) with `aria-live`, `data-message-count`, `data-visible-message-count`, `data-turn-streaming`, and `data-at-bottom` so products and Workshop can inspect scroll/stream state without event-shape assumptions.
 - Rendered text blocks expose `data-message-text`, `data-message-role`, `data-message-surface`, `data-message-streaming`, `data-text-length`, and `data-has-analysis`; message buttons expose `data-message-action` for actions such as `copy` or adapter-owned analysis playback.
-- Message part containers expose `data-message-parts`, `data-message-role`, `data-message-surface`, `data-part-count`, `data-action-count`, and `data-attachment-count`; these counts describe rendered event parts, not provider internals.
+- Message part containers expose `data-message-parts`, `data-message-role`, `data-message-surface`, `data-part-count`, `data-action-count`, `data-attachment-count`, and `data-unknown-part-count`; these counts describe rendered event parts, not provider internals.
 - Default action rows expose `data-context-action`, `data-action-name`, `data-action-call-id`, `data-action-state`, `data-action-status`, `data-has-input`, `data-has-output`, and `data-has-error`; these describe normalized actions, not provider tool payloads.
 - Step lists expose `data-context-step-list`, `data-step-count`, `data-running-step-count`, `data-show-reasoning`, and `data-debug-enabled`; rendered steps expose `data-context-step`, `data-step-status`, `data-step-live`, `data-step-part-count`, `data-step-action-count`, and `data-step-has-debug` without raw step or execution ids.
 - Message lists should not render `event`, `status`, or `channel` chips by default; consumers must opt in with `showMessageMetadata` for explicit inspect/debug layouts.
 - Sticky streaming review is opt-in through `autoScroll`; consumers provide the constrained scroll rail with `classNames.messageList`.
 - Step lists should not render raw `event_step`, iteration, or execution labels by default.
 - Event ids, context ids, part payloads, and execution details stay available to adapters and Workshop.
+- Unknown provider/runtime parts increment `data-unknown-part-count` but do not render raw payloads in the default chat thread.
 - Product UIs may provide an explicit inspect/open-workshop action, but the message content should remain the primary visual signal.
 
 ## Runtime Surface Boundary

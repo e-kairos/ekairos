@@ -58,7 +58,9 @@ const MessageList = memo(function MessageList({
     const toMessage = (event: ContextEventForUI) => {
       const type = String(event?.type ?? "");
       const role =
-        type === INPUT_TEXT_ITEM_TYPE || type === "input" || type.startsWith("user.")
+        type === INPUT_TEXT_ITEM_TYPE ||
+        type === "input" ||
+        type.startsWith("user.")
           ? "user"
           : "assistant";
       return {
@@ -87,7 +89,7 @@ const MessageList = memo(function MessageList({
   const shouldStickToBottomRef = useRef(true);
   const visibleMessages = useMemo(
     () => messages.slice(Math.max(0, messages.length - visibleCount)),
-    [messages, visibleCount]
+    [messages, visibleCount],
   );
   const latestMessageId =
     visibleMessages.length > 0
@@ -107,20 +109,17 @@ const MessageList = memo(function MessageList({
     "data-visible-message-count": visibleMessages.length,
     role: "log",
   } as const;
-  const scrollToBottom = useCallback(
-    (behavior: ScrollBehavior = "smooth") => {
-      const element = scrollRef.current;
-      if (!element) return;
-      if (typeof element.scrollTo === "function") {
-        element.scrollTo({ behavior, top: element.scrollHeight });
-      } else {
-        element.scrollTop = element.scrollHeight;
-      }
-      shouldStickToBottomRef.current = true;
-      setIsAtBottom(true);
-    },
-    []
-  );
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const element = scrollRef.current;
+    if (!element) return;
+    if (typeof element.scrollTo === "function") {
+      element.scrollTo({ behavior, top: element.scrollHeight });
+    } else {
+      element.scrollTop = element.scrollHeight;
+    }
+    shouldStickToBottomRef.current = true;
+    setIsAtBottom(true);
+  }, []);
 
   const handleScroll = useCallback(() => {
     if (!autoScroll) return;
@@ -134,7 +133,13 @@ const MessageList = memo(function MessageList({
   useEffect(() => {
     if (!autoScroll || !shouldStickToBottomRef.current) return;
     scrollToBottom("auto");
-  }, [autoScroll, latestMessageId, visibleMessages.length, isTurnStreaming, scrollToBottom]);
+  }, [
+    autoScroll,
+    latestMessageId,
+    visibleMessages.length,
+    isTurnStreaming,
+    scrollToBottom,
+  ]);
 
   return (
     <div
@@ -143,7 +148,7 @@ const MessageList = memo(function MessageList({
       {...messageListStateAttrs}
       className={cn(
         "relative w-full max-w-3xl mx-auto space-y-6",
-        classNames?.messageList
+        classNames?.messageList,
       )}
     >
       {messages.length > visibleCount && (
@@ -158,7 +163,8 @@ const MessageList = memo(function MessageList({
       )}
 
       {visibleMessages.map((message: any) => {
-        const isLatest = message === visibleMessages[visibleMessages.length - 1];
+        const isLatest =
+          message === visibleMessages[visibleMessages.length - 1];
         const hasSteps =
           message.role === "assistant" &&
           Array.isArray(message.steps) &&
@@ -173,7 +179,10 @@ const MessageList = memo(function MessageList({
             key={String(message?.id)}
             className={classNames?.message?.container}
           >
-            <MessageHeader message={message} showMetadata={showMessageMetadata} />
+            <MessageHeader
+              message={message}
+              showMetadata={showMessageMetadata}
+            />
             {!hasSteps ? (
               <MessageParts
                 message={message}
@@ -204,7 +213,7 @@ const MessageList = memo(function MessageList({
           className={cn(
             "absolute bottom-3 right-3 z-10 inline-flex size-8 items-center justify-center rounded-full",
             "border border-border/70 bg-background/90 text-foreground shadow-lg transition-colors",
-            "hover:border-foreground/40 hover:bg-accent"
+            "hover:border-foreground/40 hover:bg-accent",
           )}
           onClick={() => scrollToBottom()}
           type="button"
@@ -220,9 +229,11 @@ export { MessageList, isNearScrollBottom };
 
 function isNearScrollBottom(
   element: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
-  threshold = 48
+  threshold = 48,
 ) {
-  return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <= threshold
+  );
 }
 
 function MessageHeader({
@@ -312,6 +323,6 @@ function hasVisibleAssistantParts(parts: unknown[]): boolean {
         getCreateMessageText(part).trim().length > 0
       );
     }
-    return getPartText(part).trim().length > 0 || Boolean(part.type);
+    return getPartText(part).trim().length > 0;
   });
 }

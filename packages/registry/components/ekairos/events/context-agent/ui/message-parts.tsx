@@ -121,12 +121,16 @@ function summarizeActionPart(view: ActionView): string {
     const msg =
       typeof outputRecord.message === "string" ? outputRecord.message : "";
 
-    if (actionName === "read_dataset_rows" && Array.isArray(outputRecord.rows)) {
+    if (
+      actionName === "read_dataset_rows" &&
+      Array.isArray(outputRecord.rows)
+    ) {
       return formatCount(outputRecord.rows.length, "row");
     }
 
     if (actionName === "sandbox_run_command") {
-      const status = typeof outputRecord.status === "string" ? outputRecord.status : "";
+      const status =
+        typeof outputRecord.status === "string" ? outputRecord.status : "";
       const exitCode =
         typeof outputRecord.exitCode === "number"
           ? `exit ${outputRecord.exitCode}`
@@ -224,6 +228,23 @@ function messageTextAttrs({
   } as const;
 }
 
+function isUnknownRenderablePart(part: Record<string, unknown>) {
+  if (
+    part.type === "reasoning" ||
+    part.type === "source" ||
+    part.type === "source-url" ||
+    part.type === "source-document" ||
+    part.type === "file"
+  ) {
+    return false;
+  }
+  const action = getActionPartInfo(part);
+  if (action) {
+    return false;
+  }
+  return getPartText(part).trim().length === 0;
+}
+
 const MessageParts = memo(function MessageParts({
   message,
   status,
@@ -313,7 +334,7 @@ const MessageParts = memo(function MessageParts({
 
   const [isCoTOpen, setIsCoTOpen] = useState(isStreaming);
   const [channelView, setChannelView] = useState<"none" | "email" | "whatsapp">(
-    "none"
+    "none",
   );
 
   useEffect(() => {
@@ -366,7 +387,7 @@ const MessageParts = memo(function MessageParts({
           className={cn(
             message.role === "user"
               ? (classNames as AgentClassNames | undefined)?.message?.user
-              : (classNames as AgentClassNames | undefined)?.message?.assistant
+              : (classNames as AgentClassNames | undefined)?.message?.assistant,
           )}
         >
           <MessageContent
@@ -416,9 +437,7 @@ const MessageParts = memo(function MessageParts({
     return (
       <Action
         key={i}
-        className={cn(
-          isStepSurface && "mb-0 border-border/70 bg-background"
-        )}
+        className={cn(isStepSurface && "mb-0 border-border/70 bg-background")}
         data-action-call-id={actionCallId}
         data-action-name={actionName}
         data-action-state={state}
@@ -478,12 +497,12 @@ const MessageParts = memo(function MessageParts({
     })
     .filter((item) => isStreaming || item.content.length > 0);
   const hasReasoningContent = isStreaming || reasoningItems.length > 0;
-  const reasoningTitle = reasoningItems.length === 1
-    ? reasoningItems[0]!.title
-    : "Razonamiento";
-  const renderedReasoningItems = reasoningItems.length > 0
-    ? reasoningItems
-    : [{ key: "streaming", title: "Razonamiento", content: "" }];
+  const reasoningTitle =
+    reasoningItems.length === 1 ? reasoningItems[0]!.title : "Razonamiento";
+  const renderedReasoningItems =
+    reasoningItems.length > 0
+      ? reasoningItems
+      : [{ key: "streaming", title: "Razonamiento", content: "" }];
   const actionCount = useMemo(() => {
     const actionCallIds = new Set<string>();
     for (const part of normalizedParts) {
@@ -516,8 +535,13 @@ const MessageParts = memo(function MessageParts({
         }).length,
     [normalizedParts],
   );
+  const unknownPartCount = useMemo(
+    () => normalizedParts.filter(isUnknownRenderablePart).length,
+    [normalizedParts],
+  );
 
-  const defaultUserContentChrome = "bg-primary text-primary-foreground shadow-sm";
+  const defaultUserContentChrome =
+    "bg-primary text-primary-foreground shadow-sm";
   const userContentChrome =
     (classNames as AgentClassNames | undefined)?.message?.userContent ??
     defaultUserContentChrome;
@@ -552,7 +576,7 @@ const MessageParts = memo(function MessageParts({
         className={cn(
           message.role === "user"
             ? (classNames as AgentClassNames | undefined)?.message?.user
-            : (classNames as AgentClassNames | undefined)?.message?.assistant
+            : (classNames as AgentClassNames | undefined)?.message?.assistant,
         )}
       >
         <MessageContent
@@ -562,7 +586,7 @@ const MessageParts = memo(function MessageParts({
           )}
         >
           <div className="flex flex-wrap gap-2 mt-2">
-            {attachments.map((att: any, i: number) => (
+            {attachments.map((att: any, i: number) =>
               att.mediaType?.startsWith("image/") ? (
                 <a
                   key={i}
@@ -593,8 +617,8 @@ const MessageParts = memo(function MessageParts({
                   />
                   <span className="truncate">{att.filename}</span>
                 </a>
-              )
-            ))}
+              ),
+            )}
           </div>
         </MessageContent>
       </Message>
@@ -688,6 +712,7 @@ const MessageParts = memo(function MessageParts({
       data-message-role={message.role}
       data-message-surface={surface}
       data-part-count={normalizedParts.length}
+      data-unknown-part-count={unknownPartCount}
     >
       {sources.length > 0 && message.role === "assistant" && (
         <Sources className="mb-2">
@@ -707,7 +732,7 @@ const MessageParts = memo(function MessageParts({
             onToggle={(event) => setIsCoTOpen(event.currentTarget.open)}
             className={cn(
               "mb-3 border-l border-border pl-3",
-              isStepSurface && "mb-2"
+              isStepSurface && "mb-2",
             )}
           >
             <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground">
@@ -715,9 +740,7 @@ const MessageParts = memo(function MessageParts({
             </summary>
             <div className="mt-2 space-y-3">
               {renderedReasoningItems.map((item) => (
-                <div
-                  key={item.key}
-                >
+                <div key={item.key}>
                   {renderedReasoningItems.length > 1 ? (
                     <div className="mb-1 text-xs font-medium text-muted-foreground">
                       {item.title}
@@ -735,7 +758,13 @@ const MessageParts = memo(function MessageParts({
         ) : null)}
 
       {normalizedParts.map((part: any, i: number) => {
-        if (part.type === "reasoning" || part.type === "source" || part.type === "file") {
+        if (
+          part.type === "reasoning" ||
+          part.type === "source" ||
+          part.type === "source-url" ||
+          part.type === "source-document" ||
+          part.type === "file"
+        ) {
           return null;
         }
 
@@ -779,7 +808,7 @@ const MessageParts = memo(function MessageParts({
                   message.role === "user"
                     ? (classNames as AgentClassNames | undefined)?.message?.user
                     : (classNames as AgentClassNames | undefined)?.message
-                        ?.assistant
+                        ?.assistant,
                 )}
               >
                 <MessageContent
