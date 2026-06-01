@@ -1,6 +1,8 @@
 # Ekairos Registry
 
-shadcn-compatible component registry for Ekairos UI packages.
+Domain-first shadcn-compatible component registry for Ekairos UI packages.
+The registry is organized as `domain -> components -> /r/*.json`; domain
+runtime APIs stay in package dependencies such as `@ekairos/events`.
 
 ## Start
 
@@ -11,7 +13,7 @@ pnpm --filter registry dev
 Default URL:
 
 ```txt
-http://localhost:3001
+http://localhost:3030
 ```
 
 ## Consume from another app
@@ -19,15 +21,15 @@ http://localhost:3001
 ```json
 {
   "registries": {
-    "@ekairos": "http://localhost:3001/{name}.json"
+    "@ekairos": "http://localhost:3030/r/{name}.json"
   }
 }
 ```
 
-Example:
+Example for the first published domain component:
 
 ```bash
-pnpm dlx shadcn@latest add @ekairos/agent
+pnpm dlx shadcn@4.8.0 add https://registry.ekairos.dev/r/event-context-panel.json
 ```
 
 ## E2E

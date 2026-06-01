@@ -1,4 +1,5 @@
 import { i } from "@instantdb/core";
+import { z } from "zod";
 
 import { defineDomainAction, domain, type DomainActionsOf } from "../index.ts";
 
@@ -13,12 +14,10 @@ const reflectedDomain = domain("typed-action-reflection")
     rooms: {},
   })
   .withActions({
-    getSandbox: defineDomainAction<
-      Record<string, unknown>,
-      { sandboxId: string },
-      { id: string }
-    >({
+    getSandbox: defineDomainAction({
       name: "typedActionReflection.getSandbox",
+      input: z.object({ sandboxId: z.string() }),
+      output: z.object({ id: z.string() }),
       execute: async ({ input }) => ({ id: input.sandboxId }),
     }),
   });
@@ -26,7 +25,6 @@ const reflectedDomain = domain("typed-action-reflection")
 const reflectedActions: DomainActionsOf<typeof reflectedDomain> = reflectedDomain.actions;
 
 reflectedActions.getSandbox.execute({
-  env: {},
   input: { sandboxId: "sandbox_1" },
   runtime: {},
 });
@@ -35,7 +33,6 @@ reflectedActions.getSandbox.execute({
 reflectedActions.missingSandbox;
 
 reflectedActions.getSandbox.execute({
-  env: {},
   // @ts-expect-error action inputs keep the declared shape.
   input: { wrong: "sandbox_1" },
   runtime: {},

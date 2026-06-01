@@ -5,7 +5,6 @@ import { init } from "@instantdb/admin"
 import http from "node:http"
 import { eventsDomain } from "@ekairos/events"
 import { configureContextDurableWorkflow } from "@ekairos/events/runtime"
-import { Sandbox } from "@ekairos/sandbox/sandbox"
 
 import {
   ASSISTANT_TEXT,
@@ -17,6 +16,7 @@ import {
   codexReactorDurableWorkflow,
   codexWorkflowContext,
 } from "./codex.reactor.workflow-fixtures.js"
+import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 import { verifyEventDomainRun } from "../../../../events/src/tests/context.reactor-contract.js"
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -217,7 +217,7 @@ describeWorkflowInstant("codex reactor + durable context engine workflow", () =>
       (part) =>
         asString(part.type) === "action" &&
         asString(asRecord(part.content).status) === "started" &&
-        asString(asRecord(part.content).actionName) === Sandbox.runCommandActionName,
+        asString(asRecord(part.content).actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
     )
     expect(commandCallPart).toBeTruthy()
     const commandCallJson = asRecord(asRecord(commandCallPart?.content).input)
@@ -227,7 +227,7 @@ describeWorkflowInstant("codex reactor + durable context engine workflow", () =>
       (part) =>
         asString(part.type) === "action" &&
         asString(asRecord(part.content).status) === "completed" &&
-        asString(asRecord(part.content).actionName) === Sandbox.runCommandActionName,
+        asString(asRecord(part.content).actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
     )
     const commandResultJson = asRecord(asRecord(commandResultPart?.content).output)
     expect(commandResultJson.success).toBe(true)

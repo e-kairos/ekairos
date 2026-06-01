@@ -1,8 +1,7 @@
 "use client";
 
-import { ComponentDocPage } from "../_component-page";
-import { eventStepsRegistryItem } from "./config";
+import { redirect } from "next/navigation";
 
 export default function EventStepsPage() {
-  return <ComponentDocPage item={eventStepsRegistryItem} />;
+  redirect("/events/components");
 }

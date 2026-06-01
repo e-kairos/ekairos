@@ -1,11 +1,8 @@
 import { Sandbox as VercelSandbox, Snapshot as VercelSnapshot, type NetworkPolicy } from "@vercel/sandbox"
 import { Daytona, type Sandbox as DaytonaSandbox } from "@daytonaio/sdk"
-import { id, init, type InstantAdminDatabase } from "@instantdb/admin"
-import type { InstaQLParams } from "@instantdb/core"
-import type { DomainInstantSchema } from "@ekairos/domain"
+import { id, init } from "@instantdb/admin"
 import { resolveRuntime, type RuntimeDomainSource } from "@ekairos/domain/runtime"
 import { runCommandInSandbox, type CommandResult } from "./commands.js"
-import { sandboxSchemaDomain } from "./schema.js"
 import type { SandboxConfig, SandboxInstallableSkill } from "./types.js"
 import {
   buildDeclarativeImage,
@@ -39,7 +36,14 @@ import {
 import { randomUUID } from "node:crypto"
 import path from "node:path"
 
-type SandboxSchemaType = DomainInstantSchema<typeof sandboxSchemaDomain>
+type SandboxAdminDb = {
+  query: (query: unknown) => Promise<any>
+  transact: (mutations: unknown) => Promise<any>
+  tx: any
+  streams?: any
+  auth?: any
+  config?: any
+}
 
 export interface SandboxRecord {
   id: string
@@ -372,9 +376,9 @@ export class SandboxCommandRun implements PromiseLike<CommandResult> {
 }
 
 export class SandboxService {
-  private adminDb: InstantAdminDatabase<SandboxSchemaType, true>
+  private adminDb: SandboxAdminDb
 
-  constructor(db: InstantAdminDatabase<SandboxSchemaType, true>) {
+  constructor(db: SandboxAdminDb) {
     this.adminDb = db
   }
 
@@ -1109,7 +1113,7 @@ export class SandboxService {
   private async getSandboxRecord(sandboxId: string): Promise<any | null> {
     const query = {
       sandbox_sandboxes: { $: { where: { id: sandboxId } as any, limit: 1 }, user: {} },
-    } satisfies InstaQLParams<SandboxSchemaType>
+    }
     const recordResult: any = await this.adminDb.query(query)
     return recordResult?.sandbox_sandboxes?.[0] ?? null
   }
@@ -1121,7 +1125,7 @@ export class SandboxService {
           $: { where: { id: processId } as any, limit: 1 },
           sandbox: {},
         },
-      } satisfies InstaQLParams<SandboxSchemaType>
+      }
       const processResult: any = await this.adminDb.query(query)
       const processRow = processResult?.sandbox_processes?.[0]
       if (!processRow) return { ok: false, error: "sandbox_process_not_found" }
@@ -1218,7 +1222,7 @@ export class SandboxService {
         $: { where: { id: processId } as any, limit: 1 },
         sandbox: {},
       },
-    } satisfies InstaQLParams<SandboxSchemaType>
+    }
     const result: any = await this.adminDb.query(query)
     return result?.sandbox_processes?.[0] ?? null
   }

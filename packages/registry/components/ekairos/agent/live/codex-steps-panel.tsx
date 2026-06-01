@@ -183,7 +183,7 @@ export function CodexStepsPanel({ controller }: { controller: CodexStepsControll
                         : "ready"
                     }
                     isLatest
-                    toolComponents={{}}
+                    actionComponents={{}}
                     showReasoning
                   />
                 </div>

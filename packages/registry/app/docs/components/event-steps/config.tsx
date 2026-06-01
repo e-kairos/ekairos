@@ -116,7 +116,7 @@ export const eventStepsRegistryItem: RegistryItem = {
         "Optional map of step renderers keyed by `event_steps.kind`, plus an optional `default` renderer.",
     },
     {
-      name: "toolComponents",
+      name: "actionComponents",
       type: "Record<string, React.ComponentType<any>>",
       default: "{}",
       description: "Forwarded to the default step renderer so part-level tool views stay injectable.",

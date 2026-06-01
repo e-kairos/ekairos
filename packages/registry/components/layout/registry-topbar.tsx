@@ -3,15 +3,26 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { EkairosLogo } from "@/components/ekairos/ekairos-logo";
+import { OrbLogo } from "@/components/ekairos/orb-logo";
+import { domainRegistry } from "@/lib/domain-registry";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Registry", match: (pathname: string) => pathname === "/" },
   {
-    href: "/docs/components/use-context",
-    label: "useContext",
-    match: (pathname: string) => pathname.startsWith("/docs/components/use-context"),
+    href: "/",
+    label: "Domains",
+    match: (pathname: string) =>
+      pathname === "/" ||
+      domainRegistry.some(
+        (domain) => pathname === domain.href || pathname.startsWith(`${domain.href}/`),
+      ) ||
+      pathname.startsWith("/docs/domains"),
+  },
+  {
+    href: "/registry",
+    label: "Manifest",
+    match: (pathname: string) =>
+      pathname.startsWith("/registry") || pathname.startsWith("/r/"),
   },
 ] as const;
 
@@ -19,14 +30,25 @@ export function RegistryTopbar() {
   const pathname = usePathname();
 
   return (
-    <div className="fixed inset-x-0 top-0 z-[70] border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-      <div className="mx-auto flex h-11 w-full max-w-5xl items-center justify-between gap-4 px-4 md:px-6">
-        <Link href="/" className="flex min-w-0 items-center gap-3">
-          <EkairosLogo size="sm" />
-          <span className="hidden text-sm font-medium sm:inline">Ekairos Registry</span>
+    <div className="fixed inset-x-0 top-0 z-[70] border-b border-white/15 bg-black text-white">
+      <div className="flex h-14 w-full items-center justify-between gap-4 px-4">
+        <Link
+          href="/"
+          className="flex h-8 min-w-0 shrink-0 items-center gap-2"
+          aria-label="Ekairos Registry"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center">
+            <OrbLogo size={32} className="text-white" ariaHidden />
+          </span>
+          <span className="hidden h-8 items-center border border-white/20 px-2 font-mono text-[11px] uppercase tracking-[0.24em] text-white sm:flex">
+            registry
+          </span>
         </Link>
 
-        <nav className="flex items-center gap-1">
+        <nav
+          aria-label="Registry navigation"
+          className="flex min-w-0 items-center gap-1 overflow-x-auto font-mono text-[11px] uppercase tracking-[0.22em]"
+        >
           {NAV_ITEMS.map((item) => {
             const active = item.match(pathname);
             return (
@@ -34,22 +56,17 @@ export function RegistryTopbar() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                  active
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  "relative flex h-8 items-center px-2 transition-colors",
+                  active ? "text-white" : "text-white/55 hover:text-white",
                 )}
               >
                 {item.label}
+                {active ? (
+                  <span className="pointer-events-none absolute inset-x-2 bottom-0 h-[2px] bg-red-600" />
+                ) : null}
               </Link>
             );
           })}
-          <a
-            href="/r/use-context.json"
-            className="rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-          >
-            JSON
-          </a>
         </nav>
       </div>
     </div>

@@ -90,9 +90,9 @@ async function domainActionTypes() {
   }
 }
 
-sandbox.actions()[Sandbox.runCommandActionName].execute({ command: "pwd" }, {} as any)
+sandbox.actions()[Sandbox.executeCommandActionName].execute({ command: "pwd" }, {} as any)
 
-sandbox.actions()[Sandbox.runCommandActionName].execute(
+sandbox.actions()[Sandbox.executeCommandActionName].execute(
   // @ts-expect-error sandboxId is bound by the Sandbox instance
   { sandboxId: "sandbox_456", command: "pwd" },
   {} as any,

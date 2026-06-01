@@ -7,11 +7,29 @@ export type {
 
 export { sandboxDomain } from "./actions.js"
 export { sandboxDomain as sandboxSchemaDomain } from "./schema.js"
-export { sandboxDomain as publicSandboxDomain } from "./public.js"
+export {
+  SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
+  SANDBOX_PROCESS_KINDS,
+  SANDBOX_PROCESS_MODES,
+  SANDBOX_PROCESS_STATUSES,
+  SANDBOX_PROCESS_STREAM_CHUNK_TYPES,
+  sandboxCommandResultSchema,
+  sandboxExecuteCommandInputSchema,
+  sandboxExecuteCommandOutputSchema,
+  sandboxProcessRunResultSchema,
+  sandboxProcessStreamChunkSchema,
+} from "./contract.js"
+export type {
+  SandboxCommandResult,
+  SandboxExecuteCommandInput,
+  SandboxExecuteCommandOutput,
+  SandboxProcessStreamChunkType,
+} from "./contract.js"
+export {
+  sandboxDomain as publicSandboxDomain,
+} from "./public.js"
 export { Sandbox } from "./sandbox.js"
 export type {
-  SandboxRunCommandInput,
-  SandboxRunCommandOutput,
   SandboxActions,
   SerializedSandbox,
   SerializedSandboxState,

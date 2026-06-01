@@ -1,10 +1,10 @@
-﻿import { tool } from "ai"
+import { tool } from "ai"
 import { z } from "zod"
 
 import {
   createContext,
   createScriptedReactor,
-  didToolExecute,
+  didActionExecute,
   runContextReactionDirect,
   type ContextToolExecuteContext,
   type ContextDurableWorkflowPayload,
@@ -180,7 +180,7 @@ function createStorySmoke(mode: WorkflowSmokeEnv["mode"]) {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "echo"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "echo"))
       .build()
   }
 

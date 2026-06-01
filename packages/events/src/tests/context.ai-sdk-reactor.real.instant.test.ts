@@ -8,7 +8,7 @@ import { z } from "zod"
 
 import {
   createContext,
-  didToolExecute,
+  didActionExecute,
   eventsDomain,
   type ContextItem,
 } from "../index.ts"
@@ -134,7 +134,7 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
         }),
       }))
       .model(REAL_MODEL)
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "set_status"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "set_status"))
       .build()
 
     const shell = await timer.measure("reactShellMs", async () =>

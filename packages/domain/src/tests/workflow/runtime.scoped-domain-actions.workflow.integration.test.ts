@@ -16,7 +16,7 @@ describeRuntimeWorkflow("workflow scoped domain actions", () => {
   const app = useRuntimeWorkflowTestApp();
 
   it(
-    "runs runtime.use(domain).actions through step-safe actions and keeps nested composition in-process",
+    "runs runtime.use(domain).actions through scoped actions and keeps nested composition in-process",
     async () => {
       // given: a workflow runtime and scoped domain actions that call each other
       // in process through runtime.use(domain).actions.

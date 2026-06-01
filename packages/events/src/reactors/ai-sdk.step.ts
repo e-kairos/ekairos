@@ -121,7 +121,7 @@ export async function executeAiSdkReaction<Env extends ContextEnvironment = Cont
   stepId?: string
 }): Promise<{
   assistantEvent: ContextItem
-  toolCalls: any[]
+  actionCalls: any[]
   messagesForModel: ModelMessage[]
   llm?: {
     provider?: string
@@ -162,7 +162,7 @@ export async function executeAiSdkReaction<Env extends ContextEnvironment = Cont
   }
 
   const { jsonSchema, gateway, smoothStream, stepCountIs, streamText } = await import("ai")
-  const { extractToolCallsFromParts } = await import("../context.toolcalls.js")
+  const { extractActionCallsFromParts } = await import("../context.action-calls.js")
 
   const resolvedModel =
     typeof params.model === "string"
@@ -314,7 +314,7 @@ export async function executeAiSdkReaction<Env extends ContextEnvironment = Cont
 
   const assistantEvent = await finishPromise
   const finishedAtMs = Date.now()
-  const toolCalls = extractToolCallsFromParts((assistantEvent as any)?.content?.parts)
+  const actionCalls = extractActionCallsFromParts((assistantEvent as any)?.content?.parts)
 
   const latencyMs = Math.max(0, finishedAtMs - startedAtMs)
   let usage: any = undefined
@@ -440,5 +440,5 @@ export async function executeAiSdkReaction<Env extends ContextEnvironment = Cont
     // tracing must not break reaction
   }
 
-  return { assistantEvent, toolCalls, messagesForModel, llm }
+  return { assistantEvent, actionCalls, messagesForModel, llm }
 }

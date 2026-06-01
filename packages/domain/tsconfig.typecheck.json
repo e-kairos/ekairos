@@ -7,6 +7,7 @@
   "include": [
     "src",
     "src/__type_tests__/domain.builder-result-shape.typecheck.ts",
+    "src/__type_tests__/domain.callable-runtime.typecheck.ts",
     "src/__type_tests__/domain.classic-compose.typecheck.ts",
     "src/__type_tests__/domain.dx-domain-names.typecheck.ts",
     "src/__type_tests__/domain.dx-instant-schema.typecheck.ts",
@@ -34,7 +35,6 @@
     "src/__type_tests__/runtime.domain-names-transitive.typecheck.ts",
     "src/__type_tests__/runtime.use.typecheck.ts",
     "src/__type_tests__/workflow-output-invalid-execute.typecheck.ts",
-    "src/__type_tests__/workflow-output-missing-serde.typecheck.ts",
     "src/__type_tests__/workflow-output-normal.typecheck.ts",
     "src/__type_tests__/workflow-output-runtime.typecheck.ts"
   ]

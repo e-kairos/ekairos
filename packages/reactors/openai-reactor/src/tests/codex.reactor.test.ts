@@ -5,7 +5,6 @@ import { dirname } from "node:path"
 
 import type { ContextEnvironment } from "@ekairos/events/runtime"
 import type { ContextItem, ContextReactorParams, ContextSkillPackage } from "@ekairos/events"
-import { Sandbox } from "@ekairos/sandbox/sandbox"
 
 import {
   createCodexReactor,
@@ -16,6 +15,7 @@ import {
   type CodexMappedChunk,
   type CodexTurnResult,
 } from "../index.js"
+import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 
 type TestContext = Record<string, unknown>
 type TestEnv = ContextEnvironment & {
@@ -247,7 +247,7 @@ function buildAudit(params: {
     const content = asRecord(record.content)
     return (
       asString(record.type) === "action" &&
-      asString(content.actionName) === Sandbox.runCommandActionName
+      asString(content.actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME
     )
   })
   const assistantText = getAssistantTextPart(params.result.assistantEvent)
@@ -1013,7 +1013,7 @@ describe("createCodexReactor", () => {
     expect((audit.stream.emittedChunkTypes as Record<string, number>)["chunk.action_completed"]).toBeUndefined()
   })
 
-  it("maps Codex commandExecution notifications to sandbox_run_command action parts", async () => {
+  it("maps Codex commandExecution notifications to executeCommand action parts", async () => {
     const collected = collectWritableChunks()
     const commandId = "cmd-001"
     const providerChunks: Record<string, unknown>[] = [
@@ -1088,6 +1088,18 @@ describe("createCodexReactor", () => {
           providerContextId: "thr-command",
           turnId: "turn-command-001",
           assistantText: "",
+          metadata: {
+            sandbox: {
+              sandboxId: "sandbox-001",
+              commandProcesses: {
+                [commandId]: {
+                  processId: "process-001",
+                  streamId: "stream-001",
+                  streamClientId: "sandbox-process:process-001",
+                },
+              },
+            },
+          },
         }
       },
     })
@@ -1109,7 +1121,7 @@ describe("createCodexReactor", () => {
       const content = asRecord(part.content)
       return (
         asString(part.type) === "action" &&
-        asString(content.actionName) === Sandbox.runCommandActionName
+        asString(content.actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME
       )
     })
     const started = commandParts.find(
@@ -1124,19 +1136,38 @@ describe("createCodexReactor", () => {
     expect(commandParts).toHaveLength(2)
     expect(input).toMatchObject({
       command: "git status --short",
+      args: [],
       cwd: "/workspace/repo",
+      kind: "command",
+      mode: "foreground",
+      metadata: {
+        source: "codex.commandExecution",
+      },
     })
     expect(output).toMatchObject({
+      sandboxId: "sandbox-001",
+      processId: "process-001",
+      streamId: "stream-001",
+      streamClientId: "sandbox-process:process-001",
       success: true,
       exitCode: 0,
       output: "clean",
       command: "git status --short",
       durationMs: 12,
-      status: "completed",
+      status: "exited",
     })
     expect(asRecord(started?.reactorMetadata)).toMatchObject({
       reactorKind: "codex",
       source: "codex.timeline",
+      provider: {
+        codex: {
+          toolType: "commandExecution",
+          success: true,
+          response: {
+            outputText: "clean",
+          },
+        },
+      },
     })
   })
 
@@ -1224,27 +1255,35 @@ describe("createCodexReactor", () => {
     const parts = Array.isArray(result.assistantEvent.content?.parts)
       ? result.assistantEvent.content.parts.map((part) => asRecord(part))
       : []
-    const callPart = parts.find((part) => asString(part.type) === "tool-call" && asString(part.toolName) === "createMessage")
-    const resultPart = parts.find((part) => asString(part.type) === "tool-result" && asString(part.toolName) === "createMessage")
-    const callContent = Array.isArray(callPart?.content) ? callPart?.content.map((entry) => asRecord(entry)) : []
-    const resultContent = Array.isArray(resultPart?.content) ? resultPart?.content.map((entry) => asRecord(entry)) : []
-    const callMetadata = asRecord(callPart?.metadata)
-    const resultMetadata = asRecord(resultPart?.metadata)
+    const callPart = parts.find((part) => {
+      const content = asRecord(part.content)
+      return (
+        asString(part.type) === "action" &&
+        asString(content.status) === "started" &&
+        asString(content.actionName) === "createMessage"
+      )
+    })
+    const resultPart = parts.find((part) => {
+      const content = asRecord(part.content)
+      return (
+        asString(part.type) === "action" &&
+        asString(content.status) === "completed" &&
+        asString(content.actionName) === "createMessage"
+      )
+    })
+    const callContent = asRecord(callPart?.content)
+    const resultContent = asRecord(resultPart?.content)
+    const callMetadata = asRecord(callPart?.reactorMetadata)
+    const resultMetadata = asRecord(resultPart?.reactorMetadata)
     const callProvider = asRecord(asRecord(callMetadata.provider).codex)
     const resultProvider = asRecord(asRecord(resultMetadata.provider).codex)
 
     expect(callPart).toBeTruthy()
     expect(resultPart).toBeTruthy()
-    expect(callContent[0]).toMatchObject({
-      type: "json",
-      value: { message: "hello from canonical parts" },
-    })
-    expect(resultContent[0]).toMatchObject({
-      type: "json",
-      value: { message: "hello from canonical parts" },
-    })
-    expect(JSON.stringify(callContent[0]?.value)).not.toContain("providerToolType")
-    expect(JSON.stringify(resultContent[0]?.value)).not.toContain("success")
+    expect(callContent.input).toMatchObject({ message: "hello from canonical parts" })
+    expect(resultContent.output).toMatchObject({ message: "hello from canonical parts" })
+    expect(JSON.stringify(callContent.input)).not.toContain("providerToolType")
+    expect(JSON.stringify(resultContent.output)).not.toContain("success")
     expect(callProvider).toMatchObject({
       threadId: "thr-dynamic-tool",
       turnId: "turn-dynamic-tool-001",
@@ -1259,6 +1298,126 @@ describe("createCodexReactor", () => {
       success: true,
     })
     expect(asRecord(resultProvider.response)).toMatchObject({ success: true })
+  })
+
+  it("preserves nested Codex app-server dynamic action identity", async () => {
+    const collected = collectWritableChunks()
+    const actionCallId = "call_read_dataset_rows_001"
+    const providerChunks: Record<string, unknown>[] = [
+      {
+        method: "turn/started",
+        params: {
+          threadId: "thr-nested-dynamic-tool",
+          turn: { id: "turn-nested-dynamic-tool-001", status: "inProgress" },
+        },
+      },
+      {
+        id: "rpc-tool-call-nested-001",
+        method: "item/tool/call",
+        params: {
+          threadId: "thr-nested-dynamic-tool",
+          turnId: "turn-nested-dynamic-tool-001",
+          item: {
+            id: actionCallId,
+            type: "toolCall",
+            name: "read_dataset_rows",
+            arguments: "{\"datasetId\":\"ds-001\",\"limit\":3}",
+          },
+        },
+      },
+      {
+        method: "item/tool/result",
+        params: {
+          threadId: "thr-nested-dynamic-tool",
+          turnId: "turn-nested-dynamic-tool-001",
+          item: {
+            id: actionCallId,
+            type: "toolCall",
+            name: "read_dataset_rows",
+          },
+          result: {
+            success: true,
+            contentItems: [
+              {
+                type: "inputText",
+                text: "{\"rows\":[{\"id\":\"row-001\"}],\"done\":true,\"cursor\":1}",
+              },
+            ],
+          },
+        },
+      },
+      {
+        method: "turn/completed",
+        params: {
+          threadId: "thr-nested-dynamic-tool",
+          turn: { id: "turn-nested-dynamic-tool-001", status: "completed" },
+        },
+      },
+    ]
+
+    const mappedCall = defaultMapCodexChunk(providerChunks[1])
+    const mappedCallData = asRecord(mappedCall.data)
+    expect(mappedCall.chunkType).toBe("chunk.action_started")
+    expect(mappedCall.actionRef).toBe(actionCallId)
+    expect(mappedCallData.actionName).toBe("read_dataset_rows")
+    expect(asRecord(mappedCallData.input)).toMatchObject({ datasetId: "ds-001", limit: 3 })
+
+    const reactor = createCodexReactor<TestContext, CodexConfig, TestEnv>({
+      resolveConfig: async () => ({
+        appServerUrl: "http://127.0.0.1:3436",
+        repoPath: "/workspace/repo",
+        providerContextId: "thr-nested-dynamic-tool",
+        model: "openai/gpt-5.2-codex",
+      }),
+      executeTurn: async ({ emitChunk }) => {
+        for (const chunk of providerChunks) {
+          await emitChunk(chunk)
+        }
+        return {
+          providerContextId: "thr-nested-dynamic-tool",
+          turnId: "turn-nested-dynamic-tool-001",
+          assistantText: "",
+        }
+      },
+    })
+
+    const result = await reactor(
+      createParams({
+        writable: collected.writable,
+        contextId: "ctx-nested-dynamic-tool",
+        eventId: "evt-nested-dynamic-tool",
+        executionId: "exe-nested-dynamic-tool",
+        stepId: "step-nested-dynamic-tool",
+      }),
+    )
+
+    const parts = Array.isArray(result.assistantEvent.content?.parts)
+      ? result.assistantEvent.content.parts.map((part) => asRecord(part))
+      : []
+    const actionParts = parts.filter((part) => {
+      const content = asRecord(part.content)
+      return asString(part.type) === "action" && asString(content.actionCallId) === actionCallId
+    })
+    const started = actionParts.find(
+      (part) => asString(asRecord(part.content).status) === "started",
+    )
+    const completed = actionParts.find(
+      (part) => asString(asRecord(part.content).status) === "completed",
+    )
+    const startedContent = asRecord(started?.content)
+    const completedContent = asRecord(completed?.content)
+
+    expect(actionParts).toHaveLength(2)
+    expect(startedContent.actionName).toBe("read_dataset_rows")
+    expect(completedContent.actionName).toBe("read_dataset_rows")
+    expect(startedContent.actionName).not.toBe("call")
+    expect(completedContent.actionName).not.toBe("result")
+    expect(startedContent.input).toMatchObject({ datasetId: "ds-001", limit: 3 })
+    expect(completedContent.output).toMatchObject({
+      rows: [{ id: "row-001" }],
+      done: true,
+      cursor: 1,
+    })
   })
 
   const realProviderUrl = asString(process.env.CODEX_REACTOR_REAL_URL).trim()

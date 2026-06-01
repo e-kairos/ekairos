@@ -1,47 +1,55 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-async function expectEventStepsDemoToComplete(page: Page) {
-  await expect(page.getByTestId("event-steps-status")).toBeVisible();
-  await expect
-    .poll(
-      async () =>
-        ((await page.getByTestId("event-steps-status").textContent()) ?? "").trim(),
-      { timeout: 60_000 },
-    )
-    .toContain("completed");
-}
-
-test("events domain exposes overview, demos, and event-steps preview", async ({ page }) => {
+test("events domain exposes installable components by domain", async ({ page }) => {
   test.setTimeout(180_000);
 
-  await page.goto("/docs/domains/events");
-  await expect(page.getByRole("heading", { name: "Events", level: 1 })).toBeVisible();
-  await expect(page.locator("a[href='/docs/domains/events/demos/scripted']").first()).toBeVisible();
-  await expect(page.locator("a[href='/docs/domains/events/demos/ai-sdk']").first()).toBeVisible();
-  await expect(page.locator("a[href='/docs/domains/events/demos/codex']").first()).toBeVisible();
+  await page.goto("/events/components");
+  await expect(page.getByRole("heading", { name: "Events components." })).toBeVisible();
+  await expect(page.locator("#event-context-panel")).toBeVisible();
+  await expect(page.getByText("@ekairos/events@beta").first()).toBeVisible();
+  await expect(page.getByText("shadcn@4.8.0").first()).toBeVisible();
+  await expect(page.getByText("registry:hook")).toHaveCount(0);
+  await expect(page.getByText("components/ekairos/events/context/index.ts")).toHaveCount(0);
 
-  await page.goto("/docs/domains/events/demos/scripted");
-  await expectEventStepsDemoToComplete(page);
+  const response = await page.request.get("/r/event-context-panel.json");
+  expect(response.ok()).toBe(true);
+  const json = await response.json();
+  expect(json.type).toBe("registry:component");
+  expect(json.dependencies).toContain("@ekairos/events@beta");
+  expect(json.files[0].target).toBe("components/ekairos/events/event-context-panel.tsx");
+  expect(json.files[0].content).toContain('from "@ekairos/events/react"');
 
-  await page.goto("/docs/domains/events/demos/ai-sdk");
-  await expectEventStepsDemoToComplete(page);
+  await page.goto("/registry/event-context-panel");
+  await expect(page.getByRole("heading", { name: "EventContextPanel" })).toBeVisible();
+  await expect(page.getByText("/events registry component")).toBeVisible();
+  await expect(page.getByText("components/ekairos/events/event-context-panel.tsx")).toBeVisible();
+});
 
-  await page.goto("/docs/domains/events/demos/codex");
-  await expectEventStepsDemoToComplete(page);
+test("event component docs preview the real domain component", async ({ page }) => {
+  const prompt = "Confirma que el preview usa el panel real";
 
-  await page.goto("/docs/components/event-steps");
-  await expect(page.getByRole("heading", { name: "Event Steps" })).toBeVisible();
-  await expect(page.getByTestId("component-preview-ephemeral-app")).toBeVisible();
-  await expect(page.getByTestId("component-preview-app-id")).toBeVisible();
-  await expect(page.getByTestId("event-steps-scenario-scripted")).toBeVisible();
+  await page.goto("/docs/components/event-context-panel");
+  await expect(page.getByRole("heading", { name: "EventContextPanel" })).toBeVisible();
+  await expect(page.getByText("Live context panel")).toBeVisible();
+  await expect(page.getByText("registry:hook")).toHaveCount(0);
+  await expect(page.getByText("components/ekairos/events/context/index.ts")).toHaveCount(0);
 
-  await expectEventStepsDemoToComplete(page);
+  await page.getByRole("textbox").fill(prompt);
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(`Preview response for: ${prompt}`)).toBeVisible();
+});
 
-  await page.getByTestId("event-steps-scenario-ai-sdk").click();
-  await expect(page.getByRole("heading", { name: "AI SDK", level: 3 })).toBeVisible();
-  await expectEventStepsDemoToComplete(page);
-
-  await page.getByTestId("event-steps-scenario-codex").click();
-  await expect(page.getByRole("heading", { name: "Codex", level: 3 })).toBeVisible();
-  await expectEventStepsDemoToComplete(page);
+test("legacy component shelf routes redirect to the domain catalog", async ({ page }) => {
+  for (const legacyPath of [
+    "/docs/components/context",
+    "/docs/components/event-steps",
+    "/docs/components/full-agent",
+    "/docs/components/message",
+    "/docs/components/prompt",
+    "/docs/components/chain-of-thought",
+  ]) {
+    await page.goto(legacyPath);
+    await expect(page).toHaveURL(/\/events\/components$/);
+    await expect(page.getByRole("heading", { name: "Events components." })).toBeVisible();
+  }
 });

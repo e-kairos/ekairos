@@ -41,7 +41,7 @@ function InstallTabs({ options }: { options: InstallOption[] }) {
   if (!activeOption) return null
 
   return (
-    <div className="border border-border/80 rounded-lg bg-card overflow-hidden">
+    <div className="overflow-hidden border border-border/80 bg-card">
       <div className="flex gap-3 px-4 pt-3 border-b border-border/80">
         {options.map(option => (
           <button
@@ -57,8 +57,10 @@ function InstallTabs({ options }: { options: InstallOption[] }) {
           </button>
         ))}
       </div>
-      <div className="flex items-center justify-between px-4 py-4">
-        <code className="text-sm font-mono text-foreground">{activeOption.command}</code>
+      <div className="flex flex-col items-start gap-3 px-4 py-4 sm:flex-row sm:justify-between">
+        <code className="min-w-0 whitespace-pre-wrap break-words font-mono text-sm text-foreground [overflow-wrap:anywhere]">
+          {activeOption.command}
+        </code>
         <CopyButton text={activeOption.command} />
       </div>
     </div>
@@ -86,14 +88,8 @@ export function ComponentDocPage({ item }: ComponentDocPageProps) {
     return () => observer.disconnect()
   }, [])
 
-  const installCmd = `npx ekairos@latest add ${item.registryName}`
-  const shadcnCmd = `npx shadcn@latest add ${item.registryName}`
+  const shadcnCmd = `pnpm dlx shadcn@4.8.0 add https://${REGISTRY_HOST}/r/${item.registryName}.json`
   const installOptions: InstallOption[] = [
-    {
-      id: "ai-elements",
-      label: "ekairos CLI",
-      command: installCmd
-    },
     {
       id: "shadcn",
       label: "shadcn CLI",
@@ -112,7 +108,7 @@ export function ComponentDocPage({ item }: ComponentDocPageProps) {
         <div className="text-[0.7rem] text-muted-foreground uppercase tracking-[0.5em]">installation</div>
         <InstallTabs options={installOptions} />
         <p className="text-xs text-muted-foreground">
-          Disponible en {REGISTRY_HOST}/{item.registryName}
+          Disponible en https://{REGISTRY_HOST}/r/{item.registryName}.json
         </p>
       </div>
 
@@ -140,13 +136,13 @@ export function ComponentDocPage({ item }: ComponentDocPageProps) {
           </button>
         </div>
 
-        <div className="border border-border/80 rounded-xl min-h-[400px] relative overflow-hidden bg-card">
+        <div className="relative min-h-[400px] overflow-hidden border border-border/80 bg-card">
           {view === "preview" ? (
-            <div className="w-full p-8 space-y-4">
+            <div className="w-full space-y-4 px-3 py-4 md:p-8">
               {item.previewMode === "ephemeral-app" ? (
                 <div
                   data-testid="component-preview-ephemeral-app"
-                  className="rounded-2xl border border-border/80 bg-background px-4 py-4"
+                  className="border border-border/80 bg-background px-4 py-4"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
@@ -159,13 +155,13 @@ export function ComponentDocPage({ item }: ComponentDocPageProps) {
                       <div className="grid gap-2 font-mono text-[11px] text-muted-foreground md:grid-cols-2">
                         <div
                           data-testid="component-preview-app-status"
-                          className="rounded border border-border/70 bg-card px-2 py-1"
+                          className="border border-border/70 bg-card px-2 py-1"
                         >
                           status: {registrySession.status}
                         </div>
                         <div
                           data-testid="component-preview-app-id"
-                          className="rounded border border-border/70 bg-card px-2 py-1"
+                          className="border border-border/70 bg-card px-2 py-1"
                         >
                           appId: {registrySession.session?.appId || "-"}
                         </div>
@@ -175,7 +171,7 @@ export function ComponentDocPage({ item }: ComponentDocPageProps) {
                     <button
                       type="button"
                       onClick={() => void registrySession.recreateSession()}
-                      className="rounded-full border border-border px-4 py-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
+                      className="border border-border px-4 py-2 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
                       disabled={registrySession.status === "initializing"}
                     >
                       New app
@@ -225,7 +221,7 @@ export function ComponentDocPage({ item }: ComponentDocPageProps) {
       {item.props && item.props.length > 0 && (
         <div className="space-y-4">
           <div className="text-[0.7rem] text-muted-foreground uppercase tracking-[0.5em]">api reference</div>
-          <div className="border border-border/80 rounded-xl overflow-hidden">
+          <div className="overflow-hidden border border-border/80">
             <table className="w-full text-left text-xs">
               <thead className="border-b border-border/80 text-muted-foreground bg-muted/40 uppercase tracking-[0.3em] text-[0.6rem]">
                 <tr>

@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto"
 import {
   createScriptedReactor,
   createContext,
-  didToolExecute,
+  didActionExecute,
   eventsDomain,
   type ContextItem,
 } from "../index.ts"
@@ -144,7 +144,7 @@ describeInstant("context scripted reactor + Instant runtime", () => {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "set_status"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "set_status"))
       .build()
 
     const shell = await timer.measure("reactShellMs", async () =>

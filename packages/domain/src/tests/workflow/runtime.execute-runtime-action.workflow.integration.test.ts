@@ -16,7 +16,7 @@ describeRuntimeWorkflow("workflow executeRuntimeAction domain actions", () => {
   const app = useRuntimeWorkflowTestApp();
 
   it(
-    "runs executeRuntimeAction through step-safe domain actions inside a workflow",
+    "runs executeRuntimeAction through scoped domain actions inside a workflow",
     async () => {
       // given: a workflow runtime backed by a temporary Instant app and a probe
       // id that will be written by the domain action.
@@ -29,8 +29,8 @@ describeRuntimeWorkflow("workflow executeRuntimeAction domain actions", () => {
       const probeId = `probe-execute-${Date.now()}`;
       const label = "  runtime action workflow  ";
 
-      // when: the workflow invokes executeRuntimeAction, which crosses the
-      // workflow step boundary before executing the domain action.
+      // when: the workflow invokes executeRuntimeAction, which resolves the
+      // scoped domain runtime before executing the domain action.
       const run = await start(executeRuntimeActionWorkflow, [
         runtime,
         { probeId, label },

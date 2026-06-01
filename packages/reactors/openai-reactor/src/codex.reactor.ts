@@ -13,11 +13,17 @@ import {
   actionsToActionSpecs,
 } from "@ekairos/events"
 import type { ContextEnvironment } from "@ekairos/events/runtime"
-import type { ActiveDomain } from "@ekairos/domain"
-import type { sandboxDomain as SandboxDomain } from "@ekairos/sandbox"
+import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 import { randomUUID } from "node:crypto"
 
-import { asRecord, asString, buildCodexParts, defaultInstructionFromTrigger, type AnyRecord } from "./shared.js"
+import {
+  asRecord,
+  asString,
+  buildCodexParts,
+  defaultInstructionFromTrigger,
+  readCodexDynamicActionDetails,
+  type AnyRecord,
+} from "./shared.js"
 
 export type CodexConfig = {
   appServerUrl: string
@@ -49,7 +55,26 @@ function isCodexExecutableAction(value: unknown): value is CodexExecutableAction
   )
 }
 
-type CodexSandboxDomain = Omit<ActiveDomain<typeof SandboxDomain, Record<string, never>>, "env">
+type ServiceResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string }
+type CodexSandboxProcessResult = {
+  result?: unknown
+  [key: string]: unknown
+}
+
+type CodexSandboxActions = {
+  createSandbox(input: Record<string, unknown>): Promise<ServiceResult<{ sandboxId: string }>>
+  installCodexAuth(input: Record<string, unknown>): Promise<ServiceResult<unknown>>
+  writeFiles(input: Record<string, unknown>): Promise<ServiceResult<unknown>>
+  runCommandProcess(input: Record<string, unknown>): Promise<ServiceResult<CodexSandboxProcessResult>>
+  createCheckpoint(input: Record<string, unknown>): Promise<ServiceResult<{ checkpointId: string }>>
+  createEkairosApp(input: Record<string, unknown>): Promise<ServiceResult<CodexSandboxProcessResult>>
+  getPortUrl(input: Record<string, unknown>): Promise<ServiceResult<{ url: string }>>
+}
+
+type CodexSandboxDomain = {
+  actions: CodexSandboxActions
+  db: any
+}
 
 type SandboxProcessMutation = {
   update(values: Record<string, unknown>): {
@@ -57,20 +82,21 @@ type SandboxProcessMutation = {
   }
 }
 
-type StreamCapableSandboxDb = CodexSandboxDomain["db"] & {
+type StreamCapableSandboxDb = {
   streams: {
     createWriteStream(input: { clientId: string }): WritableStream<string> & {
       streamId?: () => Promise<string>
     }
   }
-  tx: CodexSandboxDomain["db"]["tx"] & {
+  tx: {
     sandbox_processes: Record<string, SandboxProcessMutation>
   }
   transact(txs: unknown[]): Promise<unknown> | unknown
 }
 
 type CodexSandboxRuntime = {
-  use(domain: typeof SandboxDomain): Promise<CodexSandboxDomain>
+  meta?: () => { domain?: unknown }
+  use(domain: unknown): Promise<CodexSandboxDomain>
 }
 
 function isCodexSandboxRuntime(value: unknown): value is CodexSandboxRuntime {
@@ -275,6 +301,10 @@ function toJsonSafe(value: unknown): unknown {
   }
 }
 
+function cleanRecord(value: AnyRecord): AnyRecord {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
+}
+
 export function mapCodexChunkType(providerChunkType: string): ContextStreamChunkType {
   const value = providerChunkType.toLowerCase()
 
@@ -439,11 +469,65 @@ export function mapCodexAppServerNotification(
   const actionRef = resolveActionRef(params, item)
   const providerPartId = resolveProviderPartId(params, item)
   const hasItemError = Boolean(item.error)
+  const actionDetails = readCodexDynamicActionDetails(params)
+  const isCommandExecutionItem = itemType === "commandexecution"
+  const isCommandExecutionOutputDelta = method === "item/commandExecution/outputDelta"
+  const commandExecutionInput = isCommandExecutionItem
+    ? cleanRecord({
+        command: asString(item.command),
+        args: [],
+        cwd: asString(item.cwd) || undefined,
+        kind: "command",
+        mode: "foreground",
+        metadata: cleanRecord({
+          source: "codex.commandExecution",
+          commandActions: Array.isArray(item.commandActions) ? item.commandActions : [],
+        }),
+      })
+    : undefined
+  const commandExecutionOutput = isCommandExecutionItem
+    ? cleanRecord({
+        success:
+          itemStatus === "failed"
+            ? false
+            : typeof item.exitCode === "number"
+              ? item.exitCode === 0
+              : undefined,
+        exitCode: typeof item.exitCode === "number" ? item.exitCode : undefined,
+        output: asString(item.aggregatedOutput) || undefined,
+        error: asString(item.error || item.message) || undefined,
+        command: asString(item.command) || undefined,
+        durationMs: typeof item.durationMs === "number" ? item.durationMs : undefined,
+        status:
+          itemStatus === "failed" || (typeof item.exitCode === "number" && item.exitCode !== 0)
+            ? "failed"
+            : itemStatus === "completed"
+              ? "exited"
+              : itemStatus || undefined,
+      })
+    : undefined
 
-  const mappedData = toJsonSafe({
-    method,
-    params,
-  })
+  const mappedData = toJsonSafe(
+    cleanRecord({
+      method,
+      params,
+      actionCallId: actionDetails.actionCallId,
+      actionName:
+        actionDetails.actionName ||
+        (isCommandExecutionItem || isCommandExecutionOutputDelta
+          ? SANDBOX_EXECUTE_COMMAND_ACTION_NAME
+          : undefined),
+      input: actionDetails.input ?? commandExecutionInput,
+      output:
+        actionDetails.output ??
+        commandExecutionOutput ??
+        (isCommandExecutionOutputDelta
+          ? cleanRecord({ output: asString(params.delta) || undefined })
+          : undefined),
+      success: actionDetails.success,
+      errorText: actionDetails.errorText,
+    }),
+  )
 
   const map = (chunkType: ContextStreamChunkType): CodexChunkMappingResult => {
     const descriptor = withCodexPartDescriptor(chunkType, providerPartId)
@@ -747,10 +831,11 @@ async function executeCodexDynamicToolCall(
   errorText?: string
   response: AnyRecord
 }> {
-  const toolName = asString(params.tool).trim()
-  const callId = asString(params.callId).trim()
+  const actionDetails = readCodexDynamicActionDetails(params)
+  const toolName = asString(actionDetails.actionName).trim()
+  const callId = asString(actionDetails.actionCallId).trim()
   const action = toolName ? (args.actions ?? {})[toolName] : undefined
-  const input = "arguments" in params ? params.arguments : {}
+  const input = actionDetails.input ?? {}
 
   if (!toolName || !isCodexExecutableAction(action)) {
     const errorText = `codex_dynamic_tool_not_found:${toolName || "unknown"}`
@@ -1023,9 +1108,21 @@ emit("EKAIROS_CODEX_RESULT", { providerContextId: threadId, turnId: asString(com
 `
 }
 
-function ensureOk<T>(result: { ok: true; data: T } | { ok: false; error: string }, label: string): T {
+function ensureOk<T>(result: { ok: true; data?: T } | { ok: false; error: string }, label: string): T {
   if (!result.ok) throw new Error(`${label}: ${result.error}`)
-  return result.data
+  return result.data as T
+}
+
+async function resolveCodexSandboxDomain(runtime: CodexSandboxRuntime): Promise<CodexSandboxDomain> {
+  const rootDomain = runtime.meta?.().domain
+  if (!rootDomain) {
+    throw new Error("codex_sandbox_domain_required")
+  }
+  const scoped = await runtime.use(rootDomain)
+  if (!scoped.actions) {
+    throw new Error("codex_sandbox_actions_required")
+  }
+  return scoped
 }
 
 async function executeCodexSandboxTurn(
@@ -1041,11 +1138,9 @@ async function executeCodexSandboxTurn(
     throw new Error("codex_sandbox_runtime_required")
   }
 
-  const { sandboxDomain } = await import("@ekairos/sandbox")
-  const scoped = await runtime.use(sandboxDomain)
+  const scoped = await resolveCodexSandboxDomain(runtime)
   const actions = scoped.actions
   const sandboxDb = scoped.db
-  if (!actions) throw new Error("codex_sandbox_actions_required")
 
   const provider = sandboxConfig.provider ?? "sprites"
   const homeDir = provider === "vercel" ? "/vercel/sandbox" : "/home/sprite"
@@ -1069,6 +1164,14 @@ async function executeCodexSandboxTurn(
       streamClientId: string
       writer: WritableStreamDefaultWriter<string>
       seq: number
+    }
+  >()
+  const observedCommandProcessResults = new Map<
+    string,
+    {
+      processId: string
+      streamId: string
+      streamClientId: string
     }
   >()
 
@@ -1174,6 +1277,11 @@ async function executeCodexSandboxTurn(
         streamClientId,
         writer,
         seq: 1,
+      })
+      observedCommandProcessResults.set(codexItemId, {
+        processId,
+        streamId,
+        streamClientId,
       })
       return
     }
@@ -1481,6 +1589,7 @@ async function executeCodexSandboxTurn(
         processId: "",
         streamId: "",
         streamClientId: "",
+        commandProcesses: Object.fromEntries(observedCommandProcessResults.entries()),
         checkpoints,
       },
       providerResponse: asRecord(turn.metadata).providerResponse,

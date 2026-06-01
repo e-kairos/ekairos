@@ -12,17 +12,17 @@ import {
   SourcesTrigger,
   Source,
 } from "@/components/ai-elements/sources";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ekairos/tools/tool";
 import { FileIcon } from "../../prompt/file-icon";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CopyIcon } from "lucide-react";
+import {
+  Action,
+  ActionContent,
+  ActionHeader,
+  ActionInput,
+  ActionOutput,
+} from "./action-view";
 import {
   getActionPartInfo,
   getCreateMessageText,
@@ -31,11 +31,11 @@ import {
   getReasoningText,
   getSourceParts,
   normalizeContextEventParts,
-} from "../../context/context-event-parts";
+} from "../context-event-parts";
 
 import type { AgentClassNames } from "../types";
 
-export function humanizeToolName(toolName: string): string {
+export function humanizeActionName(actionName: string): string {
   const map: Record<string, string> = {
     // Award / Bid ops (buyer-friendly)
     createBid: "Crear oferta",
@@ -45,8 +45,12 @@ export function humanizeToolName(toolName: string): string {
     linkBidItem: "Vincular ítem con lo solicitado",
     createPricingRule: "Crear regla de precio",
     removePricingRule: "Eliminar regla de precio",
+    read_dataset_rows: "Read dataset rows",
+    executeCommand: "Run command",
+    turnMetadata: "Turn metadata",
 
     // Control / escalation
+    createMessage: "Mensaje",
     requestDirection: "Escalar a soporte interno",
     end: "Finalizar",
 
@@ -54,10 +58,10 @@ export function humanizeToolName(toolName: string): string {
     semanticDerivation: "Derivación semántica",
   };
 
-  if (map[toolName]) return map[toolName];
+  if (map[actionName]) return map[actionName];
 
   // Fallback: camelCase/snake_case -> Title Case
-  return toolName
+  return actionName
     .replace(/_/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/^./, (s) => s.toUpperCase());
@@ -99,8 +103,8 @@ function actionViewInfo(view: ActionView) {
   };
 }
 
-function summarizeToolPart(view: ActionView): string {
-  const { actionName: toolName, state, output: out, errorText } = actionViewInfo(view);
+function summarizeActionPart(view: ActionView): string {
+  const { actionName, state, output: out, errorText } = actionViewInfo(view);
   const err = typeof errorText === "string" ? errorText : "";
 
   if (state === "output-error") {
@@ -117,7 +121,28 @@ function summarizeToolPart(view: ActionView): string {
     const msg =
       typeof outputRecord.message === "string" ? outputRecord.message : "";
 
-    if (toolName === "createBid") {
+    if (
+      actionName === "read_dataset_rows" &&
+      Array.isArray(outputRecord.rows)
+    ) {
+      return formatCount(outputRecord.rows.length, "row");
+    }
+
+    if (actionName === "executeCommand") {
+      const status =
+        typeof outputRecord.status === "string" ? outputRecord.status : "";
+      const exitCode =
+        typeof outputRecord.exitCode === "number"
+          ? `exit ${outputRecord.exitCode}`
+          : "";
+      return [status, exitCode].filter(Boolean).join(" / ") || "Command output";
+    }
+
+    if (actionName === "turnMetadata") {
+      return "Turn metadata";
+    }
+
+    if (actionName === "createBid") {
       const bidId =
         typeof outputRecord.bidId === "string" ? outputRecord.bidId : "";
       if (success === false) return msg || "No se pudo crear la oferta";
@@ -126,7 +151,7 @@ function summarizeToolPart(view: ActionView): string {
       return "Oferta creada";
     }
 
-    if (toolName === "addBidItems") {
+    if (actionName === "addBidItems") {
       const ok =
         typeof outputRecord.successCount === "number"
           ? outputRecord.successCount
@@ -147,6 +172,15 @@ function summarizeToolPart(view: ActionView): string {
       return "Ítems agregados";
     }
 
+    if (typeof outputRecord.rowCount === "number") {
+      return formatCount(outputRecord.rowCount, "row");
+    }
+    if (Array.isArray(outputRecord.rows)) {
+      return formatCount(outputRecord.rows.length, "row");
+    }
+    if (Array.isArray(outputRecord.datasets)) {
+      return formatCount(outputRecord.datasets.length, "dataset");
+    }
     if (success === true && msg) return msg;
     if (success === false && msg) return msg;
   }
@@ -157,11 +191,65 @@ function summarizeToolPart(view: ActionView): string {
   return "";
 }
 
+function actionStateStatus(state: string): "started" | "completed" | "failed" {
+  if (state === "output-error") {
+    return "failed";
+  }
+  if (state === "output-available") {
+    return "completed";
+  }
+  return "started";
+}
+
+function formatCount(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function messageTextAttrs({
+  hasAnalysis,
+  role,
+  streaming,
+  surface,
+  text,
+}: {
+  hasAnalysis: boolean;
+  role: "assistant" | "user";
+  streaming: boolean;
+  surface: string;
+  text: string;
+}) {
+  return {
+    "data-has-analysis": hasAnalysis ? "true" : "false",
+    "data-message-role": role,
+    "data-message-streaming": streaming ? "true" : "false",
+    "data-message-surface": surface,
+    "data-message-text": "true",
+    "data-text-length": text.length,
+  } as const;
+}
+
+function isUnknownRenderablePart(part: Record<string, unknown>) {
+  if (
+    part.type === "reasoning" ||
+    part.type === "source" ||
+    part.type === "source-url" ||
+    part.type === "source-document" ||
+    part.type === "file"
+  ) {
+    return false;
+  }
+  const action = getActionPartInfo(part);
+  if (action) {
+    return false;
+  }
+  return getPartText(part).trim().length === 0;
+}
+
 const MessageParts = memo(function MessageParts({
   message,
   status,
   isLatest,
-  toolComponents,
+  actionComponents,
   classNames,
   showReasoning = true,
   surface = "conversation",
@@ -246,7 +334,7 @@ const MessageParts = memo(function MessageParts({
 
   const [isCoTOpen, setIsCoTOpen] = useState(isStreaming);
   const [channelView, setChannelView] = useState<"none" | "email" | "whatsapp">(
-    "none"
+    "none",
   );
 
   useEffect(() => {
@@ -260,11 +348,11 @@ const MessageParts = memo(function MessageParts({
   };
 
   const renderActionView = (view: ActionView, i: number) => {
-    const { actionName: toolName, actionCallId, state, input, output, errorText } =
+    const { actionName, actionCallId, state, input, output, errorText } =
       actionViewInfo(view);
-    const ToolComponent = toolComponents?.[toolName];
+    const ActionComponent = actionComponents?.[actionName];
 
-    if (toolName === "createMessage") {
+    if (actionName === "createMessage") {
       if (actionCallId !== lastRenderableCreateMessageActionCallId) return null;
 
       const text =
@@ -277,6 +365,13 @@ const MessageParts = memo(function MessageParts({
           <div
             key={i}
             data-testid="assistant-reply-part"
+            {...messageTextAttrs({
+              hasAnalysis: false,
+              role: message.role,
+              streaming: isStreaming,
+              surface,
+              text,
+            })}
             className="text-sm leading-6 text-foreground"
           >
             <MessageResponse>{text}</MessageResponse>
@@ -292,10 +387,17 @@ const MessageParts = memo(function MessageParts({
           className={cn(
             message.role === "user"
               ? (classNames as AgentClassNames | undefined)?.message?.user
-              : (classNames as AgentClassNames | undefined)?.message?.assistant
+              : (classNames as AgentClassNames | undefined)?.message?.assistant,
           )}
         >
           <MessageContent
+            {...messageTextAttrs({
+              hasAnalysis: false,
+              role: message.role,
+              streaming: isStreaming,
+              surface,
+              text,
+            })}
             className={cn(
               message.role === "user"
                 ? userContentChrome
@@ -309,21 +411,21 @@ const MessageParts = memo(function MessageParts({
       );
     }
 
-    if (ToolComponent) {
+    if (ActionComponent) {
       return (
-        <ToolComponent
+        <ActionComponent
           key={i}
           input={input}
           output={output}
           state={state}
           errorText={errorText}
-          toolCallId={actionCallId}
+          actionCallId={actionCallId}
         />
       );
     }
 
-    const label = humanizeToolName(toolName || "Tool");
-    const summary = summarizeToolPart(view);
+    const label = humanizeActionName(actionName || "Action");
+    const summary = summarizeActionPart(view);
     const headerSummary =
       summary === "Completado" ||
       summary === "Error" ||
@@ -333,29 +435,35 @@ const MessageParts = memo(function MessageParts({
         : summary;
 
     return (
-      <Tool
+      <Action
         key={i}
-        className={cn(
-          isStepSurface && "mb-0 border-border/70 bg-background"
-        )}
+        className={cn(isStepSurface && "mb-0 border-border/70 bg-background")}
+        data-action-call-id={actionCallId}
+        data-action-name={actionName}
+        data-action-state={state}
+        data-action-status={actionStateStatus(state)}
+        data-context-action
+        data-has-error={errorText ? "true" : "false"}
+        data-has-input={input !== undefined ? "true" : "false"}
+        data-has-output={output !== undefined ? "true" : "false"}
       >
-        <ToolHeader
-          type={`tool-${toolName}` as any}
+        <ActionHeader
+          type={actionName as any}
           state={state as any}
           label={label}
           summary={headerSummary}
         />
-        <ToolContent>
-          {input !== undefined && <ToolInput input={input} />}
+        <ActionContent>
+          {input !== undefined && <ActionInput input={input} />}
           {input === undefined && (
             <div className="p-3 text-xs text-muted-foreground italic">
               Ejecutando...
             </div>
           )}
-          {output !== undefined && <ToolOutput output={output} />}
-          {errorText && <ToolOutput errorText={errorText} />}
-        </ToolContent>
-      </Tool>
+          {output !== undefined && <ActionOutput output={output} />}
+          {errorText && <ActionOutput errorText={errorText} />}
+        </ActionContent>
+      </Action>
     );
   };
 
@@ -389,14 +497,51 @@ const MessageParts = memo(function MessageParts({
     })
     .filter((item) => isStreaming || item.content.length > 0);
   const hasReasoningContent = isStreaming || reasoningItems.length > 0;
-  const reasoningTitle = reasoningItems.length === 1
-    ? reasoningItems[0]!.title
-    : "Razonamiento";
-  const renderedReasoningItems = reasoningItems.length > 0
-    ? reasoningItems
-    : [{ key: "streaming", title: "Razonamiento", content: "" }];
+  const reasoningTitle =
+    reasoningItems.length === 1 ? reasoningItems[0]!.title : "Razonamiento";
+  const renderedReasoningItems =
+    reasoningItems.length > 0
+      ? reasoningItems
+      : [{ key: "streaming", title: "Razonamiento", content: "" }];
+  const actionCount = useMemo(() => {
+    const actionCallIds = new Set<string>();
+    for (const part of normalizedParts) {
+      const action = getActionPartInfo(part);
+      if (action?.actionCallId) {
+        actionCallIds.add(action.actionCallId);
+      }
+    }
+    return actionCallIds.size;
+  }, [normalizedParts]);
+  const attachmentCount = useMemo(
+    () =>
+      normalizedParts
+        .flatMap((part: any) => {
+          const record = asRecord(part);
+          if (!record) return [];
+          if (record.type === "file") return [record];
+          if (record.type !== "message") return [];
 
-  const defaultUserContentChrome = "bg-primary text-primary-foreground shadow-sm";
+          const blocks = asRecord(record.content)?.blocks;
+          return Array.isArray(blocks)
+            ? blocks.filter((block) => asRecord(block)?.type === "file")
+            : [];
+        })
+        .filter((att: any) => {
+          const url =
+            (typeof att.url === "string" ? att.url : "") ||
+            att.providerMetadata?.instant?.downloadUrl;
+          return typeof url === "string" && url.length > 0;
+        }).length,
+    [normalizedParts],
+  );
+  const unknownPartCount = useMemo(
+    () => normalizedParts.filter(isUnknownRenderablePart).length,
+    [normalizedParts],
+  );
+
+  const defaultUserContentChrome =
+    "bg-primary text-primary-foreground shadow-sm";
   const userContentChrome =
     (classNames as AgentClassNames | undefined)?.message?.userContent ??
     defaultUserContentChrome;
@@ -431,7 +576,7 @@ const MessageParts = memo(function MessageParts({
         className={cn(
           message.role === "user"
             ? (classNames as AgentClassNames | undefined)?.message?.user
-            : (classNames as AgentClassNames | undefined)?.message?.assistant
+            : (classNames as AgentClassNames | undefined)?.message?.assistant,
         )}
       >
         <MessageContent
@@ -441,7 +586,7 @@ const MessageParts = memo(function MessageParts({
           )}
         >
           <div className="flex flex-wrap gap-2 mt-2">
-            {attachments.map((att: any, i: number) => (
+            {attachments.map((att: any, i: number) =>
               att.mediaType?.startsWith("image/") ? (
                 <a
                   key={i}
@@ -472,8 +617,8 @@ const MessageParts = memo(function MessageParts({
                   />
                   <span className="truncate">{att.filename}</span>
                 </a>
-              )
-            ))}
+              ),
+            )}
           </div>
         </MessageContent>
       </Message>
@@ -559,7 +704,16 @@ const MessageParts = memo(function MessageParts({
   };
 
   return (
-    <Fragment>
+    <div
+      className="contents"
+      data-action-count={actionCount}
+      data-attachment-count={attachmentCount}
+      data-message-parts
+      data-message-role={message.role}
+      data-message-surface={surface}
+      data-part-count={normalizedParts.length}
+      data-unknown-part-count={unknownPartCount}
+    >
       {sources.length > 0 && message.role === "assistant" && (
         <Sources className="mb-2">
           <SourcesTrigger count={sources.length} />
@@ -578,7 +732,7 @@ const MessageParts = memo(function MessageParts({
             onToggle={(event) => setIsCoTOpen(event.currentTarget.open)}
             className={cn(
               "mb-3 border-l border-border pl-3",
-              isStepSurface && "mb-2"
+              isStepSurface && "mb-2",
             )}
           >
             <summary className="cursor-pointer list-none text-xs font-medium text-muted-foreground">
@@ -586,9 +740,7 @@ const MessageParts = memo(function MessageParts({
             </summary>
             <div className="mt-2 space-y-3">
               {renderedReasoningItems.map((item) => (
-                <div
-                  key={item.key}
-                >
+                <div key={item.key}>
                   {renderedReasoningItems.length > 1 ? (
                     <div className="mb-1 text-xs font-medium text-muted-foreground">
                       {item.title}
@@ -606,7 +758,13 @@ const MessageParts = memo(function MessageParts({
         ) : null)}
 
       {normalizedParts.map((part: any, i: number) => {
-        if (part.type === "reasoning" || part.type === "source" || part.type === "file") {
+        if (
+          part.type === "reasoning" ||
+          part.type === "source" ||
+          part.type === "source-url" ||
+          part.type === "source-document" ||
+          part.type === "file"
+        ) {
           return null;
         }
 
@@ -627,6 +785,13 @@ const MessageParts = memo(function MessageParts({
               <div
                 key={i}
                 data-testid="message-part"
+                {...messageTextAttrs({
+                  hasAnalysis: false,
+                  role: message.role,
+                  streaming: isStreaming,
+                  surface,
+                  text,
+                })}
                 className="text-sm leading-6 text-foreground"
               >
                 <MessageResponse>{text}</MessageResponse>
@@ -643,10 +808,17 @@ const MessageParts = memo(function MessageParts({
                   message.role === "user"
                     ? (classNames as AgentClassNames | undefined)?.message?.user
                     : (classNames as AgentClassNames | undefined)?.message
-                        ?.assistant
+                        ?.assistant,
                 )}
               >
                 <MessageContent
+                  {...messageTextAttrs({
+                    hasAnalysis: false,
+                    role: message.role,
+                    streaming: isStreaming,
+                    surface,
+                    text,
+                  })}
                   className={cn(
                     message.role === "user"
                       ? userContentChrome
@@ -665,6 +837,7 @@ const MessageParts = memo(function MessageParts({
                     <Button
                       size="icon"
                       className="h-7 w-7"
+                      data-message-action="copy"
                       variant="ghost"
                       onClick={() => handleCopy(text)}
                       title="Copy"
@@ -683,7 +856,7 @@ const MessageParts = memo(function MessageParts({
       {renderAttachments(normalizedParts)}
       {renderChannelButtons()}
       {renderChannelContent()}
-    </Fragment>
+    </div>
   );
 });
 

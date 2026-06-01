@@ -1,8 +1,7 @@
 "use client";
 
 import React, { Suspense, useMemo } from "react";
-
-import { useContext } from "../context";
+import { useContext } from "@ekairos/events/react";
 import {
   Conversation,
   ConversationContent,
@@ -14,6 +13,7 @@ import { useOrgDb } from "@/lib/org-db-context";
 import type { AgentProps } from "./types";
 import { AgentPromptBridgeProvider } from "./agent-prompt-bridge";
 import { MessageList } from "./ui/message-list";
+import { getContextActivityState } from "./ui/context-activity-indicator";
 import { PromptBar } from "./ui/prompt-bar";
 
 export type { AgentProps, ContextHistoryItem } from "./types";
@@ -27,8 +27,9 @@ export default function ContextAgent(props: AgentProps) {
     prepareAppendArgs,
     prepareRequestBody,
     streamChunkDelayMs,
-    toolComponents,
+    actionComponents,
     classNames,
+    emptyState,
     promptDensity = "default",
     showReasoning,
     contextLayoutMockEvents,
@@ -51,15 +52,33 @@ export default function ContextAgent(props: AgentProps) {
     if (contextLayoutMockEvents === undefined) return context;
     return { ...context, events: contextLayoutMockEvents };
   }, [context, contextLayoutMockEvents]);
+  const activity = useMemo(
+    () => getContextActivityState({ context, isUploading: false }),
+    [context],
+  );
+  const hasVisibleEvents = listContext.events.length > 0;
+  const loading =
+    context.sendStatus === "submitting" ||
+    context.contextStatus === "open_streaming" ||
+    listContext.events.some((event) => event.status === "pending");
+  const hasError = Boolean(context.sendError);
+  const showEmptyState =
+    emptyState !== undefined &&
+    !hasVisibleEvents &&
+    !activity &&
+    context.sendStatus !== "submitting";
 
   const layoutMockReadOnly =
     contextLayoutMockReadOnly ??
-    (contextLayoutMockEvents !== undefined && contextLayoutMockEvents.length > 0);
+    (contextLayoutMockEvents !== undefined &&
+      contextLayoutMockEvents.length > 0);
 
   const instanceId = useMemo(() => {
     const anyCrypto = (globalThis as any)?.crypto;
     const id = anyCrypto?.randomUUID?.() as string | undefined;
-    return id || `context_agent_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    return (
+      id || `context_agent_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    );
   }, []);
   void instanceId;
 
@@ -73,41 +92,93 @@ export default function ContextAgent(props: AgentProps) {
     >
       <AgentPromptBridgeProvider>
         <div
+          data-context-agent="true"
+          data-context-empty={showEmptyState ? "true" : "false"}
+          data-context-event-count={listContext.events.length}
+          data-context-has-activity={activity ? "true" : "false"}
+          data-context-has-error={hasError ? "true" : "false"}
+          data-context-has-visible-events={hasVisibleEvents ? "true" : "false"}
+          data-context-id={context.contextId || undefined}
+          data-context-key={contextKey || undefined}
+          data-context-loading={loading ? "true" : "false"}
+          data-context-prompt-density={promptDensity}
+          data-context-read-only={layoutMockReadOnly ? "true" : "false"}
+          data-context-send-status={context.sendStatus}
+          data-context-status={context.contextStatus}
           data-testid="canvas-context-agent"
           className={cn(
             "relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground",
-            classNames?.container
+            classNames?.container,
           )}
         >
-          <Conversation className={cn("min-h-0 flex-1", classNames?.scrollArea)}>
-            <ConversationContent
-              className={cn("space-y-6 p-4 md:p-6", classNames?.conversationContent)}
+          {showEmptyState ? (
+            <div
+              className={cn(
+                "flex min-h-0 flex-1 items-center justify-center px-4 py-10",
+                classNames?.emptyState,
+              )}
             >
-              <MessageList
-                context={listContext}
-                toolComponents={toolComponents || {}}
-                classNames={classNames}
-                showReasoning={showReasoning ?? true}
-              />
-              <div className={cn("h-4", classNames?.conversationEndSpacer)} />
-            </ConversationContent>
-            <ConversationScrollButton
-              className={cn("bottom-20 right-8", classNames?.conversationScrollButton)}
-            />
-          </Conversation>
+              <div
+                className={cn(
+                  "w-full max-w-3xl -translate-y-[4vh] space-y-7",
+                  classNames?.emptyStateInner,
+                )}
+              >
+                {emptyState}
+                <div className={cn("w-full", classNames?.emptyPrompt)}>
+                  <PromptBar
+                    context={context}
+                    density={promptDensity}
+                    layoutMockReadOnly={layoutMockReadOnly}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Conversation
+                className={cn("min-h-0 flex-1", classNames?.scrollArea)}
+              >
+                <ConversationContent
+                  className={cn(
+                    "space-y-6 p-4 md:p-6",
+                    classNames?.conversationContent,
+                  )}
+                >
+                  <MessageList
+                    context={listContext}
+                    actionComponents={actionComponents || {}}
+                    classNames={classNames}
+                    showReasoning={showReasoning ?? true}
+                  />
+                  <div
+                    className={cn("h-4", classNames?.conversationEndSpacer)}
+                  />
+                </ConversationContent>
+                <ConversationScrollButton
+                  className={cn(
+                    "bottom-20 right-8",
+                    classNames?.conversationScrollButton,
+                  )}
+                />
+              </Conversation>
 
-          <div
-            className={cn(
-              "bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60",
-              classNames?.prompt
-            )}
-          >
-            <PromptBar
-              context={context}
-              density={promptDensity}
-              layoutMockReadOnly={layoutMockReadOnly}
-            />
-          </div>
+              <div
+                data-agent-prompt-shell
+                data-prompt-density={promptDensity}
+                className={cn(
+                  "bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60",
+                  classNames?.prompt,
+                )}
+              >
+                <PromptBar
+                  context={context}
+                  density={promptDensity}
+                  layoutMockReadOnly={layoutMockReadOnly}
+                />
+              </div>
+            </>
+          )}
         </div>
       </AgentPromptBridgeProvider>
     </Suspense>

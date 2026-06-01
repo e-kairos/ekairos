@@ -1,4 +1,4 @@
-import type { DomainSchemaResult } from "@ekairos/domain"
+import type { DomainLike } from "@ekairos/domain"
 import type { z } from "zod"
 
 import type { ContextEnvironment } from "./context.config.js"
@@ -29,7 +29,7 @@ export type ContextActionExecuteParams<
   TInput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = ContextToolExecuteContext<Context, Env, RequiredDomain, Runtime> & {
   input: z.output<TInput>
@@ -40,7 +40,7 @@ export type DefineContextActionExecute<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = (
   params: ContextActionExecuteParams<TInput, Context, Env, RequiredDomain, Runtime>,
@@ -51,7 +51,7 @@ export type ContextActionExecute<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = DefineContextActionExecute<TInput, TOutput, Context, Env, RequiredDomain, Runtime>
 
@@ -60,7 +60,7 @@ export type LegacyContextActionExecute<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = (
   input: z.output<TInput>,
@@ -72,7 +72,7 @@ export type DefineContextActionDefinition<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = ContextActionBase & {
   input: TInput
@@ -85,7 +85,7 @@ export type LegacyContextActionDefinition<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = ContextActionBase & {
   input: TInput
@@ -98,7 +98,7 @@ export type ContextActionDefinition<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = DefineContextActionDefinition<TInput, TOutput, Context, Env, RequiredDomain, Runtime>
 
@@ -107,7 +107,7 @@ export type ContextAction<
   TOutput extends ContextActionSchema = ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > = ContextActionBase & {
   input: TInput
@@ -122,7 +122,7 @@ export type AnyContextAction = ContextAction<ContextActionSchema, ContextActionS
 export type ContextTool<
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 > =
   | ContextAction<ContextActionSchema, ContextActionSchema, Context, Env, RequiredDomain, Runtime>
@@ -143,7 +143,7 @@ function createContextAction<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 >(
   definition: ContextActionBase & {
@@ -177,7 +177,7 @@ export function defineAction<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 >(
   definition: DefineContextActionDefinition<TInput, TOutput, Context, Env, RequiredDomain, Runtime>,
@@ -198,7 +198,7 @@ export function action<
   TOutput extends ContextActionSchema,
   Context = any,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
   Runtime extends ContextRuntime<Env> = ContextRuntime<Env>,
 >(
   definition: LegacyContextActionDefinition<TInput, TOutput, Context, Env, RequiredDomain, Runtime>,

@@ -76,7 +76,7 @@ function CodexReactorShowcaseReadyPage() {
           data-testid="examples-codex-message-list"
           className="max-h-[560px] overflow-y-auto p-4 md:p-6"
         >
-          <MessageList context={context} toolComponents={{}} showReasoning />
+          <MessageList context={context} actionComponents={{}} showReasoning />
         </div>
 
         <div className="space-y-3 border-t bg-background/95 p-4">

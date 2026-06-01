@@ -1,4 +1,4 @@
-import type { ActiveDomain, ConcreteDomain, DomainSchemaResult } from "@ekairos/domain"
+import type { ConcreteDomain, DomainLike } from "@ekairos/domain"
 import type { EkairosRuntime, RuntimeForDomain, RuntimeResolveOptions } from "@ekairos/domain/runtime"
 
 import type { ContextEnvironment } from "./context.config.js"
@@ -17,17 +17,17 @@ export type ContextRuntimeServiceHandle = {
 
 export type ContextRuntimeHandleForDomain<
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 > = ContextRuntimeServiceHandle & {
   use<Subdomain extends typeof eventsDomain | RequiredDomain>(
     subdomain: Subdomain,
     options?: RuntimeResolveOptions,
-  ): Promise<Omit<ActiveDomain<Subdomain, Env>, "env">>
+  ): Promise<unknown>
 }
 
 export type ContextRuntimeForDomain<
   Runtime extends ContextRuntime<any>,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 > =
   & RuntimeForDomain<Runtime, typeof eventsDomain>
   & RuntimeForDomain<Runtime, RequiredDomain>

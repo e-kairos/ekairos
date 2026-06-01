@@ -1,10 +1,9 @@
 "use client"
 
-import { ComponentDocPage } from "../_component-page"
-import { fullAgentRegistryItem } from "./config"
+import { redirect } from "next/navigation";
 
 export default function FullAgentPage() {
-  return <ComponentDocPage item={fullAgentRegistryItem} />
+  redirect("/events/components");
 }
 
 

@@ -2,8 +2,9 @@
 
 import { describe, expect, it } from "vitest";
 import { i } from "@instantdb/core";
+import { z } from "zod";
 
-import { domain } from "../index.ts";
+import { defineDomainAction, domain } from "../index.ts";
 import { DomainRuntime } from "./runtime-actions.test-fixtures.ts";
 
 describe("runtime action included subdomain scoping", () => {
@@ -22,32 +23,34 @@ describe("runtime action included subdomain scoping", () => {
 
     let tasksDomain: any;
     tasksDomain = baseTasksDomain.withActions({
-      normalizeTitle: {
+      normalizeTitle: defineDomainAction({
         description: "Normalize title",
-        inputSchema: { type: "object" },
+        input: z.object({ title: z.string() }),
+        output: z.object({ title: z.string(), runtimeCall: z.number() }),
         execute: async ({ input, runtime }) => {
-          "use step";
-          const scoped = await runtime.use(tasksDomain);
-          return {
+            return {
             title: String(input.title).trim(),
-            runtimeCall: scoped.db.runtimeCall,
+            runtimeCall: runtime.db.runtimeCall,
           };
         },
-      },
-      createTask: {
+      }),
+      createTask: defineDomainAction({
         description: "Create task",
-        inputSchema: { type: "object" },
-        execute: async ({ env, input, runtime }) => {
-          "use step";
-          const scoped = await runtime.use(tasksDomain);
-          const normalized = await scoped.actions.normalizeTitle({ title: input.title });
+        input: z.object({ title: z.string() }),
+        output: z.object({
+          title: z.string(),
+          orgId: z.string(),
+          runtimeCall: z.number(),
+        }),
+        execute: async ({ input, runtime }) => {
+            const normalized = await runtime.actions.normalizeTitle({ title: input.title });
           return {
             title: normalized.title,
-            orgId: env.orgId,
+            orgId: runtime.env.orgId,
             runtimeCall: normalized.runtimeCall,
           };
         },
-      },
+      }),
     });
 
     const appDomain = domain("app")

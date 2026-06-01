@@ -1,4 +1,4 @@
-import type { DomainSchemaResult } from "@ekairos/domain"
+import type { DomainLike } from "@ekairos/domain"
 
 import type { ContextEnvironment } from "./context.config.js"
 import type { ContextSkillPackage } from "./context.skill.js"
@@ -28,7 +28,7 @@ import { eventsDomain } from "./schema.js"
 export interface ContextConfig<
   Context,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 > {
   context: (
     context: StoredContext<Context>,
@@ -85,7 +85,7 @@ export interface ContextConfig<
 export type ContextInstance<
   Context,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 > = ContextEngine<Context, Env, RequiredDomain> & {
   readonly __config: ContextConfig<Context, Env, RequiredDomain>
   readonly __contextKey?: ContextKey
@@ -95,7 +95,7 @@ export type ContextInstance<
 function isDynamicModelSelector<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 >(
   model: ContextConfig<Context, Env, RequiredDomain>["model"],
 ): model is (
@@ -109,7 +109,7 @@ function isDynamicModelSelector<
 export function context<
   Context,
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 >(config: ContextConfig<Context, Env, RequiredDomain>): ContextInstance<Context, Env, RequiredDomain> {
   class FunctionalContext extends ContextEngine<Context, Env, RequiredDomain> {
     public readonly __config = config
@@ -187,7 +187,7 @@ export function context<
 
 type AnyContextInitializer<
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = (
   context: StoredContext<any>,
   env: Env,
@@ -201,7 +201,7 @@ type InferContextFromInitializer<I extends AnyContextInitializer<any, any>> = Aw
 type BuilderSystemPrompt<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = (
   context: StoredContext<Context>,
   env: Env,
@@ -211,7 +211,7 @@ type BuilderSystemPrompt<
 type BuilderSkills<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = (
   context: StoredContext<Context>,
   env: Env,
@@ -221,7 +221,7 @@ type BuilderSkills<
 type BuilderTools<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = (
   context: StoredContext<Context>,
   env: Env,
@@ -233,7 +233,7 @@ type BuilderTools<
 type BuilderExpandEvents<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = (
   events: ContextItem[],
   context: StoredContext<Context>,
@@ -244,7 +244,7 @@ type BuilderExpandEvents<
 type BuilderShouldContinue<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = (
   args: ContextShouldContinueArgs<Context, Env, RequiredDomain>,
 ) => Promise<ShouldContinue> | ShouldContinue
@@ -252,7 +252,7 @@ type BuilderShouldContinue<
 type BuilderModel<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > =
   | ContextModelInit
   | ((
@@ -269,7 +269,7 @@ export type RegistrableContextBuilder = {
 type FluentContextBuilder<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = {
   key: ContextKey
   expandEvents(fn: BuilderExpandEvents<Context, Env, RequiredDomain>): FluentContextBuilder<Context, Env, RequiredDomain>
@@ -315,7 +315,7 @@ type FluentContextBuilder<
 
 type CreateContextEntry<
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = {
   context<Initializer extends AnyContextInitializer<Env, RequiredDomain>>(
     initializer: Initializer,
@@ -328,7 +328,7 @@ type CreateContextEntry<
 function assertConfigComplete<
   Context,
   Env extends ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 >(
   config: Partial<ContextConfig<Context, Env, RequiredDomain>>,
 ): asserts config is ContextConfig<Context, Env, RequiredDomain> {
@@ -345,7 +345,7 @@ function assertConfigComplete<
 
 export function createContext<
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = DomainSchemaResult,
+  RequiredDomain extends DomainLike = DomainLike,
 >(
   domain: RequiredDomain,
   key: ContextKey,
@@ -357,7 +357,7 @@ export function createContext<Env extends ContextEnvironment = ContextEnvironmen
 
 export function createContext<
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainSchemaResult = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof eventsDomain,
 >(
   keyOrDomain: ContextKey | RequiredDomain,
   maybeKey?: ContextKey,

@@ -3,6 +3,7 @@ import {
   getDomainActionBinding,
   getDomainActions,
   materializeDomain,
+  type DomainActionSchema,
   type DomainActionDefinition,
   type DomainActionExecuteParams,
   type DomainDocLoader,
@@ -120,20 +121,17 @@ export type RuntimeMcpConfig = {
 };
 
 export type RuntimeDomainAction<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Output = unknown,
+  InputSchema extends DomainActionSchema = DomainActionSchema,
+  OutputSchema extends DomainActionSchema = DomainActionSchema,
   Runtime = unknown,
-> = DomainActionDefinition<Env, Input, Output, Runtime> & {
+> = DomainActionDefinition<InputSchema, OutputSchema, Runtime> & {
   name: string;
   domain?: RuntimeDomainSource | null;
 };
 
-export type RuntimeDomainActionCollection<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-> =
-  | RuntimeDomainAction<Env, any, any, any>[]
-  | Record<string, RuntimeDomainAction<Env, any, any, any> | ((params: DomainActionExecuteParams<Env, any, any>) => unknown)>;
+export type RuntimeDomainActionCollection =
+  | RuntimeDomainAction<any, any, any>[]
+  | Record<string, RuntimeDomainAction<any, any, any>>;
 
 export type RuntimeDomainConfig = {
   // Root domain for the app (single domain).
@@ -390,15 +388,10 @@ function createActionRuntimeHandle<
 }
 
 function normalizeAction(
-  actionInput:
-    | RuntimeDomainAction<any, any, any, any>
-    | ((params: DomainActionExecuteParams<any, any, any>) => unknown),
+  actionInput: RuntimeDomainAction<any, any, any>,
   params: { key?: string; defaultDomain?: RuntimeDomainSource | null },
-): RuntimeDomainAction<any, any, any, any> {
-  const action =
-    typeof actionInput === "function"
-      ? ({ execute: actionInput } as RuntimeDomainAction<any, any, any, any>)
-      : actionInput;
+): RuntimeDomainAction<any, any, any> {
+  const action = actionInput;
 
   if (!action || typeof action !== "object" || typeof action.execute !== "function") {
     throw new Error("invalid_runtime_action");
@@ -426,12 +419,12 @@ function normalizeAction(
 function normalizeActionCollection(
   input: RuntimeDomainActionCollection | undefined,
   defaultDomain?: RuntimeDomainSource | null,
-): RuntimeDomainAction<any, any, any, any>[] {
+): RuntimeDomainAction<any, any, any>[] {
   if (!input) return [];
-  const out: RuntimeDomainAction<any, any, any, any>[] = [];
+  const out: RuntimeDomainAction<any, any, any>[] = [];
   const seen = new Set<string>();
 
-  const push = (action: RuntimeDomainAction<any, any, any, any>) => {
+  const push = (action: RuntimeDomainAction<any, any, any>) => {
     if (seen.has(action.name)) {
       throw new Error(`duplicate_runtime_action:${action.name}`);
     }
@@ -441,23 +434,23 @@ function normalizeActionCollection(
 
   if (Array.isArray(input)) {
     for (const actionInput of input) {
-      push(normalizeAction(actionInput as RuntimeDomainAction<any, any, any, any>, { defaultDomain }));
+      push(normalizeAction(actionInput as RuntimeDomainAction<any, any, any>, { defaultDomain }));
     }
     return out;
   }
 
   for (const [key, actionInput] of Object.entries(input)) {
-    push(normalizeAction(actionInput as RuntimeDomainAction<any, any, any, any>, { key, defaultDomain }));
+    push(normalizeAction(actionInput as RuntimeDomainAction<any, any, any>, { key, defaultDomain }));
   }
   return out;
 }
 
-function resolveRuntimeActionsFromConfig(config: RuntimeDomainConfig | null): RuntimeDomainAction<any, any, any, any>[] {
+function resolveRuntimeActionsFromConfig(config: RuntimeDomainConfig | null): RuntimeDomainAction<any, any, any>[] {
   if (!config) return [];
-  const out: RuntimeDomainAction<any, any, any, any>[] = [];
+  const out: RuntimeDomainAction<any, any, any>[] = [];
   const seen = new Set<string>();
 
-  const push = (action: RuntimeDomainAction<any, any, any, any>) => {
+  const push = (action: RuntimeDomainAction<any, any, any>) => {
     if (seen.has(action.name)) {
       throw new Error(`duplicate_runtime_action:${action.name}`);
     }
@@ -468,7 +461,7 @@ function resolveRuntimeActionsFromConfig(config: RuntimeDomainConfig | null): Ru
   const domainActions = getDomainActions(config.domain);
   for (const action of domainActions) {
     push(
-      normalizeAction(action as RuntimeDomainAction<any, any, any, any>, {
+      normalizeAction(action as RuntimeDomainAction<any, any, any>, {
         defaultDomain: config.domain ?? null,
       }),
     );
@@ -541,11 +534,11 @@ export function getRuntimeProjectId(): string {
   return runtimeProjectId ?? resolveProjectIdFromEnv();
 }
 
-export function getRuntimeActions(): RuntimeDomainAction<any, any, any, any>[] {
+export function getRuntimeActions(): RuntimeDomainAction<any, any, any>[] {
   return resolveRuntimeActionsFromConfig(runtimeDomainConfig);
 }
 
-export function getRuntimeAction(name: string): RuntimeDomainAction<any, any, any, any> | null {
+export function getRuntimeAction(name: string): RuntimeDomainAction<any, any, any> | null {
   const normalized = String(name ?? "").trim();
   if (!normalized) return null;
   const actions = getRuntimeActions();
@@ -558,7 +551,7 @@ type ExecuteRuntimeActionParams<
   Output,
   Runtime,
 > = {
-  action: RuntimeDomainAction<Env, Input, Output, Runtime> | string;
+  action: RuntimeDomainAction<any, any, Runtime> | string;
   env?: Env;
   runtime?: Runtime;
   input: Input;
@@ -574,7 +567,7 @@ export async function executeRuntimeAction<
 >(params: ExecuteRuntimeActionParams<Env, Input, Output, Runtime>): Promise<Output> {
   const action =
     typeof params.action === "string"
-      ? (getRuntimeAction(params.action) as RuntimeDomainAction<Env, Input, Output, Runtime> | null)
+      ? (getRuntimeAction(params.action) as RuntimeDomainAction<any, any, Runtime> | null)
       : params.action;
   if (!action) {
     throw new Error(
@@ -611,20 +604,20 @@ export async function executeRuntimeAction<
   const resolvedRuntime = params.runtime
     ? params.runtime
     : ((await resolveRuntime(domain as any, env, params.options)) as unknown as Runtime);
-  const runtime = createActionRuntimeHandle({
+  const rootRuntime = createActionRuntimeHandle({
     runtime: resolvedRuntime,
     env,
     rootDomain: (domain as RuntimeDomainSource | null) ?? null,
-  }) as Runtime;
+  });
+  const actionRuntime =
+    typeof rootRuntime.use === "function"
+      ? await rootRuntime.use(domain as any, params.options)
+      : rootRuntime;
 
-  const executeParams: DomainActionExecuteParams<
-    Env,
-    Input,
-    Runtime
-  > = {
-    env,
-    input: params.input,
-    runtime,
+  const parsedInput = (action as any).input.parse(params.input);
+  const executeParams: DomainActionExecuteParams<any, typeof actionRuntime> = {
+    input: parsedInput,
+    runtime: actionRuntime,
   };
 
   const execute = action.execute;
@@ -633,7 +626,7 @@ export async function executeRuntimeAction<
   }
 
   const output = await execute(executeParams);
-  return output as Output;
+  return (action as any).output.parse(output) as Output;
 }
 
 export async function resolveRuntime<

@@ -56,13 +56,12 @@ This handle is runtime/server state, not canonical persisted domain data.
 
 Top-level `part.type` values:
 
-- `content`
+- `message`
 - `reasoning`
 - `source`
-- `tool-call`
-- `tool-result`
+- `action`
 
-Every part carries `content: []`, where each entry is one of:
+Message parts carry `content.text` and optionally `content.blocks`, where each block is one of:
 
 - `text`
 - `file`
@@ -70,18 +69,14 @@ Every part carries `content: []`, where each entry is one of:
 - `source-url`
 - `source-document`
 
-Tool execution is modeled explicitly:
+Action execution is modeled explicitly and is provider agnostic:
 
-- `tool-call`: the requested invocation plus canonicalized input content
-- `tool-result`: the settled outcome plus canonicalized output content
+- `action` with `content.status: "started"` carries the requested invocation.
+- `action` with `content.status: "completed"` carries the settled output.
+- `action` with `content.status: "failed"` carries the failure details.
 
-`tool-result` covers both success and failure via `state`:
-
-- `output-available`
-- `output-error`
-
-There is no separate canonical `tool-error` part in persistence. If an external protocol requires a
-`tool-error` message, it must be projected from `tool-result` during adaptation.
+External model/provider protocols may call these tools, function calls, actions, commands, or MCP
+calls. Those names are adapter concerns. Persistence stores the semantic Ekairos action contract.
 
 ### Metadata Rule
 
@@ -103,11 +98,11 @@ The replay pipeline must reconstruct model messages from canonical `event_parts`
 
 Required projection:
 
-- `content` / `reasoning` / `source` -> assistant or user content
-- `tool-call` -> assistant tool call
-- `tool-result` -> tool message result/error
+- `message` / `reasoning` / `source` -> assistant or user content
+- `action.started` -> provider-specific assistant action/tool call
+- `action.completed` / `action.failed` -> provider-specific action/tool result
 
-This rule exists so multipart tool outputs, including image artifacts, survive replay without depending
+This rule exists so multipart action outputs, including image artifacts, survive replay without depending
 on the deprecated `event_items.content.parts` mirror.
 
 Tracing uses:

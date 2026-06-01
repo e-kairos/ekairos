@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { Sparkles } from "lucide-react"
+import { OrbLogo } from "@/components/ekairos/orb-logo"
 import { cn } from "@/lib/utils"
 
 export interface EkairosLogoProps {
@@ -48,7 +48,11 @@ export function EkairosLogo({
   return (
     <div className={cn("flex items-center", config.gap, className)}>
       {displayIcon && (
-        <Sparkles className={cn("text-primary", config.icon, iconClassName)} />
+        <OrbLogo
+          size={size === "lg" ? 24 : size === "md" ? 20 : 16}
+          ariaHidden
+          className={cn(config.icon, iconClassName)}
+        />
       )}
       {displayLabel && (
         <span className={cn("font-semibold tracking-tight", config.label, labelClassName)}>

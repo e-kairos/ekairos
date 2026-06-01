@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { ASSISTANT_MESSAGE_TYPE, INPUT_TEXT_ITEM_TYPE } from "@ekairos/events/react";
 
 import type {
   AppendArgs,
   ContextEventForUI,
   ContextValue,
-} from "@/components/ekairos/context/context";
-import { ASSISTANT_MESSAGE_TYPE, INPUT_TEXT_ITEM_TYPE } from "@/components/ekairos/context/context";
+} from "@ekairos/events/react";
 
 import fixture from "./codex-run.fixture.json";
 

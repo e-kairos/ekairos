@@ -1,10 +1,9 @@
 "use client"
 
-import { ComponentDocPage } from "../_component-page"
-import { messageRegistryItem } from "./config"
+import { redirect } from "next/navigation";
 
 export default function MessagePage() {
-  return <ComponentDocPage item={messageRegistryItem} />
+  redirect("/events/components");
 }
 
 

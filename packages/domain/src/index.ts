@@ -1,10 +1,11 @@
 import { i } from "@instantdb/core";
 import type { InstantAdminDatabase } from "@instantdb/admin";
-import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef } from "@instantdb/core";
-import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";
+import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef, InstaQLParams } from "@instantdb/core";
+import { z } from "zod";
 export {
   EkairosRuntime,
   type RuntimeForDomain,
+  type RuntimeUseForDomain,
   type RuntimeLike,
   type ExplicitRuntimeLike,
 } from "./runtime-handle.js";
@@ -48,126 +49,62 @@ export type DomainDocNormalizer = (input: {
 
 export type DomainInclude =
   | DomainInstance<any, any, any>
-  | DomainSchemaResult<any, any, any>
+  | AnyDomainSchemaResult
   | InstantSchemaDef<any, any, any>
-  | (() => DomainInstance<any, any, any> | DomainSchemaResult<any, any, any> | InstantSchemaDef<any, any, any> | undefined)
+  | (() => DomainInstance<any, any, any> | AnyDomainSchemaResult | InstantSchemaDef<any, any, any> | undefined)
   | undefined;
 
+export type DomainActionSchema = z.ZodType;
+
 export type DomainActionExecuteParams<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Runtime = unknown,
+  InputSchema extends DomainActionSchema = DomainActionSchema,
+  Runtime = DomainRuntime<any>,
   Domain = unknown,
 > = {
-  env: Env;
-  input: Input;
+  input: z.output<InputSchema>;
   runtime: Runtime;
 };
 
-declare const DOMAIN_ACTION_RUNTIME_OUTPUT: unique symbol;
-declare const DOMAIN_ACTION_SERIALIZED_OUTPUT: unique symbol;
-
-export type DomainActionOutputContract<
-  RuntimeOutput,
-  SerializedOutput = RuntimeOutput,
-> = {
-  readonly kind: string;
-  readonly [DOMAIN_ACTION_RUNTIME_OUTPUT]?: RuntimeOutput;
-  readonly [DOMAIN_ACTION_SERIALIZED_OUTPUT]?: SerializedOutput;
-};
-
-export type WorkflowSerializableConstructor<
-  Instance = unknown,
-  Serialized = unknown,
-> = {
-  [WORKFLOW_SERIALIZE](instance: Instance): Serialized;
-  [WORKFLOW_DESERIALIZE](data: Serialized): Instance;
-};
-
-export type WorkflowOutputInstance<Ctor> =
-  Ctor extends { [WORKFLOW_DESERIALIZE](data: any): infer Instance }
-    ? Instance
-    : never;
-
-export type WorkflowOutputSerialized<Ctor> =
-  Ctor extends { [WORKFLOW_SERIALIZE](instance: any): infer Serialized }
-    ? Serialized
-    : never;
-
-export type DomainWorkflowOutput<
-  Ctor extends WorkflowSerializableConstructor<any, any>,
-> = DomainActionOutputContract<
-  WorkflowOutputInstance<Ctor>,
-  WorkflowOutputSerialized<Ctor>
-> & {
-  readonly kind: "workflow";
-  readonly ctor: Ctor;
-};
-
-export type DomainActionRuntimeOutput<Output> =
-  Output extends DomainActionOutputContract<infer RuntimeOutput, any>
-    ? RuntimeOutput
-    : Output;
-
-export type DomainActionSerializedOutputValue<Output> =
-  Output extends DomainActionOutputContract<any, infer SerializedOutput>
-    ? SerializedOutput
-    : Output;
-
-export function workflow<Ctor extends WorkflowSerializableConstructor<any, any>>(
-  ctor: Ctor,
-): DomainWorkflowOutput<Ctor> {
-  return {
-    kind: "workflow",
-    ctor,
-  } as DomainWorkflowOutput<Ctor>;
-}
-
 export type DomainActionDefinition<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Output = unknown,
+  InputSchema extends DomainActionSchema = DomainActionSchema,
+  OutputSchema extends DomainActionSchema = DomainActionSchema,
   Runtime = unknown,
   Domain = unknown,
-  OutputContract = unknown,
 > = {
   name?: string;
   description?: string;
+  input: InputSchema;
+  output: OutputSchema;
   inputSchema?: unknown;
-  output?: OutputContract;
   outputSchema?: unknown;
   requiredScopes?: string[];
   /**
-   * Domain actions are step-safe command units.
+   * Domain actions are command units with typed input and output.
    *
    * Recommended pattern:
    *
-   * `async execute({ runtime, input }) { "use step"; const domain = await runtime.use(myDomain); ... }`
+   * `async execute({ runtime, input }) { await runtime.db.transact([...]); }`
    *
-   * Action execution receives `env`, `input`, and `runtime`. If action logic
-   * needs a scoped domain handle, reconstruct it locally with
-   * `await runtime.use(exportedDomain)`. `"use workflow"` inside `execute(...)`
-   * is intentionally out of scope.
+   * Action execution receives `input` and a runtime already scoped to the
+   * domain that declared the action. Workflow boundaries belong to the
+   * orchestration layer, not to the action executor.
    */
   execute: (
-    params: DomainActionExecuteParams<Env, Input, Runtime, Domain>,
-  ) => Promise<Output> | Output;
+    params: DomainActionExecuteParams<InputSchema, Runtime, Domain>,
+  ) => Promise<z.output<OutputSchema>> | z.output<OutputSchema>;
 };
 
 export type DomainActionRegistration<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Output = unknown,
+  InputSchema extends DomainActionSchema = DomainActionSchema,
+  OutputSchema extends DomainActionSchema = DomainActionSchema,
   Runtime = unknown,
   Domain = unknown,
-  OutputContract = unknown,
-> = DomainActionDefinition<Env, Input, Output, Runtime, Domain, OutputContract> & {
+> = DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain> & {
   name: string;
 };
 
 export type DomainActionLike =
-  | DomainActionDefinition<any, any, any, any, any, any>
-  | ((params: DomainActionExecuteParams<any, any, any, any>) => unknown);
+  DomainActionDefinition<any, any, any, any>;
 
 export type DomainActionCollection =
   | Record<string, DomainActionLike>
@@ -208,15 +145,35 @@ export type DomainContextOptions = {
 
 type UnknownDomainNames = string;
 
+type AnyDomainSchemaResult = {
+  entities: any;
+  links: any;
+  rooms: any;
+  instantSchema: () => any;
+  toInstantSchema?: () => any;
+};
+
 const EKAIROS_META = Symbol.for("@ekairos/domain/meta");
 const EKAIROS_ACTIONS = Symbol.for("@ekairos/domain/actions");
 const EKAIROS_ACTION_MAP = Symbol.for("@ekairos/domain/action-map");
 const EKAIROS_ACTION_BINDING = Symbol.for("@ekairos/domain/action-binding");
-const EKAIROS_ACTION_STACK = Symbol.for("@ekairos/domain/action-stack");
 declare const DOMAIN_NAME_TYPE: unique symbol;
 declare const DOMAIN_INCLUDED_NAMES_TYPE: unique symbol;
 declare const DOMAIN_ACTION_MAP_TYPE: unique symbol;
 declare const DOMAIN_LINKS_TYPE: unique symbol;
+
+export type DomainLike = {
+  readonly entities: EntitiesDef;
+  readonly links: LinksDef<any>;
+  readonly rooms: RoomsDef;
+  instantSchema: () => any;
+  toInstantSchema?: () => any;
+  fromDB?: (db: any, bindings?: { env?: unknown; runtime?: unknown }) => any;
+  readonly [DOMAIN_NAME_TYPE]?: string;
+  readonly [DOMAIN_INCLUDED_NAMES_TYPE]?: string;
+  readonly [DOMAIN_ACTION_MAP_TYPE]?: DomainActionMap;
+  readonly [DOMAIN_LINKS_TYPE]?: LinksDef<any>;
+};
 
 // No hard-coded base entities here. InstantDB adds base entities at runtime inside i.schema.
 // We only add them at the TYPE level via WithBase<> so links can reference them.
@@ -235,12 +192,14 @@ export type DomainInstance<E extends EntitiesDef, L extends LinksDef<E>, R exten
   meta?: Record<string, unknown>;
 };
 
-export type SchemaOf<D extends DomainDefinition<any, any, any> | DomainSchemaResult<any, any, any>> =
-  D extends DomainSchemaResult<any, any, any>
+export type SchemaOf<D> =
+  D extends AnyDomainSchemaResult
     ? ReturnType<D["instantSchema"]>
-    : InstantSchemaDef<D["entities"], LinksDef<D["entities"]>, D["rooms"]>;
+    : D extends DomainDefinition<infer E, any, infer R>
+      ? InstantSchemaDef<E, LinksDef<E>, R>
+      : InstantSchemaDef<any, any, any>;
 
-export type DomainDbFor<D extends DomainDefinition<any, any, any> | DomainSchemaResult<any, any, any>> =
+export type DomainDbFor<D> =
   InstantAdminDatabase<SchemaOf<D>, true>;
 
 // --- Schema compatibility helpers for domain composition ---
@@ -319,7 +278,7 @@ type EnsureIncludesSchema<
  */
 export type CompatibleSchemaForDomain<
   S extends InstantSchemaDef<any, any, any>,
-  RequiredDomain extends DomainDefinition<any, any, any> | DomainSchemaResult<any, any, any> | DomainInstance<any, any, any>
+  RequiredDomain extends DomainDefinition<any, any, any> | AnyDomainSchemaResult | DomainInstance<any, any, any>
 > = EnsureIncludesSchema<S, SchemaOf<RequiredDomain>>;
 
 export type DomainNameOf<D> =
@@ -337,8 +296,8 @@ export type IncludedDomainNamesOf<D> =
     : DomainNameOf<D>;
 
 export type DomainInstantSchema<D> =
-  D extends DomainSchemaResult<any, any, any, any, any, any>
-    ? ReturnType<D["instantSchema"]>
+  D extends DomainSchemaResult<infer E, infer L, infer R, any, any, any>
+    ? InstantSchemaDef<WithBase<E>, L, R>
     : never;
 
 // Utility types for extracting from domain definitions/instances
@@ -348,7 +307,7 @@ type ExtractRooms<T> = T extends { rooms: infer R } ? R extends RoomsDef ? R : n
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
-export type DomainActionMap = Record<string, DomainActionRegistration<any, any, any, any, any, any>>;
+export type DomainActionMap = Record<string, DomainActionRegistration<any, any, any, any>>;
 
 export type DomainDefinitionOf<D> =
   D extends DomainSchemaResult<
@@ -371,22 +330,13 @@ export type DomainDefinitionOf<D> =
 
 type InferActionRegistrationFromLike<Value, Key extends string> =
   Value extends DomainActionDefinition<
-    infer Env,
-    infer Input,
-    infer Output,
+    infer InputSchema,
+    infer OutputSchema,
     infer Runtime,
-    infer Domain,
-    infer OutputContract
+    infer Domain
   >
-    ? DomainActionRegistration<Env, Input, Output, Runtime, Domain, OutputContract>
-    : Value extends (params: DomainActionExecuteParams<
-        infer Env,
-        infer Input,
-        infer Runtime,
-        infer Domain
-      >) => infer Output
-      ? DomainActionRegistration<Env, Input, Awaited<Output>, Runtime, Domain>
-      : DomainActionRegistration;
+    ? DomainActionRegistration<InputSchema, OutputSchema, Runtime, Domain>
+    : DomainActionRegistration;
 
 type ActionMapFromCollection<Input> =
   Input extends Record<string, any>
@@ -408,31 +358,98 @@ export type ActionMapOf<D> =
 export type DomainActionsOf<D> = ActionMapOf<D>;
 
 type ActionInputOf<Action> =
-  Action extends DomainActionDefinition<any, infer Input, any, any, any, any> ? Input : never;
+  Action extends DomainActionDefinition<infer InputSchema, any, any, any>
+    ? z.output<InputSchema>
+    : never;
 
 type ActionOutputOf<Action> =
-  Action extends DomainActionDefinition<any, any, infer Output, any, any, any>
-    ? Awaited<Output>
+  Action extends DomainActionDefinition<any, infer OutputSchema, any, any>
+    ? z.output<OutputSchema>
     : never;
 
 export type DomainActionOutput<Action> =
-  Action extends DomainActionDefinition<any, any, infer Output, any, any, any>
-    ? Awaited<Output>
+  Action extends DomainActionDefinition<any, infer OutputSchema, any, any>
+    ? z.output<OutputSchema>
     : never;
 
 export type DomainActionSerializedOutput<Action> =
-  Action extends DomainActionDefinition<any, any, infer Output, any, any, infer OutputContract>
-    ? [OutputContract] extends [never]
-      ? Awaited<Output>
-      : unknown extends OutputContract
-      ? Awaited<Output>
-      : DomainActionSerializedOutputValue<OutputContract>
+  Action extends DomainActionDefinition<any, infer OutputSchema, any, any>
+    ? z.output<OutputSchema>
     : never;
 
 type DomainActionMethods<Actions extends DomainActionMap> = {
   [K in keyof Actions]: (
     input: ActionInputOf<Actions[K]>,
   ) => Promise<ActionOutputOf<Actions[K]>>;
+};
+
+type DomainDbShortcuts<DB> =
+  DB extends { query: infer Query } ? { query: Query } : {};
+
+type RuntimeDomainQueryForParts<
+  E extends EntitiesDef,
+  L extends LinksDef<any>,
+  R extends RoomsDef,
+> = <Query extends InstaQLParams<InstantSchemaDef<WithBase<E>, L, R>>>(
+  query: Query,
+) => Promise<any>;
+
+type CallableDomainActionMethods<Actions extends DomainActionMap, DB> = Omit<
+  DomainActionMethods<Actions>,
+  | "actions"
+  | "context"
+  | "contextString"
+  | "db"
+  | "domain"
+  | "env"
+  | "schema"
+  | keyof DomainDbShortcuts<DB>
+>;
+
+export type CallableDomainScope<
+  E extends EntitiesDef,
+  L extends LinksDef<any>,
+  R extends RoomsDef,
+  Actions extends DomainActionMap,
+  Env = unknown,
+> =
+  & {
+    domain: unknown;
+    db: { query: RuntimeDomainQueryForParts<E, L, R> };
+    schema: InstantSchemaDef<WithBase<E>, L, R>;
+    context: (options?: DomainContextOptions) => DomainContext;
+    contextString: (options?: DomainContextOptions) => string;
+    env: Env;
+    actions: DomainActionMethods<Actions>;
+    query: RuntimeDomainQueryForParts<E, L, R>;
+  }
+  & CallableDomainActionMethods<Actions, { query: RuntimeDomainQueryForParts<E, L, R> }>;
+
+export type ConcreteDomainFor<
+  E extends EntitiesDef,
+  L extends LinksDef<any>,
+  R extends RoomsDef,
+  Actions extends DomainActionMap,
+  Name extends string,
+  IncludedNames extends string,
+  DB,
+> = {
+  domain: DomainSchemaResult<E, L, R, Actions, Name, IncludedNames>;
+  db: DB;
+  schema: ReturnType<typeof i.schema<WithBase<E>, L, R>>;
+  context: (options?: DomainContextOptions) => DomainContext;
+  contextString: (options?: DomainContextOptions) => string;
+};
+
+export type RuntimeDomainScope<
+  D = unknown,
+  Env = unknown,
+> =
+  & ActiveDomain<any, Env>
+  & Record<string, unknown>;
+
+type RuntimeCallableForDomain<D> = {
+  use(subdomain: D, options?: unknown): Promise<unknown>;
 };
 
 // Strip link metadata from entity definitions to avoid nested EntityDef links
@@ -492,12 +509,14 @@ type MergeLinks<A extends LinksDef<any>, B extends LinksDef<any>> = Simplify<{
 
 type DomainSchemaSource =
   | DomainInstance<any, any, any>
-  | DomainSchemaResult<any, any, any>
+  | AnyDomainSchemaResult
   | InstantSchemaDef<any, any, any>;
 
 type EntitiesOfDomainSource<D> =
-  D extends DomainSchemaResult<infer E, any, any, any, any, any>
-    ? E
+  D extends { readonly originalEntities: infer E }
+    ? E extends EntitiesDef
+      ? E
+      : {}
     : D extends DomainInstance<infer E, any, any>
       ? E
       : D extends InstantSchemaDef<infer E, any, any>
@@ -525,14 +544,11 @@ type PermissiveLinksDef = Record<string, {
 // Simple type to represent entity names for basic validation
 type EntityNames<T> = T extends Record<string, any> ? keyof T : never;
 
-// Result of domain.withSchema() with toInstantSchema method
-// L represents the merged links (current domain + included domains) with literal keys preserved
-// This type preserves both:
-// 1. Full compatibility with InstantDB's schema type for InstaQLParams validation (enriched entities)
-// 2. Original entities (E) accessible via originalEntities property for type safety
-// The key is that DomainSchemaResult extends InstantDB's schema type completely,
-// so typeof domain works with InstaQLParams and validates queries correctly (like InstantDB does)
-// InstaQLParams uses the enriched entities from the schema to validate link names in queries
+// Result of domain.withSchema().
+//
+// DomainSchemaResult is intentionally the Ekairos domain object, not the
+// InstantDB schema object. Use DomainInstantSchema<typeof domain> or
+// domain.instantSchema() when an InstantDB schema type/value is needed.
 export type DomainSchemaResult<
   E extends EntitiesDef = EntitiesDef,
   L extends LinksDef<any> = LinksDef<any>,
@@ -540,8 +556,16 @@ export type DomainSchemaResult<
   Actions extends DomainActionMap = {},
   Name extends string = string,
   IncludedNames extends string = Name,
-> = 
-  ReturnType<typeof i.schema<WithBase<E>, L, R>> & {
+> = {
+    <Env = unknown>(
+      runtime: RuntimeCallableForDomain<
+        DomainSchemaResult<E, L, R, Actions, Name, IncludedNames>
+      >,
+      options?: unknown,
+    ): Promise<CallableDomainScope<E, L, R, Actions, Env>>;
+    readonly entities: E;
+    readonly links: L;
+    readonly rooms: R;
     // Add originalEntities property for type-safe access to original entity definitions
     // This preserves type safety while InstaQLParams uses enriched entities for validation
     readonly originalEntities: E;
@@ -556,9 +580,7 @@ export type DomainSchemaResult<
      */
     toInstantSchema: () => ReturnType<typeof i.schema<WithBase<E>, L, R>>;
     // Return this domain as a materialized type, flattening composition history.
-    definition: () => DomainDefinitionOf<
-      DomainSchemaResult<E, L, R, Actions, Name, IncludedNames>
-    >;
+    definition: () => DomainSchemaResult<E, L, R, Actions, Name, IncludedNames>;
     // Build full domain context (schema + registry + docs) for AI/system prompts.
     context: (options?: DomainContextOptions) => DomainContext;
     // Render a prompt-friendly context string for AI system prompts.
@@ -567,7 +589,7 @@ export type DomainSchemaResult<
     fromDB: <DB = any>(
       db: DB,
       bindings?: { env?: unknown; runtime?: unknown },
-    ) => ConcreteDomain<DomainSchemaResult<E, L, R, Actions, Name, IncludedNames>, DB>;
+    ) => ConcreteDomainFor<E, L, R, Actions, Name, IncludedNames, DB>;
     // Optional metadata for this domain.
     meta?: Record<string, unknown>;
     // Raw domain action definitions declared for this domain result.
@@ -605,6 +627,27 @@ export type ActiveDomain<
       actions: DomainActionMethods<ActionMapOf<D>>;
     }
   : {});
+
+export type DomainRuntimeDb = {
+  query: (...args: any[]) => Promise<any>;
+  transact: (...args: any[]) => Promise<any>;
+  tx: any;
+};
+
+export type DomainRuntime<
+  D extends DomainSchemaResult = DomainSchemaResult,
+  Env = unknown,
+> = D extends DomainSchemaResult<infer E, infer L, infer R, infer Actions, any, any>
+  ? {
+      domain: D;
+      db: DomainRuntimeDb;
+      schema: ReturnType<typeof i.schema<WithBase<E>, L, R>>;
+      context: (options?: DomainContextOptions) => DomainContext;
+      contextString: (options?: DomainContextOptions) => string;
+      env: Env;
+      actions: DomainActionMethods<Actions>;
+    }
+  : ActiveDomain<D, Env>;
 
 // Base entities phantom (type-only) so links can reference $users and $files
 type AnyEntityDef = EntitiesDef[string];
@@ -662,12 +705,12 @@ export type DomainBuilder<
 };
 
 function getMeta(source: unknown): DomainMeta | null {
-  if (!source || typeof source !== "object") return null;
+  if (!isObjectLike(source)) return null;
   return (source as any)[EKAIROS_META] ?? null;
 }
 
 function getActionBinding(source: unknown): { name: string; domain: unknown; key?: string } | null {
-  if (!source || typeof source !== "object") return null;
+  if (!isObjectLike(source)) return null;
   const binding = (source as any)[EKAIROS_ACTION_BINDING];
   if (!binding || typeof binding !== "object") return null;
   const name = typeof binding.name === "string" ? binding.name.trim() : "";
@@ -681,7 +724,7 @@ function getActionBinding(source: unknown): { name: string; domain: unknown; key
 }
 
 function bindAction(
-  action: DomainActionDefinition<any, any, any, any, any, any>,
+  action: DomainActionDefinition<any, any, any, any>,
   params: { name: string; domain: unknown; key?: string },
 ): DomainActionRegistration {
   const registration: DomainActionRegistration = {
@@ -702,7 +745,7 @@ function bindAction(
 }
 
 function getStoredActions(source: unknown): DomainActionRegistration[] {
-  if (!source || typeof source !== "object") return [];
+  if (!isObjectLike(source)) return [];
   const raw = (source as any)[EKAIROS_ACTIONS];
   if (!Array.isArray(raw)) return [];
   return raw.filter(
@@ -715,14 +758,14 @@ function getStoredActions(source: unknown): DomainActionRegistration[] {
 }
 
 function getStoredActionMap(source: unknown): DomainActionMap {
-  if (!source || typeof source !== "object") return {};
+  if (!isObjectLike(source)) return {};
   const raw = (source as any)[EKAIROS_ACTION_MAP];
   if (!raw || typeof raw !== "object") return {};
   return raw as DomainActionMap;
 }
 
 function setStoredActions(source: unknown, actions: DomainActionRegistration[]) {
-  if (!source || typeof source !== "object") return;
+  if (!isObjectLike(source)) return;
   const frozenActions = Object.freeze([...actions]) as unknown as DomainActionRegistration[];
   Object.defineProperty(source, EKAIROS_ACTIONS, {
     value: frozenActions,
@@ -733,7 +776,7 @@ function setStoredActions(source: unknown, actions: DomainActionRegistration[]) 
 }
 
 function setStoredActionMap(source: unknown, actionMap: DomainActionMap) {
-  if (!source || typeof source !== "object") return;
+  if (!isObjectLike(source)) return;
   Object.defineProperty(source, EKAIROS_ACTION_MAP, {
     value: Object.freeze({ ...actionMap }),
     enumerable: false,
@@ -742,37 +785,19 @@ function setStoredActionMap(source: unknown, actionMap: DomainActionMap) {
   });
 }
 
-function readRuntimeActionStack(runtime: unknown): string[] {
-  if (!runtime || typeof runtime !== "object") return [];
-  const stack = (runtime as any)[EKAIROS_ACTION_STACK];
-  return Array.isArray(stack) ? [...stack] : [];
-}
-
-function cloneRuntimeWithActionStack<Runtime>(runtime: Runtime, stack: string[]): Runtime {
-  if (!runtime || typeof runtime !== "object") return runtime;
-  const scoped = Object.assign(
-    Object.create(Object.getPrototypeOf(runtime)),
-    runtime,
-  ) as Runtime;
-  Object.defineProperty(scoped as object, EKAIROS_ACTION_STACK, {
-    value: [...stack],
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
-  return scoped;
-}
-
 function normalizeActionLike(
   value: DomainActionLike,
   params: { fallbackName: string; domain: unknown; key?: string },
 ): DomainActionRegistration {
-  const action: DomainActionDefinition<any, any, any, any> =
-    typeof value === "function"
-      ? ({ execute: value } as DomainActionDefinition<any, any, any, any>)
-      : value;
+  const action: DomainActionDefinition<any, any, any, any> = value;
 
-  if (!action || typeof action !== "object" || typeof action.execute !== "function") {
+  if (
+    !action ||
+    typeof action !== "object" ||
+    typeof action.execute !== "function" ||
+    !action.input ||
+    !action.output
+  ) {
     throw new Error(`Invalid domain action definition: ${params.fallbackName}`);
   }
 
@@ -920,6 +945,20 @@ function listKeys(value: unknown): string[] {
   return Object.keys(value as object).filter((key) => !key.startsWith("$"));
 }
 
+function isObjectLike(value: unknown): value is object {
+  return !!value && (typeof value === "object" || typeof value === "function");
+}
+
+function isMaterializedDomainSource(value: unknown): boolean {
+  if (!isObjectLike(value)) return false;
+  const source = value as Record<string, unknown>;
+  return (
+    typeof source.instantSchema === "function" ||
+    typeof source.toInstantSchema === "function" ||
+    ("entities" in source && "links" in source && "rooms" in source)
+  );
+}
+
 function resolveSchema(source: any): any {
   if (!source) return null;
   if (typeof source.instantSchema === "function") return source.instantSchema();
@@ -958,7 +997,7 @@ function assertSchemaIncludes(fullSchema: any, requiredSchema: any) {
 
 function collectTransitiveDomainNames(source: unknown, seen = new Set<unknown>()): Set<string> {
   const names = new Set<string>();
-  if (!source || typeof source !== "object") return names;
+  if (!isObjectLike(source)) return names;
   if (seen.has(source)) return names;
   seen.add(source);
 
@@ -1012,8 +1051,17 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
     context: (options?: DomainContextOptions) => domainInstance.context(options),
     contextString: (options?: DomainContextOptions) => domainInstance.contextString(options),
   };
-  if (bindings?.env !== undefined && bindings?.runtime !== undefined) {
-    const inheritedStack = readRuntimeActionStack(bindings.runtime);
+  if (bindings?.runtime !== undefined) {
+    const inheritedStack: string[] = [];
+
+    const createActionRuntime = (stack: string[]): any => {
+      const runtime = {
+        ...concrete,
+        ...(bindings.env !== undefined ? { env: bindings.env } : {}),
+      } as any;
+      runtime.actions = buildActions(stack);
+      return runtime;
+    };
 
     const buildActions = (stack: string[]) =>
       Object.fromEntries(
@@ -1029,26 +1077,56 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
             }
 
             const nextStack = [...stack, key];
-            const scopedRuntime = cloneRuntimeWithActionStack(
-              bindings.runtime,
-              nextStack,
-            );
+            const scopedRuntime = createActionRuntime(nextStack);
 
-            const params: DomainActionExecuteParams<any, unknown, unknown> = {
-              env: bindings.env,
-              input,
+            const parsedInput = (action as any).input.parse(input);
+            const params: DomainActionExecuteParams<any, any, D> = {
+              input: parsedInput,
               runtime: scopedRuntime,
             }
 
-            return await execute(params);
+            const output = await execute(params);
+            return (action as any).output.parse(output);
           },
         ]),
       );
 
-    ;(concrete as any).env = bindings.env;
+    if (bindings.env !== undefined) {
+      ;(concrete as any).env = bindings.env;
+    }
     ;(concrete as any).actions = buildActions(inheritedStack);
   }
   return concrete;
+}
+
+function promoteRuntimeDomainScope(scoped: any): any {
+  const promoted = { ...scoped } as Record<string, unknown>;
+  const db = scoped?.db;
+
+  if (db && typeof db.query === "function") {
+    promoted.query = db.query.bind(db);
+  }
+
+  const actions = scoped?.actions;
+  if (actions && typeof actions === "object") {
+    for (const [key, action] of Object.entries(actions)) {
+      if (key in promoted) continue;
+      promoted[key] = action;
+    }
+  }
+
+  return promoted;
+}
+
+async function callDomainRuntimeScope<D extends AnyDomainSchemaResult>(
+  domainInstance: D,
+  runtime: RuntimeCallableForDomain<D>,
+  options?: unknown,
+): Promise<any> {
+  if (!runtime || typeof runtime.use !== "function") {
+    throw new Error("domain(runtime) requires an Ekairos runtime with use(domain).");
+  }
+  return promoteRuntimeDomainScope(await runtime.use(domainInstance, options));
 }
 
 export function materializeDomain<SubD extends DomainSchemaResult>(params: {
@@ -1113,7 +1191,7 @@ function buildRegistryEntries(
     } catch {
       child = null;
     }
-    if (!child || typeof child !== "object") continue;
+    if (!isObjectLike(child)) continue;
     if (seen.has(child)) continue;
     seen.add(child);
 
@@ -1246,7 +1324,7 @@ function resolveIncludeNames(meta: DomainMeta | null): string[] {
     } catch {
       child = null;
     }
-    if (!child || typeof child !== "object") continue;
+    if (!isObjectLike(child)) continue;
     const childMeta = getMeta(child);
     if (childMeta?.name) names.add(childMeta.name);
   }
@@ -1438,7 +1516,7 @@ export function domain(arg?: unknown): any {
   >(
     deps: AE,
     linkDeps: AL,
-    lazyIncludes: Array<() => DomainInstance<any, any, any> | DomainSchemaResult<any, any, any> | InstantSchemaDef<any, any, any> | undefined> = [],
+    lazyIncludes: Array<() => DomainInstance<any, any, any> | AnyDomainSchemaResult | InstantSchemaDef<any, any, any> | undefined> = [],
     meta: DomainMeta
   ): DomainBuilder<AE, AL, Name, IncludedNames> {
     const builder = {
@@ -1447,10 +1525,10 @@ export function domain(arg?: unknown): any {
         type L2 = LinksOfDomainSource<OtherDomain>;
         type NextIncludedNames = IncludedNames | IncludedDomainNamesOf<OtherDomain>;
         // Support lazy includes via function for circular dependencies
-        if (typeof other === 'function') {
+        if (typeof other === 'function' && !isMaterializedDomainSource(other)) {
           const lazyGetter = () => {
             try {
-              return other();
+              return (other as () => unknown)();
             } catch (e) {
               return undefined;
             }
@@ -1647,16 +1725,26 @@ export function domain(arg?: unknown): any {
             return frozenSchema;
           };
 
-          const result = {
-            entities: Object.freeze({ ...allEntities }) as MergedEntitiesType,
-            // Strip base phantom from public type so it's assignable to i.schema()
-            links: Object.freeze(cloneLinksDef(allLinks)) as MergedLinksType,
-            rooms: Object.freeze(cloneRoomsDef(def.rooms)),
-            // Add originalEntities for type-safe access to original entity definitions
-            originalEntities: Object.freeze({ ...allEntities }) as MergedEntitiesType,
-            instantSchema,
-            toInstantSchema: instantSchema,
-          } as unknown as DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms, Actions, Name, IncludedNames>;
+          let result: DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms, Actions, Name, IncludedNames>;
+          const callableResult = (
+            runtime: RuntimeCallableForDomain<
+              DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms, Actions, Name, IncludedNames>
+            >,
+            options?: unknown,
+          ) => callDomainRuntimeScope(result as any, runtime as any, options);
+          result = Object.assign(
+            callableResult,
+            {
+              entities: Object.freeze({ ...allEntities }) as MergedEntitiesType,
+              // Strip base phantom from public type so it's assignable to i.schema()
+              links: Object.freeze(cloneLinksDef(allLinks)) as MergedLinksType,
+              rooms: Object.freeze(cloneRoomsDef(def.rooms)),
+              // Add originalEntities for type-safe access to original entity definitions
+              originalEntities: Object.freeze({ ...allEntities }) as MergedEntitiesType,
+              instantSchema,
+              toInstantSchema: instantSchema,
+            },
+          ) as unknown as DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms, Actions, Name, IncludedNames>;
 
           attachMeta(result as object, freezeMeta(meta));
           (result as any).context = (options?: DomainContextOptions) =>
@@ -1708,14 +1796,14 @@ export function domain(arg?: unknown): any {
           return Object.freeze(result as any);
         };
 
-        return createDomainResult([], {});
+        return createDomainResult([], {} as any) as any;
       },
       schema<LE extends EntitiesDef, const LL extends LinksDef<any>>(def: {
         entities: LE;
         links: LL;
         rooms: RoomsDef;
       }): DomainSchemaResult<MergeEntities<AE, LE>, MergeLinks<AL, LL>, RoomsDef, {}, Name, IncludedNames> {
-        return this.withSchema(def);
+        return this.withSchema(def) as any;
       },
     };
     return builder as unknown as DomainBuilder<AE, AL, Name, IncludedNames>;
@@ -1746,57 +1834,35 @@ export function composeDomain(
  *
  * Convention for new actions:
  *
- * `async execute({ runtime, input }) { "use step"; const domain = await runtime.use(myDomain); ... }`
+ * `async execute({ runtime, input }) { await runtime.db.transact([...]); }`
  *
- * Actions remain callable directly, from nested `runtime.use(domain).actions.*`
- * composition, and from higher-level workflows that orchestrate them.
+ * Actions receive a runtime already scoped to the declaring domain. Nested
+ * action composition is available through `runtime.actions.*`.
  */
+function toJsonSchema(schema: DomainActionSchema): unknown {
+  try {
+    return z.toJSONSchema(schema as never, { target: "draft-7" });
+  } catch {
+    return undefined;
+  }
+}
+
 export function defineDomainAction<
-  OutputContract extends DomainActionOutputContract<any, any>,
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Runtime = unknown,
+  InputSchema extends DomainActionSchema,
+  OutputSchema extends DomainActionSchema,
+  Runtime = DomainRuntime<any>,
   Domain = unknown,
 >(
-  action: Omit<
-    DomainActionDefinition<
-      Env,
-      Input,
-      DomainActionRuntimeOutput<OutputContract>,
-      Runtime,
-      Domain,
-      OutputContract
-    >,
-    "output"
-  > & {
-    output: OutputContract;
-  },
-): DomainActionDefinition<
-  Env,
-  Input,
-  DomainActionRuntimeOutput<OutputContract>,
-  Runtime,
-  Domain,
-  OutputContract
->;
-export function defineDomainAction<
-  Env extends Record<string, unknown> = Record<string, unknown>,
-  Input = unknown,
-  Output = unknown,
-  Runtime = unknown,
-  Domain = unknown,
->(
-  action: Omit<
-    DomainActionDefinition<Env, Input, Output, Runtime, Domain, never>,
-    "output"
-  > & {
-    output?: never;
-  },
-): DomainActionDefinition<Env, Input, Output, Runtime, Domain, never>;
+  action: DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain>,
+): DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain>;
 export function defineDomainAction(
-  action: DomainActionDefinition<any, any, any, any, any, any>,
-): DomainActionDefinition<any, any, any, any, any, any> {
-  return action;
+  action: DomainActionDefinition<any, any, any, any>,
+): DomainActionDefinition<any, any, any, any> {
+  return Object.freeze({
+    ...action,
+    inputSchema: toJsonSchema(action.input),
+    outputSchema: toJsonSchema(action.output),
+  });
 }
 
 export const defineAction = defineDomainAction;
@@ -1808,5 +1874,3 @@ export function getDomainActions(source: unknown): DomainActionRegistration[] {
 export function getDomainActionBinding(source: unknown): { name: string; domain: unknown; key?: string } | null {
   return getActionBinding(source);
 }
-
-

@@ -1,10 +1,9 @@
 "use client"
 
-import { ComponentDocPage } from "../_component-page"
-import { promptRegistryItem } from "./config"
+import { redirect } from "next/navigation";
 
 export default function PromptPage() {
-  return <ComponentDocPage item={promptRegistryItem} />
+  redirect("/events/components");
 }
 
 

@@ -1,4 +1,4 @@
-import type { ContextEventForUI } from "@/components/ekairos/context/context";
+import type { ContextEventForUI } from "@ekairos/events/react";
 
 export type ReactorShowcaseDefinition = {
   id: string;

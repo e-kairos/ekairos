@@ -351,6 +351,61 @@ function normalizeFileContentBlock(value: Record<string, unknown>): ContextInlin
   )
 }
 
+function normalizeInlineContentBlock(value: unknown): ContextInlineContent | null {
+  const record = asRecord(value)
+  if (!record || typeof record.type !== "string") return null
+
+  if (record.type === "text" && typeof record.text === "string") {
+    return contextInlineContentSchema.parse({ type: "text", text: record.text })
+  }
+
+  if (record.type === "json") {
+    return contextInlineContentSchema.parse({ type: "json", value: record.value })
+  }
+
+  if (record.type === "file" || record.type === "image-data") {
+    return normalizeFileContentBlock(record)
+  }
+
+  return null
+}
+
+function normalizeInlineContentBlocks(value: unknown): ContextInlineContent[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((block) => normalizeInlineContentBlock(block))
+    .filter((block): block is ContextInlineContent => Boolean(block))
+}
+
+function contentBlocksToActionValue(blocks: ContextInlineContent[]) {
+  if (blocks.length === 0) return undefined
+  if (blocks.length === 1) {
+    const [first] = blocks
+    if (first.type === "json") return first.value
+    if (first.type === "text") return first.text
+    if (first.type === "file") return first
+  }
+
+  return {
+    type: "content",
+    value: blocks,
+  }
+}
+
+function contentBlocksToErrorMessage(blocks: ContextInlineContent[]) {
+  const text = blocks
+    .filter((block): block is Extract<ContextInlineContent, { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("\n\n")
+    .trim()
+  if (text) return text
+
+  const jsonBlock = blocks.find((block) => block.type === "json")
+  if (jsonBlock) return JSON.stringify(jsonBlock.value, null, 2)
+
+  return ""
+}
+
 function readReactorMetadata(record: Record<string, unknown>) {
   const parsed = reactorMetadataSchema.safeParse(record.reactorMetadata)
   return parsed.success ? parsed.data : undefined
@@ -375,6 +430,79 @@ function messageFromBlocks(
           text: text || undefined,
           blocks: hasNonText ? blocks : undefined,
         }),
+        reactorMetadata,
+      }),
+    ),
+  ]
+}
+
+function normalizeExternalToolCallPart(
+  record: Record<string, unknown>,
+  reactorMetadata?: ReactorMetadata,
+): ContextPartEnvelope[] {
+  const actionName =
+    typeof record.toolName === "string" && record.toolName.length > 0
+      ? record.toolName
+      : ""
+  const actionCallId =
+    typeof record.toolCallId === "string" && record.toolCallId.length > 0
+      ? record.toolCallId
+      : ""
+  if (!actionName || !actionCallId) return []
+
+  const blocks = normalizeInlineContentBlocks(record.content)
+  return [
+    contextActionPartSchema.parse(
+      cleanRecord({
+        type: "action" as const,
+        content: {
+          status: "started" as const,
+          actionName,
+          actionCallId,
+          input: contentBlocksToActionValue(blocks),
+        },
+        reactorMetadata,
+      }),
+    ),
+  ]
+}
+
+function normalizeExternalToolResultPart(
+  record: Record<string, unknown>,
+  reactorMetadata?: ReactorMetadata,
+): ContextPartEnvelope[] {
+  const actionName =
+    typeof record.toolName === "string" && record.toolName.length > 0
+      ? record.toolName
+      : ""
+  const actionCallId =
+    typeof record.toolCallId === "string" && record.toolCallId.length > 0
+      ? record.toolCallId
+      : ""
+  if (!actionName || !actionCallId) return []
+
+  const blocks = normalizeInlineContentBlocks(record.content)
+  const failed = record.state === "output-error"
+
+  return [
+    contextActionPartSchema.parse(
+      cleanRecord({
+        type: "action" as const,
+        content: failed
+          ? {
+              status: "failed" as const,
+              actionName,
+              actionCallId,
+              error: {
+                message: contentBlocksToErrorMessage(blocks) || "Action execution failed.",
+              },
+            }
+          : {
+              status: "completed" as const,
+              actionName,
+              actionCallId,
+              output: contentBlocksToActionValue(blocks),
+            },
         reactorMetadata,
       }),
     ),
@@ -464,6 +592,14 @@ export function normalizeUiPartToContextPartEnvelopes(value: unknown): ContextPa
 
   if (record.type.startsWith("data-")) {
     return messageFromBlocks([{ type: "json", value: record.data }], reactorMetadata)
+  }
+
+  if (record.type === "tool-call") {
+    return normalizeExternalToolCallPart(record, reactorMetadata)
+  }
+
+  if (record.type === "tool-result") {
+    return normalizeExternalToolResultPart(record, reactorMetadata)
   }
 
   if (record.type.startsWith("tool-")) {

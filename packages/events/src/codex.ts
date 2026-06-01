@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { createContext, defineAction } from "./context.js"
-import { didToolExecute } from "./context.toolcalls.js"
+import { didActionExecute } from "./context.action-calls.js"
 import type { ContextEnvironment } from "./context.config.js"
 import type {
   ContextModelInit,
@@ -191,7 +191,7 @@ export function didCodexToolExecute(
   event: Pick<{ content: any }, "content">,
   toolName = DEFAULT_CODEX_TOOL_NAME,
 ): boolean {
-  return didToolExecute(event as any, toolName)
+  return didActionExecute(event as any, toolName)
 }
 
 export function createCodexContextBuilder<
@@ -217,7 +217,7 @@ export function createCodexContextBuilder<
   const shouldContinue =
     config.shouldContinue ??
     ((args: ContextShouldContinueArgs<Context, Env>) =>
-      !didToolExecute(args.reactionEvent, toolName))
+      !didActionExecute(args.reactionEvent, toolName))
 
   let builder = createContext<Env>(config.key)
     .context(config.context)

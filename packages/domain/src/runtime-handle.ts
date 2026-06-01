@@ -11,17 +11,15 @@ import type {
   RuntimeResolveOptions,
 } from "./runtime-step.js"
 import type {
-  ActiveDomain,
-  CompatibleSchemaForDomain,
-  DomainSchemaResult,
+  DomainLike,
   IncludedDomainNamesOf,
-  SchemaOf,
 } from "./index.js"
+import type { ActiveDomain, DomainSchemaResult } from "./index.js"
 import { materializeDomain } from "./index.js"
 
 type DomainNamesCompatible<
   RootDomain,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = string extends IncludedDomainNamesOf<RootDomain>
   ? true
   : string extends IncludedDomainNamesOf<RequiredDomain>
@@ -32,28 +30,24 @@ type DomainNamesCompatible<
 
 type RootIncludesDomain<
   RootDomain,
-  RequiredDomain extends DomainSchemaResult,
-> = RootDomain extends DomainSchemaResult
-  ? DomainNamesCompatible<RootDomain, RequiredDomain> extends true
-    ? CompatibleSchemaForDomain<SchemaOf<RootDomain>, RequiredDomain> extends never
-      ? false
-      : true
-    : false
+  RequiredDomain extends DomainLike,
+> = RootDomain extends DomainLike
+  ? DomainNamesCompatible<RootDomain, RequiredDomain>
   : false
 
 type SubdomainForRoot<
   RootDomain,
-  Subdomain extends DomainSchemaResult,
+  Subdomain extends DomainLike,
 > = RootIncludesDomain<RootDomain, Subdomain> extends true ? Subdomain : never
 
-type RuntimeUseForDomain<
+export type RuntimeUseForDomain<
   Env,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = {
   use(
     subdomain: RequiredDomain,
     options?: RuntimeResolveOptions,
-  ): Promise<Omit<ActiveDomain<RequiredDomain, Env>, "env">>
+  ): Promise<unknown>
 }
 
 type RuntimeEnvOf<Runtime extends EkairosRuntime<any, any, any>> =
@@ -66,7 +60,7 @@ type IsAny<T> = 0 extends (1 & T) ? true : false
 
 type RuntimeDomainCompatibility<
   Runtime extends EkairosRuntime<any, any, any>,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > = IsAny<Runtime> extends true
   ? unknown
   : IsAny<RuntimeRootDomainOf<Runtime>> extends true
@@ -172,10 +166,10 @@ export abstract class EkairosRuntime<
     }
   }
 
-  public async use<SubD extends DomainSchemaResult>(
+  public async use<SubD extends DomainLike>(
     subdomain: SubdomainForRoot<D, SubD>,
     options?: RuntimeResolveOptions,
-  ): Promise<ActiveDomain<SubD, Env>> {
+  ): Promise<unknown> {
     const rootDomain = this.getDomain() as any
     if (!rootDomain || typeof rootDomain.fromDB !== "function") {
       throw new Error("EkairosRuntime.use requires a root DomainSchemaResult.")
@@ -190,7 +184,7 @@ export abstract class EkairosRuntime<
         env: this.env,
         runtime: this,
       },
-    }) as ActiveDomain<SubD, Env>
+    }) as unknown
   }
 }
 
@@ -202,7 +196,7 @@ export type ExplicitRuntimeLike<
 
 export type RuntimeForDomain<
   Runtime extends EkairosRuntime<any, any, any>,
-  RequiredDomain extends DomainSchemaResult,
+  RequiredDomain extends DomainLike,
 > =
   & Pick<Runtime, "db" | "resolve" | "meta">
   & RuntimeUseForDomain<RuntimeEnvOf<Runtime>, RequiredDomain>

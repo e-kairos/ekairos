@@ -28,6 +28,7 @@ export type CreateDomainAppParams = {
   directory: string
   framework: "next"
   install: boolean
+  template?: CreateDomainAppTemplate
   demo?: boolean
   force?: boolean
   packageManager?: string
@@ -61,10 +62,14 @@ export type CreateDomainAppSmokeResult = {
   }
 }
 
+export const CREATE_DOMAIN_APP_TEMPLATES = ["empty", "supply-chain", "agent"] as const
+export type CreateDomainAppTemplate = (typeof CREATE_DOMAIN_APP_TEMPLATES)[number]
+
 export type CreateDomainAppResult = {
   ok: true
   directory: string
   framework: "next"
+  template: CreateDomainAppTemplate
   installed: boolean
   packageManager: string
   provisioned: boolean
@@ -77,12 +82,14 @@ export type CreateDomainAppResult = {
   nextSteps: string[]
 }
 
-const TEMPLATE_NEXT_VERSION = "15.5.7"
-const TEMPLATE_REACT_VERSION = "19.2.1"
-const TEMPLATE_TYPESCRIPT_VERSION = "^5.9.2"
-const TEMPLATE_INSTANT_VERSION = "0.22.126"
-const TEMPLATE_INSTANT_REACT_VERSION = "0.22.126"
-const TEMPLATE_WORKFLOW_VERSION = "^5.0.0-beta.5"
+const TEMPLATE_NEXT_VERSION = "16.2.6"
+const TEMPLATE_REACT_VERSION = "19.2.6"
+const TEMPLATE_TYPESCRIPT_VERSION = "^6.0.3"
+const TEMPLATE_INSTANT_VERSION = "1.0.39"
+const TEMPLATE_INSTANT_REACT_VERSION = "1.0.39"
+const TEMPLATE_WORKFLOW_VERSION = "5.0.0-beta.6"
+const TEMPLATE_VERCEL_OIDC_VERSION = "3.4.1"
+const TEMPLATE_EVENTS_VERSION = "1.22.82-beta.development.0"
 
 function trimOrEmpty(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
@@ -145,8 +152,34 @@ async function readDomainPackageVersion() {
   return trimOrEmpty(parsed.version) || "latest"
 }
 
-function createScaffoldSchema() {
-  return createSupplyChainScaffoldSchema()
+export function normalizeCreateAppTemplate(value: unknown): CreateDomainAppTemplate | null {
+  const normalized = trimOrEmpty(value)
+  if (!normalized) return null
+  if ((CREATE_DOMAIN_APP_TEMPLATES as readonly string[]).includes(normalized)) {
+    return normalized as CreateDomainAppTemplate
+  }
+  throw new Error(
+    `Unsupported template: ${normalized}. Supported templates: ${CREATE_DOMAIN_APP_TEMPLATES.join(", ")}.`,
+  )
+}
+
+function resolveCreateAppTemplate(params: {
+  demo?: boolean
+  template?: CreateDomainAppTemplate | null
+}) {
+  if (params.template) {
+    if (params.demo && params.template !== "supply-chain") {
+      throw new Error("--demo only supports --template=supply-chain.")
+    }
+    return params.template
+  }
+  return params.demo ? "supply-chain" : "empty"
+}
+
+function createScaffoldSchema(template: CreateDomainAppTemplate) {
+  if (template === "supply-chain") return createSupplyChainScaffoldSchema()
+  if (template === "agent") return createAgentScaffoldSchema()
+  return createEmptyScaffoldSchema()
 }
 
 function createEmptyScaffoldSchema() {
@@ -264,8 +297,188 @@ function createSupplyChainScaffoldSchema() {
   return scaffoldDomain.toInstantSchema()
 }
 
-function createScaffoldPerms() {
-  return createSupplyChainScaffoldPerms()
+function createAgentScaffoldSchema() {
+  return domain("events")
+    .withSchema({
+      entities: {
+        event_contexts: i.entity({
+          createdAt: i.date(),
+          updatedAt: i.date().optional(),
+          key: i.string().optional().indexed().unique(),
+          name: i.string().optional(),
+          status: i.string().optional().indexed(),
+          content: i.any().optional(),
+          reactor: i.json().optional(),
+        }),
+        event_items: i.entity({
+          channel: i.string().indexed(),
+          createdAt: i.date().indexed(),
+          type: i.string().optional().indexed(),
+          content: i.any().optional(),
+          status: i.string().optional().indexed(),
+        }),
+        event_executions: i.entity({
+          createdAt: i.date(),
+          updatedAt: i.date().optional(),
+          status: i.string().optional().indexed(),
+          workflowRunId: i.string().optional().indexed(),
+          activeStreamId: i.string().optional().indexed(),
+          activeStreamClientId: i.string().optional().indexed(),
+          lastStreamId: i.string().optional().indexed(),
+          lastStreamClientId: i.string().optional().indexed(),
+        }),
+        event_steps: i.entity({
+          createdAt: i.date().indexed(),
+          updatedAt: i.date().optional(),
+          status: i.string().optional().indexed(),
+          iteration: i.number().indexed(),
+          errorText: i.string().optional(),
+          streamId: i.string().optional().indexed(),
+          streamClientId: i.string().optional().indexed(),
+          streamStartedAt: i.date().optional().indexed(),
+          streamFinishedAt: i.date().optional().indexed(),
+          streamAbortReason: i.string().optional(),
+        }),
+        event_parts: i.entity({
+          key: i.string().unique().indexed(),
+          stepId: i.string().indexed(),
+          idx: i.number().indexed(),
+          type: i.string().optional().indexed(),
+          part: i.json().optional(),
+          metadata: i.json().optional(),
+          updatedAt: i.date().optional(),
+        }),
+        event_trace_events: i.entity({
+          key: i.string().unique().indexed(),
+          workflowRunId: i.string().indexed(),
+          seq: i.number().indexed(),
+          eventId: i.string().indexed(),
+          eventKind: i.string().indexed(),
+          eventAt: i.date().optional(),
+          ingestedAt: i.date().optional(),
+          orgId: i.string().optional().indexed(),
+          projectId: i.string().optional().indexed(),
+          contextKey: i.string().optional().indexed(),
+          contextId: i.string().optional().indexed(),
+          executionId: i.string().optional().indexed(),
+          stepId: i.string().optional().indexed(),
+          contextEventId: i.string().optional().indexed(),
+          toolCallId: i.string().optional().indexed(),
+          partKey: i.string().optional().indexed(),
+          partIdx: i.number().optional().indexed(),
+          spanId: i.string().optional().indexed(),
+          parentSpanId: i.string().optional().indexed(),
+          isDeleted: i.boolean().optional(),
+          aiProvider: i.string().optional().indexed(),
+          aiModel: i.string().optional().indexed(),
+          promptTokens: i.number().optional(),
+          promptTokensCached: i.number().optional(),
+          promptTokensUncached: i.number().optional(),
+          completionTokens: i.number().optional(),
+          totalTokens: i.number().optional(),
+          latencyMs: i.number().optional(),
+          cacheCostUsd: i.number().optional(),
+          computeCostUsd: i.number().optional(),
+          costUsd: i.number().optional(),
+          payload: i.any().optional(),
+        }),
+        event_trace_runs: i.entity({
+          workflowRunId: i.string().unique().indexed(),
+          orgId: i.string().optional().indexed(),
+          projectId: i.string().optional().indexed(),
+          firstEventAt: i.date().optional().indexed(),
+          lastEventAt: i.date().optional().indexed(),
+          lastIngestedAt: i.date().optional().indexed(),
+          eventsCount: i.number().optional(),
+          status: i.string().optional().indexed(),
+          payload: i.any().optional(),
+        }),
+        event_trace_spans: i.entity({
+          spanId: i.string().unique().indexed(),
+          parentSpanId: i.string().optional().indexed(),
+          workflowRunId: i.string().indexed(),
+          executionId: i.string().optional().indexed(),
+          stepId: i.string().optional().indexed(),
+          kind: i.string().optional().indexed(),
+          name: i.string().optional().indexed(),
+          status: i.string().optional().indexed(),
+          startedAt: i.date().optional().indexed(),
+          endedAt: i.date().optional().indexed(),
+          durationMs: i.number().optional(),
+          payload: i.any().optional(),
+        }),
+        document_documents: i.entity({
+          name: i.string().optional().indexed(),
+          mimeType: i.string().optional(),
+          size: i.number().optional(),
+          ownerId: i.string().optional().indexed(),
+          orgId: i.string().optional().indexed(),
+          createdAt: i.date().optional().indexed(),
+          processedAt: i.date().optional().indexed(),
+          updatedAt: i.date().optional(),
+          lastJobId: i.string().optional(),
+          content: i.json().optional(),
+        }),
+      },
+      links: {
+        contextItemsContext: {
+          forward: { on: "event_items", has: "one", label: "context" },
+          reverse: { on: "event_contexts", has: "many", label: "items" },
+        },
+        contextExecutionsContext: {
+          forward: { on: "event_executions", has: "one", label: "context" },
+          reverse: { on: "event_contexts", has: "many", label: "executions" },
+        },
+        contextCurrentExecution: {
+          forward: { on: "event_contexts", has: "one", label: "currentExecution" },
+          reverse: { on: "event_executions", has: "one", label: "currentOf" },
+        },
+        contextExecutionsTrigger: {
+          forward: { on: "event_executions", has: "one", label: "trigger" },
+          reverse: { on: "event_items", has: "many", label: "executionsAsTrigger" },
+        },
+        contextExecutionsReaction: {
+          forward: { on: "event_executions", has: "one", label: "reaction" },
+          reverse: { on: "event_items", has: "many", label: "executionsAsReaction" },
+        },
+        contextStepsExecution: {
+          forward: { on: "event_steps", has: "one", label: "execution" },
+          reverse: { on: "event_executions", has: "many", label: "steps" },
+        },
+        contextExecutionItems: {
+          forward: { on: "event_items", has: "one", label: "execution" },
+          reverse: { on: "event_executions", has: "many", label: "items" },
+        },
+        contextPartsStep: {
+          forward: { on: "event_parts", has: "one", label: "step" },
+          reverse: { on: "event_steps", has: "many", label: "parts" },
+        },
+        contextStepStream: {
+          forward: { on: "event_steps", has: "one", label: "stream" },
+          reverse: { on: "$streams", has: "many", label: "step" },
+        },
+        contextExecutionActiveStream: {
+          forward: { on: "event_executions", has: "one", label: "activeStream" },
+          reverse: { on: "$streams", has: "many", label: "activeOf" },
+        },
+        contextExecutionLastStream: {
+          forward: { on: "event_executions", has: "one", label: "lastStream" },
+          reverse: { on: "$streams", has: "many", label: "lastOf" },
+        },
+        documentFile: {
+          forward: { on: "document_documents", has: "one", label: "file" },
+          reverse: { on: "$files", has: "one", label: "document" },
+        },
+      },
+      rooms: {},
+    })
+    .toInstantSchema()
+}
+
+function createScaffoldPerms(template: CreateDomainAppTemplate) {
+  if (template === "supply-chain") return createSupplyChainScaffoldPerms()
+  if (template === "agent") return createAgentScaffoldPerms()
+  return createEmptyScaffoldPerms()
 }
 
 function createEmptyScaffoldPerms() {
@@ -296,6 +509,32 @@ function createSupplyChainScaffoldPerms() {
     inventory_stockItem: entityRules,
     transportation_shipment: entityRules,
     qualityControl_inspection: entityRules,
+  } as any
+}
+
+function createAgentScaffoldPerms() {
+  const entityRules = {
+    allow: {
+      view: "true",
+      create: "true",
+      update: "true",
+      delete: "false",
+    },
+  }
+
+  return {
+    attrs: {
+      allow: { create: "true" },
+    },
+    event_contexts: entityRules,
+    event_items: entityRules,
+    event_executions: entityRules,
+    event_steps: entityRules,
+    event_parts: entityRules,
+    event_trace_events: entityRules,
+    event_trace_runs: entityRules,
+    event_trace_spans: entityRules,
+    document_documents: entityRules,
   } as any
 }
 
@@ -695,6 +934,7 @@ async function runSmoke(params: {
 
 async function provisionInstantApp(params: {
   directory: string
+  template: CreateDomainAppTemplate
   instantToken: string
   orgId?: string
 }) {
@@ -705,8 +945,8 @@ async function provisionInstantApp(params: {
   const created = await api.createApp({
     title: `ekairos-${trimOrEmpty(params.directory.split(/[\\/]/).pop()) || "app"}`,
     orgId: trimOrEmpty(params.orgId) || undefined,
-    schema: createScaffoldSchema(),
-    perms: createScaffoldPerms(),
+    schema: createScaffoldSchema(params.template),
+    perms: createScaffoldPerms(params.template),
   })
 
   const appId = trimOrEmpty(created?.app?.id)
@@ -803,7 +1043,8 @@ async function writeScaffoldFiles(targetDir: string, files: Record<string, strin
   }
 }
 
-function resolveDomainDependencyVersion(
+function resolveWorkspacePackageDependencyVersion(
+  packageName: string,
   version: string,
   targetDir: string,
   workspacePath?: string,
@@ -813,22 +1054,45 @@ function resolveDomainDependencyVersion(
     return version
   }
 
-  const packageRoot = resolve(workspaceRoot, "packages/domain")
+  const packageRoot = resolve(workspaceRoot, "packages", packageName.split("/").pop() || packageName)
   const relativePath = toPosix(relative(targetDir, packageRoot))
   if (!relativePath) return "file:."
   const prefixed = relativePath.startsWith(".") ? relativePath : `./${relativePath}`
   return `file:${prefixed}`
 }
 
+function resolveDomainDependencyVersion(
+  version: string,
+  targetDir: string,
+  workspacePath?: string,
+) {
+  return resolveWorkspacePackageDependencyVersion(
+    "@ekairos/domain",
+    version,
+    targetDir,
+    workspacePath,
+  )
+}
+
 function buildNextTemplateFiles(params: {
-  demo?: boolean
+  template: CreateDomainAppTemplate
   targetDir: string
   domainVersion: string
   packageManager: string
   workspacePath?: string
 }): Record<string, string> {
-  const domainDependency = resolveDomainDependencyVersion(
-    params.domainVersion,
+  const workspaceRoot = trimOrEmpty(params.workspacePath)
+  const domainDependency =
+    params.template === "agent" && !workspaceRoot
+      ? TEMPLATE_EVENTS_VERSION
+      : resolveDomainDependencyVersion(
+          params.domainVersion,
+          params.targetDir,
+          params.workspacePath,
+        )
+  const eventsDependency = resolveWorkspacePackageDependencyVersion(
+    "@ekairos/events",
+    TEMPLATE_EVENTS_VERSION,
     params.targetDir,
     params.workspacePath,
   )
@@ -846,6 +1110,7 @@ function buildNextTemplateFiles(params: {
     },
     dependencies: {
       "@ekairos/domain": domainDependency,
+      "@vercel/oidc": TEMPLATE_VERCEL_OIDC_VERSION,
       "@instantdb/admin": TEMPLATE_INSTANT_VERSION,
       "@instantdb/core": TEMPLATE_INSTANT_VERSION,
       "@instantdb/react": TEMPLATE_INSTANT_REACT_VERSION,
@@ -853,6 +1118,7 @@ function buildNextTemplateFiles(params: {
       react: TEMPLATE_REACT_VERSION,
       "react-dom": TEMPLATE_REACT_VERSION,
       workflow: TEMPLATE_WORKFLOW_VERSION,
+      zod: "^4.3.6",
     },
     devDependencies: {
       "@types/node": "^24.5.0",
@@ -862,13 +1128,26 @@ function buildNextTemplateFiles(params: {
     },
     packageManager:
       params.packageManager === "pnpm"
-        ? "pnpm@10.15.1"
-        : params.packageManager === "yarn"
-          ? "yarn@1"
-          : undefined,
+      ? "pnpm@10.15.1"
+      : params.packageManager === "yarn"
+        ? "yarn@1"
+        : undefined,
   }
 
-  if (!params.demo) {
+  if (params.template === "agent") {
+    ;(packageJson.dependencies as Record<string, string>)["@ekairos/events"] = eventsDependency
+    if (params.packageManager === "pnpm") {
+      ;(packageJson as { pnpm?: { overrides: Record<string, string> } }).pnpm = {
+        overrides: {
+          "@ekairos/domain": domainDependency,
+          "@instantdb/admin": TEMPLATE_INSTANT_VERSION,
+          "@instantdb/core": TEMPLATE_INSTANT_VERSION,
+        },
+      }
+    }
+  }
+
+  if (params.template === "empty") {
     return {
       ".gitignore": [".next", "node_modules", ".env.local", ".workflow-data"].join("\n"),
       ".env.example": [
@@ -936,14 +1215,16 @@ function buildNextTemplateFiles(params: {
         '    "moduleResolution": "bundler",',
         '    "resolveJsonModule": true,',
         '    "isolatedModules": true,',
-        '    "jsx": "preserve",',
+        '    "jsx": "react-jsx",',
         '    "incremental": true,',
-        '    "baseUrl": ".",',
         '    "paths": {',
         '      "@/*": ["./src/*"]',
-        "    }",
+        "    },",
+        '    "plugins": [',
+        '      { "name": "next" }',
+        "    ]",
         "  },",
-        '  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],',
+        '  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],',
         '  "exclude": ["node_modules"]',
         "}",
       ].join("\n"),
@@ -1106,6 +1387,399 @@ function buildNextTemplateFiles(params: {
     }
   }
 
+  if (params.template === "agent") {
+    return {
+      ".gitignore": [".next", "node_modules", ".env.local", ".workflow-data"].join("\n"),
+      ".env.example": [
+        "NEXT_PUBLIC_INSTANT_APP_ID=",
+        "INSTANT_ADMIN_TOKEN=",
+        "",
+        "# Optional: use this only while provisioning new apps with the CLI.",
+        "INSTANT_PERSONAL_ACCESS_TOKEN=",
+      ].join("\n"),
+      "DOMAIN.md": [
+        "# Ekairos Agent Template",
+        "",
+        "This app is the minimal loop for Ekairos event contexts:",
+        "",
+        "1. create the app",
+        "2. start an agent context through `/api/agent/react`",
+        "3. open the Instant app in Workbench v2",
+        "4. iterate on `src/agent.ts`",
+        "",
+        "The scaffold uses the canonical `@ekairos/events` schema so Workbench v2 can inspect `event_contexts`.",
+        "It includes an Ekairos registry alias so domain UI components can be installed with shadcn and use `@ekairos/events` directly.",
+      ].join("\n"),
+      "components.json": [
+        "{",
+        '  "$schema": "https://ui.shadcn.com/schema.json",',
+        '  "style": "default",',
+        '  "rsc": false,',
+        '  "tsx": true,',
+        '  "tailwind": {',
+        '    "config": "",',
+        '    "css": "src/app/globals.css",',
+        '    "baseColor": "zinc",',
+        '    "cssVariables": true,',
+        '    "prefix": ""',
+        "  },",
+        '  "iconLibrary": "lucide",',
+        '  "aliases": {',
+        '    "components": "@/components",',
+        '    "utils": "@/lib/utils",',
+        '    "ui": "@/components/ui",',
+        '    "lib": "@/lib",',
+        '    "hooks": "@/hooks"',
+        "  },",
+        '  "registries": {',
+        '    "@ekairos": "https://registry.ekairos.dev/r/{name}.json"',
+        "  }",
+        "}",
+      ].join("\n"),
+      "instant.schema.ts": [
+        'import { eventsDomain } from "@ekairos/events/schema";',
+        "",
+        "const schema = eventsDomain.toInstantSchema();",
+        "",
+        "export default schema;",
+      ].join("\n"),
+      "next-env.d.ts": [
+        '/// <reference types="next" />',
+        '/// <reference types="next/image-types/global" />',
+        "",
+        "// This file is managed by Next.js.",
+      ].join("\n"),
+      "next.config.ts": [
+        'import type { NextConfig } from "next";',
+        'import { withWorkflow } from "workflow/next";',
+        "",
+        "const nextConfig: NextConfig = {",
+        "  transpilePackages: [\"@ekairos/domain\", \"@ekairos/events\"],",
+        "};",
+        "",
+        "export default withWorkflow(nextConfig) as NextConfig;",
+      ].join("\n"),
+      "package.json": `${JSON.stringify(packageJson, null, 2)}\n`,
+      "tsconfig.json": [
+        "{",
+        '  "compilerOptions": {',
+        '    "target": "ES2022",',
+        '    "lib": ["dom", "dom.iterable", "es2022"],',
+        '    "allowJs": false,',
+        '    "skipLibCheck": true,',
+        '    "strict": true,',
+        '    "noEmit": true,',
+        '    "esModuleInterop": true,',
+        '    "module": "esnext",',
+        '    "moduleResolution": "bundler",',
+        '    "resolveJsonModule": true,',
+        '    "isolatedModules": true,',
+        '    "jsx": "react-jsx",',
+        '    "incremental": true,',
+        '    "paths": {',
+        '      "@/*": ["./src/*"]',
+        "    },",
+        '    "plugins": [',
+        '      { "name": "next" }',
+        "    ]",
+        "  },",
+        '  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],',
+        '  "exclude": ["node_modules"]',
+        "}",
+      ].join("\n"),
+      "src/app/globals.css": [
+        ":root {",
+        "  color-scheme: light;",
+        "  --background: #f7f8f6;",
+        "  --foreground: #171a18;",
+        "  --muted: #626a63;",
+        "  --border: #d9ded7;",
+        "  --surface: #ffffff;",
+        "  --accent: #26715f;",
+        "}",
+        "* { box-sizing: border-box; }",
+        "html, body { margin: 0; min-height: 100%; }",
+        "body { min-height: 100dvh; background: var(--background); color: var(--foreground); font-family: \"Segoe UI\", sans-serif; }",
+        "button, textarea, input { font: inherit; }",
+        "main { width: min(980px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0; }",
+        ".shell { display: grid; gap: 22px; }",
+        ".eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }",
+        "h1 { max-width: 760px; margin: 0; font-size: clamp(2.1rem, 5vw, 4.4rem); line-height: 1; }",
+        "p { max-width: 68ch; margin: 0; color: var(--muted); line-height: 1.65; }",
+        ".panel { display: grid; gap: 16px; border: 1px solid var(--border); background: var(--surface); padding: 20px; }",
+        ".grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); }",
+        ".grid div { display: grid; gap: 6px; padding: 14px; border-right: 1px solid var(--border); }",
+        ".grid div:last-child { border-right: 0; }",
+        ".grid span { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }",
+        ".grid strong { font-size: 1rem; overflow-wrap: anywhere; }",
+        "textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px solid var(--border); padding: 12px; }",
+        "button { width: fit-content; border: 0; background: var(--accent); color: white; padding: 10px 14px; font-weight: 700; cursor: pointer; }",
+        "button:disabled { cursor: wait; opacity: 0.65; }",
+        "pre { overflow: auto; margin: 0; border: 1px solid var(--border); background: #f2f4f1; padding: 14px; }",
+        "code { font-family: \"Cascadia Code\", monospace; }",
+        "@media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .grid div { border-right: 0; border-bottom: 1px solid var(--border); } }",
+      ].join("\n"),
+      "src/app/layout.tsx": [
+        'import "./globals.css";',
+        'import type { ReactNode } from "react";',
+        "",
+        "export const metadata = {",
+        '  title: "Ekairos Agent",',
+        '  description: "Scaffolded Ekairos agent context app",',
+        "};",
+        "",
+        "export default function RootLayout({ children }: { children: ReactNode }) {",
+        "  return (",
+        '    <html lang="en">',
+        "      <body>{children}</body>",
+        "    </html>",
+        "  );",
+        "}",
+      ].join("\n"),
+      "src/app/page.tsx": [
+        'import AgentWorkbench from "./agent-workbench";',
+        "",
+        'export const dynamic = "force-dynamic";',
+        "",
+        "export default function HomePage() {",
+        "  return (",
+        "    <main>",
+        '      <section className="shell">',
+        '        <div className="eyebrow">Ekairos Agent Template</div>',
+        "        <h1>Start a context, inspect it in Workbench v2, iterate.</h1>",
+        "        <p>",
+        "          This template writes canonical @ekairos/events rows and returns the context id immediately.",
+        "        </p>",
+        "        <AgentWorkbench />",
+        "      </section>",
+        "    </main>",
+        "  );",
+        "}",
+      ].join("\n"),
+      "src/app/agent-workbench.tsx": [
+        '"use client";',
+        "",
+        "import { useMemo, useState } from \"react\";",
+        "",
+        "type AgentResult = {",
+        "  ok: boolean;",
+        "  appId?: string;",
+        "  contextId?: string;",
+        "  contextKey?: string | null;",
+        "  triggerEventId?: string;",
+        "  error?: string;",
+        "};",
+        "",
+        "export default function AgentWorkbench() {",
+        "  const [prompt, setPrompt] = useState(\"Create a deterministic template context.\");",
+        "  const [result, setResult] = useState<AgentResult | null>(null);",
+        "  const [pending, setPending] = useState(false);",
+        "",
+        "  const workbenchPath = useMemo(() => {",
+        "    if (!result?.appId || !result?.contextId) return \"\";",
+        "    return `/app/${result.appId}/contexts/${result.contextId}`;",
+        "  }, [result]);",
+        "",
+        "  async function startContext() {",
+        "    setPending(true);",
+        "    setResult(null);",
+        "    try {",
+        "      const response = await fetch(\"/api/agent/react\", {",
+        "        method: \"POST\",",
+        "        headers: { \"content-type\": \"application/json\" },",
+        "        body: JSON.stringify({ prompt }),",
+        "      });",
+        "      const data = (await response.json().catch(() => ({}))) as AgentResult;",
+        "      setResult(response.ok ? data : { ok: false, error: data.error || response.statusText });",
+        "    } catch (error) {",
+        "      setResult({ ok: false, error: error instanceof Error ? error.message : String(error) });",
+        "    } finally {",
+        "      setPending(false);",
+        "    }",
+        "  }",
+        "",
+        "  return (",
+        '    <section className="panel">',
+        '      <div className="grid">',
+        "        <div><span>Schema</span><strong>@ekairos/events</strong></div>",
+        "        <div><span>Route</span><strong>/api/agent/react</strong></div>",
+        "        <div><span>Mode</span><strong>scripted reactor</strong></div>",
+        "      </div>",
+        "      <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} />",
+        "      <button type=\"button\" disabled={pending} onClick={startContext}>",
+        "        {pending ? \"Starting context...\" : \"Start context\"}",
+        "      </button>",
+        "      {workbenchPath ? <p>Workbench v2 path: <code>{workbenchPath}</code></p> : null}",
+        "      {result ? <pre>{JSON.stringify(result, null, 2)}</pre> : null}",
+        "    </section>",
+        "  );",
+        "}",
+      ].join("\n"),
+      "src/app/api/agent/react/route.ts": [
+        'import { NextRequest, NextResponse } from "next/server";',
+        'import { agentContext, createTriggerEvent } from "@/agent";',
+        'import { createRuntime } from "@/runtime";',
+        "",
+        "export const maxDuration = 60;",
+        "",
+        "function readTrimmed(value: unknown) {",
+        "  return typeof value === \"string\" ? value.trim() : \"\";",
+        "}",
+        "",
+        "export async function POST(req: NextRequest) {",
+        "  try {",
+        "    const body = await req.json().catch(() => ({}));",
+        "    const prompt = readTrimmed((body as any).prompt) || \"Create a deterministic template context.\";",
+        "    const contextKey = readTrimmed((body as any).contextKey) || `agent-template:${Date.now()}`;",
+        "    const triggerEvent = createTriggerEvent(prompt);",
+        "    const reaction = await agentContext.react(triggerEvent, {",
+        "      runtime: createRuntime({ actorId: \"template-user\" }),",
+        "      context: { key: contextKey },",
+        "      durable: false,",
+        "    });",
+        "    if (reaction.run) await reaction.run;",
+        "    return NextResponse.json({",
+        "      ok: true,",
+        "      appId: process.env.NEXT_PUBLIC_INSTANT_APP_ID || null,",
+        "      contextId: String(reaction.context.id || \"\"),",
+        "      contextKey: reaction.context.key ?? contextKey,",
+        "      triggerEventId: triggerEvent.id,",
+        "    });",
+        "  } catch (error) {",
+        "    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });",
+        "  }",
+        "}",
+      ].join("\n"),
+      "src/agent.ts": [
+        "import {",
+        "  createContext,",
+        "  createScriptedReactor,",
+        "  defineAction,",
+        "  eventsDomain,",
+        "  type ContextItem,",
+        "} from \"@ekairos/events\";",
+        "import { z } from \"zod\";",
+        "",
+        "export type AgentEnv = {",
+        "  actorId?: string;",
+        "};",
+        "",
+        "const createMessageInput = z.object({",
+        "  message: z.string(),",
+        "  marker: z.string().optional(),",
+        "});",
+        "",
+        "const createMessageOutput = z.object({",
+        "  message: z.string(),",
+        "  marker: z.string(),",
+        "});",
+        "",
+        "async function createMessage(input: z.infer<typeof createMessageInput>) {",
+        "  \"use step\";",
+        "  return {",
+        "    message: input.message,",
+        "    marker: input.marker ?? \"AGENT_TEMPLATE_OK\",",
+        "  };",
+        "}",
+        "",
+        "function randomId() {",
+        "  return globalThis.crypto?.randomUUID?.() ?? `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`;",
+        "}",
+        "",
+        "export function createTriggerEvent(text: string): ContextItem {",
+        "  return {",
+        "    id: randomId(),",
+        "    type: \"user_message_created\",",
+        "    channel: \"web\",",
+        "    createdAt: new Date().toISOString(),",
+        "    content: { parts: [{ type: \"text\", text }] },",
+        "  } as any;",
+        "}",
+        "",
+        "export const agentContext = createContext<AgentEnv>(\"agent.template\")",
+        "  .context((stored, env) => ({ ...(stored.content ?? {}), actorId: env.actorId ?? null }))",
+        "  .narrative(() => \"You are the minimal Ekairos agent template. Create one deterministic message.\")",
+        "  .actions(() => ({",
+        "    createMessage: defineAction<any, any, Record<string, never>, AgentEnv, typeof eventsDomain>({",
+        "      description: \"Create the deterministic template message.\",",
+        "      input: createMessageInput as any,",
+        "      output: createMessageOutput as any,",
+        "      execute: async ({ input }) => await createMessage(input),",
+        "    }),",
+        "  }))",
+        "  .reactor(",
+        "    createScriptedReactor({",
+        "      steps: [",
+        "        {",
+        "          assistantEvent: {",
+        "            content: {",
+        "              parts: [",
+        "                { type: \"text\", text: \"AGENT_TEMPLATE_OK context ready.\" },",
+        "                {",
+        "                  type: \"tool-createMessage\",",
+        "                  toolCallId: \"agent-template-create-message\",",
+        "                  input: { message: \"AGENT_TEMPLATE_OK context ready.\", marker: \"AGENT_TEMPLATE_OK\" },",
+        "                },",
+        "              ],",
+        "            },",
+        "          },",
+        "          actionRequests: [",
+        "            {",
+        "              actionRef: \"agent-template-create-message\",",
+        "              actionName: \"createMessage\",",
+        "              input: { message: \"AGENT_TEMPLATE_OK context ready.\", marker: \"AGENT_TEMPLATE_OK\" },",
+        "            },",
+        "          ],",
+        "          messagesForModel: [],",
+        "          llm: { provider: \"scripted\", model: \"agent-template\" },",
+        "        },",
+        "      ],",
+        "      repeatLast: true,",
+        "    }),",
+        "  )",
+        "  .shouldContinue(() => false)",
+        "  .build();",
+      ].join("\n"),
+      "src/runtime.ts": [
+        'import { init } from "@instantdb/admin";',
+        'import { EkairosRuntime } from "@ekairos/domain/runtime-handle";',
+        'import { eventsDomain } from "@ekairos/events/schema";',
+        "",
+        "export type AgentRuntimeEnv = {",
+        "  actorId?: string | null;",
+        "  adminToken?: string;",
+        "  appId?: string;",
+        "};",
+        "",
+        "function resolveRuntimeEnv(env: AgentRuntimeEnv = {}): Required<Pick<AgentRuntimeEnv, \"appId\" | \"adminToken\">> & AgentRuntimeEnv {",
+        "  const appId = String(env.appId ?? process.env.NEXT_PUBLIC_INSTANT_APP_ID ?? \"\").trim();",
+        "  const adminToken = String(env.adminToken ?? process.env.INSTANT_ADMIN_TOKEN ?? \"\").trim();",
+        "  if (!appId || !adminToken) {",
+        "    throw new Error(\"Missing NEXT_PUBLIC_INSTANT_APP_ID or INSTANT_ADMIN_TOKEN. Copy .env.example to .env.local and fill both values.\");",
+        "  }",
+        "  return { ...env, appId, adminToken };",
+        "}",
+        "",
+        "export class AgentRuntime extends EkairosRuntime<AgentRuntimeEnv, typeof eventsDomain, any> {",
+        "  protected getDomain() { return eventsDomain; }",
+        "  protected async resolveDb(env: AgentRuntimeEnv) {",
+        "    const resolved = resolveRuntimeEnv(env);",
+        "    return init({",
+        "      appId: resolved.appId,",
+        "      adminToken: resolved.adminToken,",
+        "      schema: eventsDomain.toInstantSchema(),",
+        "      useDateObjects: true,",
+        "    } as any) as any;",
+        "  }",
+        "}",
+        "",
+        "export function createRuntime(env: AgentRuntimeEnv = {}) {",
+        "  return new AgentRuntime(resolveRuntimeEnv(env));",
+        "}",
+      ].join("\n"),
+    }
+  }
+
   return {
     ".gitignore": [".next", "node_modules", ".env.local", ".workflow-data"].join("\n"),
     ".env.example": [
@@ -1175,14 +1849,16 @@ function buildNextTemplateFiles(params: {
       '    "moduleResolution": "bundler",',
       '    "resolveJsonModule": true,',
       '    "isolatedModules": true,',
-      '    "jsx": "preserve",',
+      '    "jsx": "react-jsx",',
       '    "incremental": true,',
-      '    "baseUrl": ".",',
       '    "paths": {',
       '      "@/*": ["./src/*"]',
-      "    }",
+      "    },",
+      '    "plugins": [',
+      '      { "name": "next" }',
+      "    ]",
       "  },",
-      '  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],',
+      '  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"],',
       '  "exclude": ["node_modules"]',
       "}",
     ].join("\n"),
@@ -1991,6 +2667,7 @@ function buildNextTemplateFiles(params: {
     "src/domain.ts": [
       "import { defineAction, domain } from \"@ekairos/domain\";",
       "import { i } from \"@instantdb/core\";",
+      "import { z } from \"zod\";",
       "",
       "export const supplierNetworkDomain = domain(\"supplierNetwork\").withSchema({",
       "  entities: {",
@@ -2093,13 +2770,20 @@ function buildNextTemplateFiles(params: {
       "  .includes(qualityControlDomain)",
       "  .withSchema({ entities: {}, links: {}, rooms: {} });",
       "",
-      "export const launchOrderAction = defineAction<",
-      "  Record<string, unknown>,",
-      "  { reference?: string; supplierName?: string; sku?: string },",
-      "  { supplierId: string; orderId: string; stockItemId: string; shipmentId: string; inspectionId: string },",
-      "  any",
-      ">({",
+      "export const launchOrderAction = defineAction({",
       "  name: \"supplyChain.order.launch\",",
+      "  input: z.object({",
+      "    reference: z.string().optional(),",
+      "    supplierName: z.string().optional(),",
+      "    sku: z.string().optional(),",
+      "  }),",
+      "  output: z.object({",
+      "    supplierId: z.string(),",
+      "    orderId: z.string(),",
+      "    stockItemId: z.string(),",
+      "    shipmentId: z.string(),",
+      "    inspectionId: z.string(),",
+      "  }),",
       "  async execute({ runtime, input }): Promise<{",
       "    supplierId: string;",
       "    orderId: string;",
@@ -2107,8 +2791,6 @@ function buildNextTemplateFiles(params: {
       "    shipmentId: string;",
       "    inspectionId: string;",
       "  }> {",
-      "    \"use step\";",
-      "    const scoped = await runtime.use(appDomain);",
       "    const now = Date.now();",
       "    const supplierId = globalThis.crypto.randomUUID();",
       "    const orderId = globalThis.crypto.randomUUID();",
@@ -2116,65 +2798,60 @@ function buildNextTemplateFiles(params: {
       "    const shipmentId = globalThis.crypto.randomUUID();",
       "    const inspectionId = globalThis.crypto.randomUUID();",
       "",
-      "    await scoped.db.transact([",
-      "      scoped.db.tx.supplierNetwork_supplier[supplierId].update({",
+      "    await runtime.db.transact([",
+      "      runtime.db.tx.supplierNetwork_supplier[supplierId].update({",
       "        name: String(input?.supplierName ?? \"\").trim() || \"Marula Components\",",
       "        region: \"Pacific North\",",
       "        risk: \"watch\",",
       "        score: 82,",
       "        createdAt: now,",
       "      }),",
-      "      scoped.db.tx.procurement_order[orderId].update({",
+      "      runtime.db.tx.procurement_order[orderId].update({",
       "        reference: String(input?.reference ?? \"\").trim() || \"PO-7842\",",
       "        status: \"released\",",
       "        spend: 184700,",
       "        createdAt: now + 1,",
       "      }),",
-      "      scoped.db.tx.procurement_order[orderId].link({ supplier: supplierId }),",
-      "      scoped.db.tx.inventory_stockItem[stockItemId].update({",
+      "      runtime.db.tx.procurement_order[orderId].link({ supplier: supplierId }),",
+      "      runtime.db.tx.inventory_stockItem[stockItemId].update({",
       "        sku: String(input?.sku ?? \"\").trim() || \"DRV-2048\",",
       "        warehouse: \"Reno DC\",",
       "        available: 320,",
       "        safetyStock: 140,",
       "        createdAt: now + 2,",
       "      }),",
-      "      scoped.db.tx.inventory_stockItem[stockItemId].link({ order: orderId }),",
-      "      scoped.db.tx.transportation_shipment[shipmentId].update({",
+      "      runtime.db.tx.inventory_stockItem[stockItemId].link({ order: orderId }),",
+      "      runtime.db.tx.transportation_shipment[shipmentId].update({",
       "        carrier: \"Northstar Freight\",",
       "        lane: \"Reno -> Austin\",",
       "        status: \"in-transit\",",
       "        etaHours: 38,",
       "        createdAt: now + 3,",
       "      }),",
-      "      scoped.db.tx.transportation_shipment[shipmentId].link({ order: orderId }),",
-      "      scoped.db.tx.qualityControl_inspection[inspectionId].update({",
+      "      runtime.db.tx.transportation_shipment[shipmentId].link({ order: orderId }),",
+      "      runtime.db.tx.qualityControl_inspection[inspectionId].update({",
       "        result: \"pending\",",
       "        severity: \"medium\",",
       "        note: \"Inspect seal integrity on arrival.\",",
       "        createdAt: now + 4,",
       "      }),",
-      "      scoped.db.tx.qualityControl_inspection[inspectionId].link({ shipment: shipmentId }),",
+      "      runtime.db.tx.qualityControl_inspection[inspectionId].link({ shipment: shipmentId }),",
       "    ]);",
       "",
       "    return { supplierId, orderId, stockItemId, shipmentId, inspectionId };",
       "  },",
       "});",
       "",
-      "export const expediteShipmentAction = defineAction<",
-      "  Record<string, unknown>,",
-      "  { shipmentId?: string },",
-      "  { shipmentId: string },",
-      "  any",
-      ">({",
+      "export const expediteShipmentAction = defineAction({",
       "  name: \"supplyChain.shipment.expedite\",",
+      "  input: z.object({ shipmentId: z.string().optional() }),",
+      "  output: z.object({ shipmentId: z.string() }),",
       "  async execute({ runtime, input }): Promise<{ shipmentId: string }> {",
-      "    \"use step\";",
-      "    const scoped = await runtime.use(appDomain);",
       "    const shipmentId = String(input?.shipmentId ?? \"\").trim();",
       "    if (!shipmentId) throw new Error(\"shipmentId is required\");",
       "",
-      "    await scoped.db.transact([",
-      "      scoped.db.tx.transportation_shipment[shipmentId].update({",
+      "    await runtime.db.transact([",
+      "      runtime.db.tx.transportation_shipment[shipmentId].update({",
       "        status: \"expedited\",",
       "        etaHours: 16,",
       "      }),",
@@ -2248,6 +2925,7 @@ function buildNextTemplateFiles(params: {
       "});",
     ].join("\n"),
     "src/workflows/demo.workflow.ts": [
+      "import type { ActiveDomain } from \"@ekairos/domain\";",
       "import appDomain from \"../domain\";",
       "import { createRuntime } from \"../runtime\";",
       "",
@@ -2261,7 +2939,7 @@ function buildNextTemplateFiles(params: {
       "export async function runDemoWorkflow(input: DemoWorkflowInput) {",
       "  \"use workflow\";",
       "  const runtime = createRuntime();",
-      "  const scoped = await runtime.use(appDomain);",
+      "  const scoped = (await runtime.use(appDomain)) as ActiveDomain<typeof appDomain>;",
       "  const created = await scoped.actions.launchOrder({",
       "    reference: input.reference,",
       "    sku: input.sku,",
@@ -2286,6 +2964,8 @@ export async function createDomainApp(
   if (params.framework !== "next") {
     throw new Error("Only --next is supported right now.")
   }
+
+  const template = resolveCreateAppTemplate(params)
   if (params.smoke && !params.install) {
     throw new Error("--smoke requires dependencies. Remove --no-install or run smoke after installing.")
   }
@@ -2352,6 +3032,7 @@ export async function createDomainApp(
     })
     provisioned = await provisionInstantApp({
       directory: targetDir,
+      template,
       instantToken: trimOrEmpty(params.instantToken),
       orgId: params.orgId,
     })
@@ -2381,6 +3062,7 @@ export async function createDomainApp(
   })
   const files = buildNextTemplateFiles({
     targetDir,
+    template,
     domainVersion,
     packageManager,
     workspacePath: params.workspacePath,
@@ -2436,7 +3118,7 @@ export async function createDomainApp(
 
   const smoke = params.smoke
     ? await runSmoke({
-        demo: Boolean(params.demo),
+        demo: template === "supply-chain",
         targetDir,
         packageManager,
         keepServer: Boolean(params.keepServer),
@@ -2447,23 +3129,41 @@ export async function createDomainApp(
 
   const cliCommand = packageBinCommandFor(packageManager, "domain")
   const reviewUrl = smoke?.baseUrl ?? "http://localhost:3000"
-  const nextSteps = [
-    `cd ${targetDir}`,
-    smoke?.keepServer
-      ? `Open ${reviewUrl} for review`
-      : params.install
-        ? runScriptCommandFor(packageManager, "dev")
-        : `${installCommandFor(packageManager)} && ${runScriptCommandFor(packageManager, "dev")}`,
-    `Open ${reviewUrl} and launch a purchase order from the control tower UI`,
-    `${cliCommand} inspect --baseUrl=${reviewUrl} --admin --pretty`,
-    `${cliCommand} "supplyChain.order.launch" "{ reference: 'PO-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }" --baseUrl=${reviewUrl} --admin --pretty`,
-    `${cliCommand} query "{ procurement_order: { supplier: {}, stockItems: {}, shipments: { inspections: {} } } }" --baseUrl=${reviewUrl} --admin --pretty`,
-  ]
+  const startStep = smoke?.keepServer
+    ? `Open ${reviewUrl} for review`
+    : params.install
+      ? runScriptCommandFor(packageManager, "dev")
+      : `${installCommandFor(packageManager)} && ${runScriptCommandFor(packageManager, "dev")}`
+  const nextSteps =
+    template === "supply-chain"
+      ? [
+          `cd ${targetDir}`,
+          startStep,
+          `Open ${reviewUrl} and launch a purchase order from the control tower UI`,
+          `${cliCommand} inspect --baseUrl=${reviewUrl} --admin --pretty`,
+          `${cliCommand} "supplyChain.order.launch" "{ reference: 'PO-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }" --baseUrl=${reviewUrl} --admin --pretty`,
+          `${cliCommand} query "{ procurement_order: { supplier: {}, stockItems: {}, shipments: { inspections: {} } } }" --baseUrl=${reviewUrl} --admin --pretty`,
+        ]
+      : template === "agent"
+        ? [
+            `cd ${targetDir}`,
+            startStep,
+            `Open ${reviewUrl} and start a context through /api/agent/react`,
+            `Inspect the returned context id in Workbench v2 for app ${appId || "<instant-app-id>"}`,
+            `Iterate on src/agent.ts`,
+          ]
+      : [
+          `cd ${targetDir}`,
+          startStep,
+          `Open ${reviewUrl} and add your first domain in src/domain.ts`,
+          `${cliCommand} inspect --baseUrl=${reviewUrl} --admin --pretty`,
+        ]
 
   const result: CreateDomainAppResult = {
     ok: true,
     directory: targetDir,
     framework: params.framework,
+    template,
     installed: params.install,
     packageManager,
     provisioned: Boolean(provisioned),

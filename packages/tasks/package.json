@@ -1,0 +1,57 @@
+{
+  "name": "@ekairos/tasks",
+  "version": "1.22.0",
+  "description": "Ekairos Tasks - durable tasks with typed outcomes",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-kairos/ekairos.git",
+    "directory": "packages/tasks"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./domain": {
+      "types": "./dist/domain.d.ts",
+      "import": "./dist/domain.js",
+      "default": "./dist/domain.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "vitest run -c vitest.config.mts",
+    "test:workflow": "vitest run -c vitest.workflow.config.mts"
+  },
+  "dependencies": {
+    "@ekairos/domain": "workspace:*",
+    "@instantdb/core": "0.22.142",
+    "ajv": "^8.17.1",
+    "workflow": "5.0.0-beta.5",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@ekairos/tsconfig": "workspace:*",
+    "@types/node": "^24.5.0",
+    "@workflow/serde": "5.0.0-beta.1",
+    "@workflow/vitest": "5.0.0-beta.5",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.8"
+  }
+}

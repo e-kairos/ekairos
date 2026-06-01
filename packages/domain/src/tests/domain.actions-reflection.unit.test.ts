@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { i } from "@instantdb/core";
+import { z } from "zod";
 
 import { defineDomainAction, domain } from "../index.ts";
 
@@ -20,12 +21,10 @@ describe("domain action reflection", () => {
         rooms: {},
       })
       .withActions({
-        getTask: defineDomainAction<
-          Record<string, unknown>,
-          { taskId: string },
-          { title: string }
-        >({
+        getTask: defineDomainAction({
           name: "management.task.get",
+          input: z.object({ taskId: z.string() }),
+          output: z.object({ title: z.string() }),
           execute: async ({ input }) => ({ title: input.taskId }),
         }),
       });

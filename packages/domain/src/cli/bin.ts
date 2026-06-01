@@ -14,7 +14,7 @@ import {
   writeCliSession,
   ClientRuntime,
 } from "./index.js"
-import { createDomainApp } from "./create-app.js"
+import { createDomainApp, normalizeCreateAppTemplate } from "./create-app.js"
 import { runCreateAppInk } from "./ui.js"
 
 const DOMAIN_SKILL_PATH = fileURLToPath(new URL("../../SKILL.md", import.meta.url))
@@ -93,6 +93,7 @@ function printCreateAppHelp(ctx: CliContext) {
       "",
       "Options:",
       "  --next, --framework=next       Scaffold a Next.js app",
+      "  --template=<name>              Template: empty, supply-chain, or agent",
       "  --install / --no-install       Install dependencies after writing files",
       "  --package-manager=<name>       npm, pnpm, yarn, or bun",
       "  --instantToken=<token>         Provision an Instant app and write .env.local",
@@ -505,6 +506,7 @@ async function commandCreateApp(args: string[], ctx: CliContext) {
   const directory =
     String(positionals[0] ?? (demo ? "ekairos-supply-chain-demo" : ".")).trim() ||
     (demo ? "ekairos-supply-chain-demo" : ".")
+  const template = normalizeCreateAppTemplate(flagValue(flags, ["template"]))
   const install = flagValue(flags, ["install"]) !== false
   const keptServers: Array<() => void> = []
 
@@ -512,6 +514,7 @@ async function commandCreateApp(args: string[], ctx: CliContext) {
     directory,
     framework,
     install,
+    template: template ?? undefined,
     demo,
     force: hasFlag(flags, ["force"]),
     packageManager:

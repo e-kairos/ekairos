@@ -233,6 +233,56 @@ describe("context parts", () => {
     ])
   })
 
+  it("normalizes external tool UI parts into action parts by toolName", () => {
+    expect(
+      normalizePartsForPersistence([
+        {
+          type: "tool-call",
+          toolName: "createMessage",
+          toolCallId: "call_1",
+          state: "input-available",
+          content: [
+            {
+              type: "json",
+              value: { text: "hello" },
+            },
+          ],
+        },
+        {
+          type: "tool-result",
+          toolName: "createMessage",
+          toolCallId: "call_1",
+          state: "output-available",
+          content: [
+            {
+              type: "json",
+              value: { messageId: "msg_1" },
+            },
+          ],
+        },
+      ]),
+    ).toEqual([
+      {
+        type: "action",
+        content: {
+          status: "started",
+          actionName: "createMessage",
+          actionCallId: "call_1",
+          input: { text: "hello" },
+        },
+      },
+      {
+        type: "action",
+        content: {
+          status: "completed",
+          actionName: "createMessage",
+          actionCallId: "call_1",
+          output: { messageId: "msg_1" },
+        },
+      },
+    ])
+  })
+
   it("parses a typed context part", () => {
     const part = parseContextPart(actions, {
       type: "action",

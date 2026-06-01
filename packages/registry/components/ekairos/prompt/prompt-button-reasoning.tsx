@@ -54,7 +54,19 @@ function Bars({ level }: { level: ReasoningLevel }) {
 const BarsMemo = memo(Bars)
 BarsMemo.displayName = "Bars"
 
-export const PromptReasoningButton = memo(function PromptReasoningButton({ value, onChange, disabled, variant }: { value?: ReasoningLevel; onChange?: (v: ReasoningLevel) => void; disabled?: boolean; variant?: "default" | "ghost" }) {
+export const PromptReasoningButton = memo(function PromptReasoningButton({
+  value,
+  onChange,
+  disabled,
+  variant,
+  iconOnly,
+}: {
+  value?: ReasoningLevel
+  onChange?: (v: ReasoningLevel) => void
+  disabled?: boolean
+  variant?: "default" | "ghost"
+  iconOnly?: boolean
+}) {
   const isGhost = variant === "ghost"
   const level: ReasoningLevel = value || "low"
 
@@ -85,22 +97,27 @@ export const PromptReasoningButton = memo(function PromptReasoningButton({ value
               aria-label="Razonamiento"
               disabled={disabled}
               className={cn(
-                "h-8 w-auto min-w-0 shrink-0 gap-1.5 !rounded-xl px-2.5 py-0 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-[background-color,border-color,box-shadow]",
+                "h-8 w-auto min-w-0 shrink-0 gap-2 !rounded-xl px-3 py-0 shadow-[0_1px_2px_rgba(15,23,42,0.06)] transition-[background-color,border-color,box-shadow]",
                 isGhost
-                  ? "border-transparent bg-transparent text-muted-foreground shadow-none hover:border-border/65 hover:bg-muted/55 hover:text-foreground"
+                  ? "border-transparent bg-transparent text-slate-500 shadow-none hover:bg-slate-50 hover:text-slate-800 data-[state=open]:bg-blue-50 data-[state=open]:text-blue-700"
                   : "border-border/70 bg-background hover:border-border hover:bg-muted/40",
-                active && "border-ring/45 bg-accent/35 text-foreground shadow-[0_4px_18px_-12px_hsl(var(--ring)/0.42)]",
+                active &&
+                  !isGhost &&
+                  "border-ring/45 bg-accent/35 text-foreground shadow-[0_4px_18px_-12px_hsl(var(--ring)/0.42)]",
                 !active && level === "off" && "text-muted-foreground",
                 "focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-0",
                 "disabled:opacity-40 disabled:pointer-events-none",
                 "[&>svg]:ml-0.5 [&>svg]:size-3 [&>svg]:shrink-0 [&>svg]:opacity-50 [&>svg]:text-muted-foreground",
                 "[&>span]:line-clamp-none",
+                iconOnly && "w-10 px-2.5",
               )}
             >
               <SelectValue asChild>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   <BarsMemo level={level} />
-                  <span className="text-[11px] font-semibold tracking-tight whitespace-nowrap">{current.name}</span>
+                  {!iconOnly ? (
+                    <span className="text-[11px] font-semibold tracking-tight whitespace-nowrap">{current.name}</span>
+                  ) : null}
                 </div>
               </SelectValue>
             </SelectTrigger>

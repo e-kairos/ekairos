@@ -8,6 +8,7 @@ import { rm } from "node:fs/promises"
 import { resolve } from "node:path"
 import { init, id as newId } from "@instantdb/admin"
 import { i } from "@instantdb/core"
+import { z } from "zod"
 
 import { createTestApp, destroyTestApp } from "@ekairos/testing/provision"
 
@@ -57,23 +58,27 @@ describeCliE2E("domain cli", () => {
 
   let appDomain: any
   appDomain = baseDomain.withActions({
-    createTask: defineDomainAction<CliEnv, { title: string }, { taskId: string; title: string; actorId: string | null }, any, any>({
+    createTask: defineDomainAction({
       name: "cli.task.create",
-      async execute({ runtime, input, env }) {
-        "use step"
-        const domain = await runtime.use(appDomain)
+      input: z.object({ title: z.string() }),
+      output: z.object({
+        taskId: z.string(),
+        title: z.string(),
+        actorId: z.string().nullable(),
+      }),
+      async execute({ runtime, input }) {
         const taskId = newId()
-        const actorId = String(env.actorId ?? "").trim() || null
+        const actorId = String(runtime.env.actorId ?? "").trim() || null
         const mutations: any[] = [
-          domain.db.tx.cli_tasks[taskId].update({
+          runtime.db.tx.cli_tasks[taskId].update({
             title: String(input.title ?? "").trim(),
             createdAt: Date.now(),
           }),
         ]
         if (actorId) {
-          mutations.push(domain.db.tx.cli_tasks[taskId].link({ creator: actorId }))
+          mutations.push(runtime.db.tx.cli_tasks[taskId].link({ creator: actorId }))
         }
-        await domain.db.transact(mutations)
+        await runtime.db.transact(mutations)
         return {
           taskId,
           title: String(input.title ?? "").trim(),

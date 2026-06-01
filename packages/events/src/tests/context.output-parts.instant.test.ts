@@ -9,7 +9,7 @@ import { z } from "zod"
 import {
   createContext,
   createScriptedReactor,
-  didToolExecute,
+  didActionExecute,
   eventsDomain,
   type ContextToolExecuteContext,
   type ContextItem,
@@ -238,7 +238,7 @@ describeInstant("context output parts + Instant runtime", () => {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "inspect_region"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "inspect_region"))
       .build()
 
     const shell = await previewContext.react(createTriggerEvent("zoom here"), {
@@ -373,7 +373,7 @@ describeInstant("context output parts + Instant runtime", () => {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "inspect_runtime"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "inspect_runtime"))
       .build()
 
     const shell = await runtimeAwareContext.react(createTriggerEvent("inspect runtime"), {

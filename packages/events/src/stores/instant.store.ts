@@ -2,7 +2,7 @@ import "../polyfills/dom-events.js"
 import { id, lookup } from "@instantdb/admin"
 
 import { eventsDomain } from "../schema.js"
-import type { DomainSchemaResult } from "@ekairos/domain"
+import type { DomainLike } from "@ekairos/domain"
 import { convertItemToModelMessages } from "../context.events.js"
 import {
   assertContextTransition,
@@ -778,7 +778,7 @@ export class InstantStore implements ContextStore {
 export function createInstantStoreRuntime(params: {
   getDb: (orgId: string) => Promise<InstantStoreDb> | InstantStoreDb
   getOrgId?: (env: Record<string, unknown>) => string
-  domain?: DomainSchemaResult
+  domain?: DomainLike
 }) {
   const storesByOrg = new Map<string, { store: InstantStore; db: InstantStoreDb; domain?: any }>()
 

@@ -3,6 +3,7 @@
     { "name": "@ekairos/domain", "dir": "packages/domain", "publicAccess": true },
     { "name": "@ekairos/sandbox", "dir": "packages/sandbox", "publicAccess": true },
     { "name": "@ekairos/dataset", "dir": "packages/dataset", "publicAccess": true },
+    { "name": "@ekairos/tasks", "dir": "packages/tasks", "publicAccess": true },
     { "name": "@ekairos/structure", "dir": "packages/structure", "publicAccess": true },
     { "name": "@ekairos/story-react", "dir": "packages/story-react", "publicAccess": true },
     { "name": "@ekairos/events", "dir": "packages/events", "publicAccess": true },
@@ -16,6 +17,7 @@
     "packages/domain",
     "packages/sandbox",
     "packages/dataset",
+    "packages/tasks",
     "packages/structure",
     "packages/story-react",
     "packages/events",
@@ -28,6 +30,7 @@
   "linkedPackages": {
     "@ekairos/domain": "packages/domain",
     "@ekairos/sandbox": "packages/sandbox",
+    "@ekairos/tasks": "packages/tasks",
     "@ekairos/structure": "packages/structure",
     "@ekairos/testing": "packages/ekairos-test",
     "@ekairos/events": "packages/events",

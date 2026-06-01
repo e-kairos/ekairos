@@ -1,6 +1,8 @@
 import { i } from "@instantdb/core"
 import { domain } from "@ekairos/domain"
 
+export { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "./contract.js"
+
 // Browser-safe public sandbox schema. The full runtime domain imports and extends this.
 export const sandboxSchemaDomain = domain("sandbox").withSchema({
   entities: {

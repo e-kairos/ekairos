@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { INPUT_TEXT_ITEM_TYPE } from "@ekairos/events/react";
 import type {
   AppendArgs,
   ContextEventForUI,
   ContextValue,
-} from "@/components/ekairos/context/context";
+} from "@ekairos/events/react";
 import {
   buildCodexStepViews,
   consumePersistedCodexStepStream,
@@ -17,7 +18,6 @@ import {
   type CodexReplayStatus,
   type CodexStepView,
 } from "@/components/ekairos/agent/live/codex-steps-state";
-import { INPUT_TEXT_ITEM_TYPE } from "@/components/ekairos/context/context";
 import { useOrgDb } from "@/lib/org-db-context";
 import { codexReactorShowcase } from "@/lib/examples/reactors/codex/definition";
 import {
