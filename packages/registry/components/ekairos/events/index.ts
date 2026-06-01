@@ -8,12 +8,16 @@ export {
   MessageList,
   MessageParts,
   PromptBar,
+  SourceWatchStatus,
   getContextActivityState,
 } from "./context-agent";
 export type {
   ContextAgentProps,
   ContextHistoryItem,
   ContextReviewTranscriptProps,
+  SourceWatchPhase,
+  SourceWatchStatusProps,
+  SourceWatchStatusValue,
 } from "./context-agent";
 
 export { useContext } from "@ekairos/events/react";

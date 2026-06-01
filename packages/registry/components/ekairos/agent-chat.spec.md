@@ -36,6 +36,15 @@ Workbench and product review surfaces can render an agnostic turn transcript bef
 - The component preserves the event contract: files remain files, actions remain actions, and product-specific payloads only affect optional display summaries.
 - Raw ids, step payloads, and part trees stay in Workshop/debug surfaces; the transcript is a review layer, not a replacement for event inspection.
 
+## Source Watch Status
+
+Product workbenches can show live source monitoring without baking polling rules into chat UI.
+
+- `SourceWatchStatus` renders an agnostic source state with phases: `checking`, `waiting`, `loading`, `loaded`, `empty`, and `error`.
+- The component only displays status, count, timestamp, label, path, and optional open action; source-specific polling/autoload rules stay in product logic.
+- Use `waiting` for a candidate that must stabilize before loading, `loading` for automatic ingestion, and `loaded` for the active latest source.
+- File watchers, replay folders, imports, webhook streams, and task feeds should share this status shape instead of inventing product-specific chrome.
+
 ## Conversation Debug Boundary
 
 The default chat thread is user-facing; raw event metadata belongs in Workshop and explicit debug surfaces.
