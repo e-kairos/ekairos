@@ -49,10 +49,22 @@ export function SourceWatchStatus({
   const Icon = iconForPhase(status.phase);
   const label = labels?.[status.phase] ?? labelForPhase(status.phase);
   const checkedAt = formatCheckedAt(status.checkedAt);
+  const cadence = formatPollInterval(status.pollIntervalMs);
   const count = status.sourceCount ?? 0;
   const detail =
     status.sourceLabel || status.detail || status.sourcePath || "Watching source";
-  const title = [status.sourcePath, status.detail].filter(Boolean).join("\n");
+  const title = [
+    status.sourcePath,
+    status.detail,
+    cadence ? `Polling every ${cadence}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const isBusy =
+    status.phase === "checking" ||
+    status.phase === "waiting" ||
+    status.phase === "loading";
+  const meta = [checkedAt, cadence].filter(Boolean).join(" / ");
 
   const content = (
     <>
@@ -79,7 +91,7 @@ export function SourceWatchStatus({
       </span>
       <span className="ml-auto grid shrink-0 justify-items-end gap-0.5 text-[10px] font-medium uppercase leading-none text-slate-400">
         <span className="text-xs tabular-nums text-slate-700">{count}</span>
-        {checkedAt ? <small>{checkedAt}</small> : null}
+        {meta ? <small>{meta}</small> : null}
       </span>
     </>
   );
@@ -94,8 +106,11 @@ export function SourceWatchStatus({
     return (
       <button
         aria-label={`${ariaLabelPrefix}: ${label}`}
+        aria-busy={isBusy || undefined}
         className={sharedClassName}
         data-phase={status.phase}
+        data-poll-interval-ms={status.pollIntervalMs ?? undefined}
+        data-source-count={count}
         onClick={onOpen}
         title={title || undefined}
         type="button"
@@ -108,8 +123,11 @@ export function SourceWatchStatus({
   return (
     <div
       aria-label={`${ariaLabelPrefix}: ${label}`}
+      aria-busy={isBusy || undefined}
       className={sharedClassName}
       data-phase={status.phase}
+      data-poll-interval-ms={status.pollIntervalMs ?? undefined}
+      data-source-count={count}
       title={title || undefined}
     >
       {content}
@@ -151,4 +169,15 @@ function formatCheckedAt(value: SourceWatchStatusValue["checkedAt"]): string {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+function formatPollInterval(value: SourceWatchStatusValue["pollIntervalMs"]): string {
+  if (!value || !Number.isFinite(value) || value <= 0) return "";
+  if (value < 1000) return `${Math.round(value)}ms`;
+  const seconds = value / 1000;
+  if (seconds < 60) {
+    return `${Number.isInteger(seconds) ? seconds.toFixed(0) : seconds.toFixed(1)}s`;
+  }
+  const minutes = seconds / 60;
+  return `${Number.isInteger(minutes) ? minutes.toFixed(0) : minutes.toFixed(1)}m`;
 }
