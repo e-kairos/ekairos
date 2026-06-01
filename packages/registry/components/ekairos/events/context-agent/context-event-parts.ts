@@ -620,12 +620,12 @@ export function getSourceParts(part: unknown) {
     : [];
 }
 
-export function findNormalizedToolPart(parts: unknown[], toolName: string) {
+export function findNormalizedActionPart(parts: unknown[], actionName: string) {
   const normalized = normalizeContextEventParts(parts);
   return (
     normalized.find((part) => {
       const action = getActionPartInfo(part);
-      return action?.actionName === toolName;
+      return action?.actionName === actionName;
     }) ?? null
   );
 }

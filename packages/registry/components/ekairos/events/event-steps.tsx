@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React from "react";
 import type { ComponentType } from "react";
@@ -40,7 +40,7 @@ export type EventStepRendererProps = {
   event: EventStepsController["currentEvent"];
   replayStatus: EventStepsController["replayStatus"];
   storedParts: EventStepsController["currentStoredParts"];
-  toolComponents?: Record<string, any>;
+  actionComponents?: Record<string, any>;
   showReasoning?: boolean;
 };
 
@@ -50,7 +50,7 @@ export type EventStepComponents = Record<string, EventStepRenderer>;
 export type EventStepsProps = {
   controller: EventStepsController;
   stepComponents?: EventStepComponents;
-  toolComponents?: Record<string, any>;
+  actionComponents?: Record<string, any>;
   showReasoning?: boolean;
 };
 
@@ -66,7 +66,7 @@ export function DefaultEventStepRenderer({
   event,
   replayStatus,
   storedParts,
-  toolComponents,
+  actionComponents,
   showReasoning = true,
 }: EventStepRendererProps) {
   return (
@@ -108,7 +108,7 @@ export function DefaultEventStepRenderer({
                   : "ready"
               }
               isLatest
-              toolComponents={toolComponents || {}}
+              actionComponents={actionComponents || {}}
               showReasoning={showReasoning}
             />
           </div>
@@ -148,7 +148,7 @@ function resolveStepRenderer(params: {
 export function EventSteps({
   controller,
   stepComponents,
-  toolComponents,
+  actionComponents,
   showReasoning = true,
 }: EventStepsProps) {
   const selectedStep =
@@ -254,7 +254,7 @@ export function EventSteps({
               event={controller.currentEvent}
               replayStatus={controller.replayStatus}
               storedParts={controller.currentStoredParts}
-              toolComponents={toolComponents}
+              actionComponents={actionComponents}
               showReasoning={showReasoning}
             />
           ) : (

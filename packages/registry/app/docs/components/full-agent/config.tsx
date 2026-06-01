@@ -33,7 +33,7 @@ function ScriptedCodexAgentDemo() {
       <div className="flex-1 overflow-y-auto bg-muted/5 p-4 md:p-6">
         <MessageList
           context={context}
-          toolComponents={{}}
+          actionComponents={{}}
           showReasoning
         />
       </div>
@@ -106,7 +106,7 @@ export function FullAgentCodexReplay() {
   return (
     <div className="h-[680px] w-full max-w-4xl rounded-2xl border bg-background overflow-hidden flex flex-col">
       <div className="flex-1 overflow-y-auto p-6 bg-muted/5">
-        <MessageList context={context} toolComponents={{}} showReasoning />
+        <MessageList context={context} actionComponents={{}} showReasoning />
       </div>
       <div className="border-t p-4 space-y-3">
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className="w-full min-h-[88px] rounded-xl border px-3 py-2 text-sm" />

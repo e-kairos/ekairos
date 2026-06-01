@@ -81,12 +81,12 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_") || "file";
 }
 
-function scrollToChartAnchor(toolCallId?: string) {
-  if (!toolCallId || typeof document === "undefined") return;
+function scrollToChartAnchor(actionCallId?: string) {
+  if (!actionCallId || typeof document === "undefined") return;
   const selector =
     typeof CSS !== "undefined" && typeof CSS.escape === "function"
-      ? `[data-ek-chart-anchor="${CSS.escape(toolCallId)}"]`
-      : `[data-ek-chart-anchor="${toolCallId.replace(/["\\]/g, "")}"]`;
+      ? `[data-ek-chart-anchor="${CSS.escape(actionCallId)}"]`
+      : `[data-ek-chart-anchor="${actionCallId.replace(/["\\]/g, "")}"]`;
   window.requestAnimationFrame(() => {
     document.querySelector(selector)?.scrollIntoView({
       behavior: "smooth",
@@ -388,7 +388,7 @@ const PromptBarInner = memo(function PromptBarInner({
             kind: "chart-edit",
             chartPayload: payload,
             size: "contexto",
-            onPress: () => scrollToChartAnchor(payload.toolCallId),
+            onPress: () => scrollToChartAnchor(payload.actionCallId),
           },
         ];
       });

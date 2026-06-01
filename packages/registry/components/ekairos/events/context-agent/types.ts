@@ -62,7 +62,7 @@ export type AgentProps = {
   enableResumableStreams?: boolean;
   streamChunkDelayMs?: number;
   onDataChunk?: (chunk: unknown) => void;
-  toolComponents?: Record<string, any>;
+  actionComponents?: Record<string, any>;
   classNames?: AgentClassNames;
   /** Optional centered state shown before the first message. */
   emptyState?: ReactNode;

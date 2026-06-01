@@ -137,7 +137,7 @@ const sections = [
       "      <Agent",
       '        apiUrl="/api/test-agent"',
       "        onContextUpdate={handleContextUpdate}",
-      "        toolComponents={{}}",
+      "        actionComponents={{}}",
       "        initialContextId={initialContextId}",
       "      />",
       "    </div>",

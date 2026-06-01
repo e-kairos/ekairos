@@ -13,11 +13,11 @@ import {
   Source,
 } from "@/components/ai-elements/sources";
 import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
+  Tool as Action,
+  ToolContent as ActionContent,
+  ToolHeader as ActionHeader,
+  ToolInput as ActionInput,
+  ToolOutput as ActionOutput,
 } from "@/components/ekairos/tools/tool";
 import { FileIcon } from "../../prompt/file-icon";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ import {
 
 import type { AgentClassNames } from "../types";
 
-export function humanizeToolName(toolName: string): string {
+export function humanizeActionName(actionName: string): string {
   const map: Record<string, string> = {
     // Award / Bid ops (buyer-friendly)
     createBid: "Crear oferta",
@@ -54,10 +54,10 @@ export function humanizeToolName(toolName: string): string {
     semanticDerivation: "Derivación semántica",
   };
 
-  if (map[toolName]) return map[toolName];
+  if (map[actionName]) return map[actionName];
 
   // Fallback: camelCase/snake_case -> Title Case
-  return toolName
+  return actionName
     .replace(/_/g, " ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/^./, (s) => s.toUpperCase());
@@ -99,8 +99,8 @@ function actionViewInfo(view: ActionView) {
   };
 }
 
-function summarizeToolPart(view: ActionView): string {
-  const { actionName: toolName, state, output: out, errorText } = actionViewInfo(view);
+function summarizeActionPart(view: ActionView): string {
+  const { actionName, state, output: out, errorText } = actionViewInfo(view);
   const err = typeof errorText === "string" ? errorText : "";
 
   if (state === "output-error") {
@@ -117,7 +117,7 @@ function summarizeToolPart(view: ActionView): string {
     const msg =
       typeof outputRecord.message === "string" ? outputRecord.message : "";
 
-    if (toolName === "createBid") {
+    if (actionName === "createBid") {
       const bidId =
         typeof outputRecord.bidId === "string" ? outputRecord.bidId : "";
       if (success === false) return msg || "No se pudo crear la oferta";
@@ -126,7 +126,7 @@ function summarizeToolPart(view: ActionView): string {
       return "Oferta creada";
     }
 
-    if (toolName === "addBidItems") {
+    if (actionName === "addBidItems") {
       const ok =
         typeof outputRecord.successCount === "number"
           ? outputRecord.successCount
@@ -161,7 +161,7 @@ const MessageParts = memo(function MessageParts({
   message,
   status,
   isLatest,
-  toolComponents,
+  actionComponents,
   classNames,
   showReasoning = true,
   surface = "conversation",
@@ -260,11 +260,11 @@ const MessageParts = memo(function MessageParts({
   };
 
   const renderActionView = (view: ActionView, i: number) => {
-    const { actionName: toolName, actionCallId, state, input, output, errorText } =
+    const { actionName, actionCallId, state, input, output, errorText } =
       actionViewInfo(view);
-    const ToolComponent = toolComponents?.[toolName];
+    const ActionComponent = actionComponents?.[actionName];
 
-    if (toolName === "createMessage") {
+    if (actionName === "createMessage") {
       if (actionCallId !== lastRenderableCreateMessageActionCallId) return null;
 
       const text =
@@ -309,21 +309,21 @@ const MessageParts = memo(function MessageParts({
       );
     }
 
-    if (ToolComponent) {
+    if (ActionComponent) {
       return (
-        <ToolComponent
+        <ActionComponent
           key={i}
           input={input}
           output={output}
           state={state}
           errorText={errorText}
-          toolCallId={actionCallId}
+          actionCallId={actionCallId}
         />
       );
     }
 
-    const label = humanizeToolName(toolName || "Tool");
-    const summary = summarizeToolPart(view);
+    const label = humanizeActionName(actionName || "Action");
+    const summary = summarizeActionPart(view);
     const headerSummary =
       summary === "Completado" ||
       summary === "Error" ||
@@ -333,29 +333,29 @@ const MessageParts = memo(function MessageParts({
         : summary;
 
     return (
-      <Tool
+      <Action
         key={i}
         className={cn(
           isStepSurface && "mb-0 border-border/70 bg-background"
         )}
       >
-        <ToolHeader
-          type={`tool-${toolName}` as any}
+        <ActionHeader
+          type={actionName as any}
           state={state as any}
           label={label}
           summary={headerSummary}
         />
-        <ToolContent>
-          {input !== undefined && <ToolInput input={input} />}
+        <ActionContent>
+          {input !== undefined && <ActionInput input={input} />}
           {input === undefined && (
             <div className="p-3 text-xs text-muted-foreground italic">
               Ejecutando...
             </div>
           )}
-          {output !== undefined && <ToolOutput output={output} />}
-          {errorText && <ToolOutput errorText={errorText} />}
-        </ToolContent>
-      </Tool>
+          {output !== undefined && <ActionOutput output={output} />}
+          {errorText && <ActionOutput errorText={errorText} />}
+        </ActionContent>
+      </Action>
     );
   };
 

@@ -30,7 +30,7 @@ export default function ContextAgent(props: AgentProps) {
     prepareAppendArgs,
     prepareRequestBody,
     streamChunkDelayMs,
-    toolComponents,
+    actionComponents,
     classNames,
     emptyState,
     promptDensity = "default",
@@ -126,7 +126,7 @@ export default function ContextAgent(props: AgentProps) {
                 >
                   <MessageList
                     context={listContext}
-                    toolComponents={toolComponents || {}}
+                    actionComponents={actionComponents || {}}
                     classNames={classNames}
                     showReasoning={showReasoning ?? true}
                   />

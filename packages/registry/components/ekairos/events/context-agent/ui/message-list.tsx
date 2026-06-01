@@ -22,7 +22,7 @@ import type { AgentClassNames } from "../types";
 
 type MessageListProps = {
   context: ContextValue;
-  toolComponents: Record<string, any>;
+  actionComponents: Record<string, any>;
   classNames?: AgentClassNames;
   showReasoning: boolean;
   renderMessageActions?: (params: {
@@ -34,7 +34,7 @@ type MessageListProps = {
 
 const MessageList = memo(function MessageList({
   context,
-  toolComponents,
+  actionComponents,
   classNames,
   showReasoning,
   renderMessageActions,
@@ -117,7 +117,7 @@ const MessageList = memo(function MessageList({
                 message={message}
                 status={status}
                 isLatest={isLatest}
-                toolComponents={toolComponents}
+                actionComponents={actionComponents}
                 classNames={classNames}
                 showReasoning={showReasoning}
               />
@@ -125,7 +125,7 @@ const MessageList = memo(function MessageList({
             {hasSteps ? (
               <ContextStepList
                 steps={message.steps}
-                toolComponents={toolComponents}
+                actionComponents={actionComponents}
                 classNames={classNames}
                 showReasoning={showReasoning}
               />

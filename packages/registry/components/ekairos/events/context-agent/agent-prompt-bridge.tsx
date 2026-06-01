@@ -11,7 +11,7 @@ import {
 
 /** Payload queued as a virtual attachment when the user edits an inline chart. */
 export type ChartEditAttachmentPayload = {
-  toolCallId?: string;
+  actionCallId?: string;
   title: string;
   subtitle?: string;
   points: Array<{ label: string; value: number }>;

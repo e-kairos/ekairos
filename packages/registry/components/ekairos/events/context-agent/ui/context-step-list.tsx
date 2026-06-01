@@ -8,7 +8,7 @@ import { MessageParts } from "./message-parts";
 
 type ContextStepListProps = {
   steps?: ContextStepForUI[];
-  toolComponents?: Record<string, any>;
+  actionComponents?: Record<string, any>;
   classNames?: AgentClassNames;
   showReasoning?: boolean;
   showDebug?: boolean;
@@ -47,13 +47,13 @@ function StepHookDebug({ step }: { step: ContextStepForUI }) {
 
 function StepBody({
   step,
-  toolComponents,
+  actionComponents,
   classNames,
   showReasoning,
   showDebug,
 }: {
   step: ContextStepForUI;
-  toolComponents: Record<string, any>;
+  actionComponents: Record<string, any>;
   classNames?: AgentClassNames;
   showReasoning: boolean;
   showDebug: boolean;
@@ -79,7 +79,7 @@ function StepBody({
           }}
           status={isLive ? "streaming" : "ready"}
           isLatest={isLive}
-          toolComponents={toolComponents}
+          actionComponents={actionComponents}
           classNames={classNames}
           showReasoning={showReasoning}
           surface="step"
@@ -92,7 +92,7 @@ function StepBody({
 
 export function ContextStepList({
   steps = [],
-  toolComponents = {},
+  actionComponents = {},
   classNames,
   showReasoning = true,
   showDebug = false,
@@ -110,7 +110,7 @@ export function ContextStepList({
         <div key={step.stepId} data-testid="context-step" className="min-w-0">
           <StepBody
             step={step}
-            toolComponents={toolComponents}
+            actionComponents={actionComponents}
             classNames={classNames}
             showReasoning={showReasoning}
             showDebug={showDebug}
