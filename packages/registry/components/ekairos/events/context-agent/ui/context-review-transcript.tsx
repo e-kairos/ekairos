@@ -18,6 +18,7 @@ import {
 export type ContextReviewTranscriptProps = {
   className?: string;
   context: Pick<ContextValue, "contextStatus" | "events" | "sendStatus">;
+  density?: "default" | "compact";
   maxTurns?: number;
   onSelectTurn?: (eventId: string) => void;
 };
@@ -51,6 +52,7 @@ type ReviewAnalysisPayload = {
 export function ContextReviewTranscript({
   className,
   context,
+  density = "default",
   maxTurns = 6,
   onSelectTurn,
 }: ContextReviewTranscriptProps) {
@@ -92,9 +94,13 @@ export function ContextReviewTranscript({
     <section
       aria-label="Context review transcript"
       className={cn(
-        "grid gap-3 border-b border-border/70 bg-background px-4 py-3 md:px-6",
+        "grid border-b border-border/70 bg-background",
+        density === "compact"
+          ? "gap-2 px-3 py-2"
+          : "gap-3 px-4 py-3 md:px-6",
         className,
       )}
+      data-density={density}
     >
       <header className="flex min-w-0 flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
@@ -138,9 +144,17 @@ export function ContextReviewTranscript({
       </header>
 
       {turns.length ? (
-        <div className="grid auto-cols-[minmax(22rem,1fr)] grid-flow-col gap-3 overflow-x-auto pb-1 max-md:grid-flow-row max-md:auto-cols-auto">
+        <div
+          className={cn(
+            "grid grid-flow-col overflow-x-auto pb-1 max-md:grid-flow-row max-md:auto-cols-auto",
+            density === "compact"
+              ? "auto-cols-[minmax(16rem,1fr)] gap-2"
+              : "auto-cols-[minmax(22rem,1fr)] gap-3",
+          )}
+        >
           {turns.map((turn) => (
             <ReviewTurnCard
+              density={density}
               key={turn.id}
               onSelect={onSelectTurn ? () => onSelectTurn(turn.id) : undefined}
               turn={turn}
@@ -237,9 +251,11 @@ export function buildContextReviewMarkdown(
 }
 
 function ReviewTurnCard({
+  density,
   onSelect,
   turn,
 }: {
+  density: "default" | "compact";
   onSelect?: () => void;
   turn: ReviewTurn;
 }) {
@@ -262,15 +278,22 @@ function ReviewTurnCard({
         </span>
       </button>
 
-      <div className="grid min-h-40 grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] max-md:grid-cols-1">
+      <div
+        className={cn(
+          "grid grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] max-md:grid-cols-1",
+          density === "compact" ? "min-h-32" : "min-h-40",
+        )}
+      >
         <ReviewMessage
           attachments={turn.attachments}
+          density={density}
           label="input"
           text={turn.inputText}
         />
         <ReviewMessage
           actionErrors={turn.actionErrors}
           analysis={turn.analysis}
+          density={density}
           label="output"
           text={turn.outputText}
         />
@@ -283,12 +306,14 @@ function ReviewMessage({
   actionErrors = [],
   analysis,
   attachments = [],
+  density,
   label,
   text,
 }: {
   actionErrors?: string[];
   analysis?: ReviewAnalysisPayload | null;
   attachments?: ReviewAttachment[];
+  density: "default" | "compact";
   label: "input" | "output";
   text: string;
 }) {
@@ -308,9 +333,14 @@ function ReviewMessage({
       </header>
 
       {analysis ? (
-        <AnalysisReview analysis={analysis} fallbackText={text} />
+        <AnalysisReview analysis={analysis} density={density} fallbackText={text} />
       ) : (
-        <div className="max-h-36 overflow-auto text-xs leading-5">
+        <div
+          className={cn(
+            "overflow-auto text-xs leading-5",
+            density === "compact" ? "max-h-24" : "max-h-36",
+          )}
+        >
           <Streamdown parseIncompleteMarkdown skipHtml>
             {text || "No visible message."}
           </Streamdown>
@@ -353,9 +383,11 @@ function ReviewMessage({
 
 function AnalysisReview({
   analysis,
+  density,
   fallbackText,
 }: {
   analysis: ReviewAnalysisPayload;
+  density: "default" | "compact";
   fallbackText: string;
 }) {
   const answer = analysis.answer || fallbackText;
@@ -368,7 +400,12 @@ function AnalysisReview({
 
   return (
     <div className="grid gap-2">
-      <div className="max-h-36 overflow-auto text-xs leading-5">
+      <div
+        className={cn(
+          "overflow-auto text-xs leading-5",
+          density === "compact" ? "max-h-24" : "max-h-36",
+        )}
+      >
         <Streamdown parseIncompleteMarkdown skipHtml>
           {answer}
         </Streamdown>
@@ -503,14 +540,15 @@ function readAttachment(part: unknown): ReviewAttachment | null {
   const filename = asText(record.filename) || asText(record.name);
   const providerMetadata = asRecord(record.providerMetadata);
   const ekairos = asRecord(providerMetadata.ekairos);
+
+  if (type !== "file" && !filename && !mediaType) {
+    return null;
+  }
+
   const kind =
     asText(ekairos.artifactKind) ||
     asText(ekairos.kind) ||
     type;
-
-  if (type !== "file" && !filename && !mediaType && !kind) {
-    return null;
-  }
 
   return {
     filename: filename || "attachment",
