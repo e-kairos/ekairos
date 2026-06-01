@@ -429,6 +429,38 @@ const MessageParts = memo(function MessageParts({
   const renderedReasoningItems = reasoningItems.length > 0
     ? reasoningItems
     : [{ key: "streaming", title: "Razonamiento", content: "" }];
+  const actionCount = useMemo(() => {
+    const actionCallIds = new Set<string>();
+    for (const part of normalizedParts) {
+      const action = getActionPartInfo(part);
+      if (action?.actionCallId) {
+        actionCallIds.add(action.actionCallId);
+      }
+    }
+    return actionCallIds.size;
+  }, [normalizedParts]);
+  const attachmentCount = useMemo(
+    () =>
+      normalizedParts
+        .flatMap((part: any) => {
+          const record = asRecord(part);
+          if (!record) return [];
+          if (record.type === "file") return [record];
+          if (record.type !== "message") return [];
+
+          const blocks = asRecord(record.content)?.blocks;
+          return Array.isArray(blocks)
+            ? blocks.filter((block) => asRecord(block)?.type === "file")
+            : [];
+        })
+        .filter((att: any) => {
+          const url =
+            (typeof att.url === "string" ? att.url : "") ||
+            att.providerMetadata?.instant?.downloadUrl;
+          return typeof url === "string" && url.length > 0;
+        }).length,
+    [normalizedParts],
+  );
 
   const defaultUserContentChrome = "bg-primary text-primary-foreground shadow-sm";
   const userContentChrome =
@@ -593,7 +625,15 @@ const MessageParts = memo(function MessageParts({
   };
 
   return (
-    <Fragment>
+    <div
+      className="contents"
+      data-action-count={actionCount}
+      data-attachment-count={attachmentCount}
+      data-message-parts
+      data-message-role={message.role}
+      data-message-surface={surface}
+      data-part-count={normalizedParts.length}
+    >
       {sources.length > 0 && message.role === "assistant" && (
         <Sources className="mb-2">
           <SourcesTrigger count={sources.length} />
@@ -717,7 +757,7 @@ const MessageParts = memo(function MessageParts({
       {renderAttachments(normalizedParts)}
       {renderChannelButtons()}
       {renderChannelContent()}
-    </Fragment>
+    </div>
   );
 });
 
