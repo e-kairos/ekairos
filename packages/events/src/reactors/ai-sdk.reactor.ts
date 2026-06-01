@@ -115,13 +115,13 @@ export function createAiSdkReactor<
 
     return {
       assistantEvent: result.assistantEvent,
-      actionRequests: (result.toolCalls as Array<{
-        toolCallId: string
-        toolName: string
+      actionRequests: (result.actionCalls as Array<{
+        actionCallId: string
+        actionName: string
         args: unknown
       }>).map((entry) => ({
-        actionRef: String(entry.toolCallId),
-        actionName: String(entry.toolName),
+        actionRef: String(entry.actionCallId),
+        actionName: String(entry.actionName),
         input: entry.args,
       })) as ContextActionRequest[],
       messagesForModel: result.messagesForModel,

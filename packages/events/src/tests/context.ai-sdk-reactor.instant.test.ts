@@ -9,7 +9,7 @@ import { z } from "zod"
 
 import {
   createContext,
-  didToolExecute,
+  didActionExecute,
   eventsDomain,
   type ContextItem,
 } from "../index.ts"
@@ -181,7 +181,7 @@ describeInstant("context ai sdk reactor + ai/test mock model", () => {
         }),
       }))
       .model(() => createMockModel("set_status"))
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "set_status"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "set_status"))
       .build()
 
     const shell = await timer.measure("reactShellMs", async () =>

@@ -1,9 +1,9 @@
 /**
- * ## context.toolcalls.ts
+ * ## context.action-calls.ts
  *
  * This module isolates the **action-call plumbing** used by `context.engine.ts`.
  *
- * In our runtime, model tool calls are normalized into semantic `action` event parts.
+ * In our runtime, provider tool calls are normalized into semantic `action` event parts.
  * The engine needs to:
  * - extract a normalized list of action requests from `event.content.parts`, and
  * - merge action execution outcomes back into those parts.
@@ -19,9 +19,9 @@ import {
   type ContextPartEnvelope,
 } from "./context.parts.js"
 
-export type ToolCall = {
-  toolCallId: string
-  toolName: string
+export type ContextActionCall = {
+  actionCallId: string
+  actionName: string
   args: any
 }
 
@@ -30,21 +30,21 @@ export type ToolCall = {
  *
  * Also accepts raw AI SDK tool UI parts before persistence normalization.
  */
-export function extractToolCallsFromParts(parts: any[] | undefined | null): ToolCall[] {
+export function extractActionCallsFromParts(parts: any[] | undefined | null): ContextActionCall[] {
   const safeParts = parts ?? []
-  return safeParts.reduce((acc: ToolCall[], p: any) => {
+  return safeParts.reduce((acc: ContextActionCall[], p: any) => {
     if (isContextPartEnvelope(p) && p.type === "action" && p.content.status === "started") {
       acc.push({
-        toolCallId: p.content.actionCallId,
-        toolName: p.content.actionName,
+        actionCallId: p.content.actionCallId,
+        actionName: p.content.actionName,
         args: p.content.input,
       })
       return acc
     }
 
     if (typeof p?.type === "string" && p.type.startsWith("tool-")) {
-      const toolName = p.type.split("-").slice(1).join("-")
-      acc.push({ toolCallId: p.toolCallId, toolName, args: p.input })
+      const actionName = p.type.split("-").slice(1).join("-")
+      acc.push({ actionCallId: p.toolCallId, actionName, args: p.input })
     }
     return acc
   }, [])
@@ -57,9 +57,9 @@ export function extractToolCallsFromParts(parts: any[] | undefined | null): Tool
  *
  * We match by action name and action call id.
  */
-export function applyToolExecutionResultToParts(
+export function applyActionExecutionResultToParts(
   parts: any[],
-  toolCall: Pick<ToolCall, "toolCallId" | "toolName">,
+  actionCall: Pick<ContextActionCall, "actionCallId" | "actionName">,
   execution: { success: boolean; result: any; message?: string },
 ): any[] {
   const normalized = normalizePartsForPersistence(parts)
@@ -73,8 +73,8 @@ export function applyToolExecutionResultToParts(
     }
 
     if (
-      part.content.actionCallId !== toolCall.toolCallId ||
-      part.content.actionName !== toolCall.toolName
+      part.content.actionCallId !== actionCall.actionCallId ||
+      part.content.actionName !== actionCall.actionName
     ) {
       continue
     }
@@ -85,8 +85,8 @@ export function applyToolExecutionResultToParts(
             type: "action",
             content: {
               status: "completed",
-              actionCallId: toolCall.toolCallId,
-              actionName: toolCall.toolName,
+              actionCallId: actionCall.actionCallId,
+              actionName: actionCall.actionName,
               output: execution.result,
             },
           }
@@ -94,8 +94,8 @@ export function applyToolExecutionResultToParts(
             type: "action",
             content: {
               status: "failed",
-              actionCallId: toolCall.toolCallId,
-              actionName: toolCall.toolName,
+              actionCallId: actionCall.actionCallId,
+              actionName: actionCall.actionName,
               error: {
                 message: String(execution.message || "Error"),
               },
@@ -113,8 +113,8 @@ export function applyToolExecutionResultToParts(
             type: "action",
             content: {
               status: "completed",
-              actionCallId: toolCall.toolCallId,
-              actionName: toolCall.toolName,
+              actionCallId: actionCall.actionCallId,
+              actionName: actionCall.actionName,
               output: execution.result,
             },
           }
@@ -122,8 +122,8 @@ export function applyToolExecutionResultToParts(
             type: "action",
             content: {
               status: "failed",
-              actionCallId: toolCall.toolCallId,
-              actionName: toolCall.toolName,
+              actionCallId: actionCall.actionCallId,
+              actionName: actionCall.actionName,
               error: {
                 message: String(execution.message || "Error"),
               },
@@ -136,25 +136,25 @@ export function applyToolExecutionResultToParts(
 }
 
 /**
- * Returns `true` when a given tool has a **settled** execution result in an event's parts.
+ * Returns `true` when a given action has a **settled** execution result in an event's parts.
  *
- * We treat a tool part as "executed" once it has either:
+ * We treat an action part as "executed" once it has either:
  * - `state: "output-available"` (success), or
  * - `state: "output-error"` (failure).
  *
  * This is useful for stop/continue logic in `context.shouldContinue(...)` where you want to
  * decide based on the persisted `reactionEvent` (not ephemeral in-memory arrays).
  */
-export function didToolExecute(event: Pick<ContextItem, "content">, toolName: string): boolean {
+export function didActionExecute(event: Pick<ContextItem, "content">, actionName: string): boolean {
   const parts = (((event as any).content.parts ?? []) as any[]).flatMap((part) =>
     isContextPartEnvelope(part) ? [part] : normalizePartsForPersistence([part]),
   )
   return parts.some(
     (p) =>
       (p.type === "action" &&
-        p.content.actionName === toolName &&
+        p.content.actionName === actionName &&
         (p.content.status === "completed" || p.content.status === "failed")) ||
-      ((p as any).type === `tool-${toolName}` &&
+      ((p as any).type === `tool-${actionName}` &&
         ((p as any).state === "output-available" || (p as any).state === "output-error")),
   )
 }

@@ -36,7 +36,7 @@ export async function doContextStreamStep(params: {
   const writable = getWritable<UIMessageChunk>()
 
   const { jsonSchema, gateway, smoothStream, stepCountIs, streamText } = await import("ai")
-  const { extractToolCallsFromParts } = await import("../context.toolcalls.js")
+  const { extractActionCallsFromParts } = await import("../context.action-calls.js")
 
   // Match DurableAgent's model init behavior:
   // - string => AI Gateway model id, resolved via `gateway(...)` in the step runtime
@@ -119,10 +119,10 @@ export async function doContextStreamStep(params: {
   await uiStream.pipeTo(writable, { preventClose: true })
 
   const assistantEvent = await finishPromise
-  const actionRequests = extractToolCallsFromParts((assistantEvent as any)?.content?.parts).map(
+  const actionRequests = extractActionCallsFromParts((assistantEvent as any)?.content?.parts).map(
     (entry: any) => ({
-      actionRef: String(entry.toolCallId),
-      actionName: String(entry.toolName),
+      actionRef: String(entry.actionCallId),
+      actionName: String(entry.actionName),
       input: entry.args,
     }),
   )

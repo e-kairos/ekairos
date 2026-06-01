@@ -1,7 +1,7 @@
 import {
   createContext,
   createScriptedReactor,
-  didToolExecute,
+  didActionExecute,
 } from "@ekairos/events";
 import { tool } from "ai";
 import { z } from "zod";
@@ -67,7 +67,7 @@ function createStorySmoke(mode: StorySmokeMode) {
           ],
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "echo"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "echo"))
       .build();
   }
 

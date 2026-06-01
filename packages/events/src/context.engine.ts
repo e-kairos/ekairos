@@ -17,7 +17,7 @@ import type {
   StoredContext,
 } from "./context.store.js"
 import { OUTPUT_ITEM_TYPE, WEB_CHANNEL } from "./context.events.js"
-import { applyToolExecutionResultToParts } from "./context.toolcalls.js"
+import { applyActionExecutionResultToParts } from "./context.action-calls.js"
 import {
   isContextPartEnvelope,
   normalizePartsForPersistence,
@@ -1844,11 +1844,11 @@ export abstract class ContextEngine<
         // Merge action results into step parts so the next reaction can see them.
         let finalizedStepParts = Array.isArray(stepParts) ? [...stepParts] : []
         for (const r of actionResults as any[]) {
-          finalizedStepParts = applyToolExecutionResultToParts(
+          finalizedStepParts = applyActionExecutionResultToParts(
             finalizedStepParts,
             {
-              toolCallId: r.actionRequest.actionRef,
-              toolName: r.actionRequest.actionName,
+              actionCallId: r.actionRequest.actionRef,
+              actionName: r.actionRequest.actionName,
             },
             {
               success: Boolean(r.success),

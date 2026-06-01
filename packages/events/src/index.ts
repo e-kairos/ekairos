@@ -77,7 +77,11 @@ export {
 
 export { eventsDomain } from "./schema.js"
 
-export { didToolExecute, extractToolCallsFromParts } from "./context.toolcalls.js"
+export {
+  didActionExecute,
+  extractActionCallsFromParts,
+  type ContextActionCall,
+} from "./context.action-calls.js"
 export {
   actionsToActionSpecs,
   actionSpecToAiSdkTool,
