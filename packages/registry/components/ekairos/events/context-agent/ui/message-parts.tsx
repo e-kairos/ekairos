@@ -12,17 +12,17 @@ import {
   SourcesTrigger,
   Source,
 } from "@/components/ai-elements/sources";
-import {
-  Tool as Action,
-  ToolContent as ActionContent,
-  ToolHeader as ActionHeader,
-  ToolInput as ActionInput,
-  ToolOutput as ActionOutput,
-} from "@/components/ekairos/tools/tool";
 import { FileIcon } from "../../prompt/file-icon";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CopyIcon } from "lucide-react";
+import {
+  Action,
+  ActionContent,
+  ActionHeader,
+  ActionInput,
+  ActionOutput,
+} from "./action-view";
 import {
   getActionPartInfo,
   getCreateMessageText,

@@ -76,6 +76,7 @@ Context chat components do not expose provider-specific auth, IPC, or reactor co
 - The shared UI reads and renders agnostic events, steps, parts, actions, attachments, and status only.
 - User-facing answers and artifact titles should describe the domain result, not the provider, reactor, script mode, or implementation path that produced it.
 - Debuggable row refs such as `sourceRef`, evidence links, and trace labels should use domain/data pipeline names, not provider or runtime names.
+- Context agent components expose action surfaces (`actionComponents`, action cards, action state). Provider `tool-*` payloads are adapter input only and must be normalized before rendering.
 - Provider login, model/runtime selection, sandbox controls, and raw reactor wiring stay outside the component surface unless an explicit debug/workshop adapter owns them.
 - Scripted product workbenches should not keep provider-specific bridge objects in the browser global surface just because an older reactor path used them.
 - Scripted product packages should not ship unused provider binaries, bridge helpers, or IPC clients; keeping those artifacts around makes the active runtime ambiguous.
