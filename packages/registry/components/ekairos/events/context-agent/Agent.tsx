@@ -57,6 +57,11 @@ export default function ContextAgent(props: AgentProps) {
     [context],
   );
   const hasVisibleEvents = listContext.events.length > 0;
+  const loading =
+    context.sendStatus === "submitting" ||
+    context.contextStatus === "open_streaming" ||
+    listContext.events.some((event) => event.status === "pending");
+  const hasError = Boolean(context.sendError);
   const showEmptyState =
     emptyState !== undefined &&
     !hasVisibleEvents &&
@@ -71,7 +76,9 @@ export default function ContextAgent(props: AgentProps) {
   const instanceId = useMemo(() => {
     const anyCrypto = (globalThis as any)?.crypto;
     const id = anyCrypto?.randomUUID?.() as string | undefined;
-    return id || `context_agent_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    return (
+      id || `context_agent_${Date.now()}_${Math.random().toString(16).slice(2)}`
+    );
   }, []);
   void instanceId;
 
@@ -89,9 +96,11 @@ export default function ContextAgent(props: AgentProps) {
           data-context-empty={showEmptyState ? "true" : "false"}
           data-context-event-count={listContext.events.length}
           data-context-has-activity={activity ? "true" : "false"}
+          data-context-has-error={hasError ? "true" : "false"}
           data-context-has-visible-events={hasVisibleEvents ? "true" : "false"}
           data-context-id={context.contextId || undefined}
           data-context-key={contextKey || undefined}
+          data-context-loading={loading ? "true" : "false"}
           data-context-prompt-density={promptDensity}
           data-context-read-only={layoutMockReadOnly ? "true" : "false"}
           data-context-send-status={context.sendStatus}
@@ -99,7 +108,7 @@ export default function ContextAgent(props: AgentProps) {
           data-testid="canvas-context-agent"
           className={cn(
             "relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground",
-            classNames?.container
+            classNames?.container,
           )}
         >
           {showEmptyState ? (
@@ -127,9 +136,14 @@ export default function ContextAgent(props: AgentProps) {
             </div>
           ) : (
             <>
-              <Conversation className={cn("min-h-0 flex-1", classNames?.scrollArea)}>
+              <Conversation
+                className={cn("min-h-0 flex-1", classNames?.scrollArea)}
+              >
                 <ConversationContent
-                  className={cn("space-y-6 p-4 md:p-6", classNames?.conversationContent)}
+                  className={cn(
+                    "space-y-6 p-4 md:p-6",
+                    classNames?.conversationContent,
+                  )}
                 >
                   <MessageList
                     context={listContext}
@@ -137,10 +151,15 @@ export default function ContextAgent(props: AgentProps) {
                     classNames={classNames}
                     showReasoning={showReasoning ?? true}
                   />
-                  <div className={cn("h-4", classNames?.conversationEndSpacer)} />
+                  <div
+                    className={cn("h-4", classNames?.conversationEndSpacer)}
+                  />
                 </ConversationContent>
                 <ConversationScrollButton
-                  className={cn("bottom-20 right-8", classNames?.conversationScrollButton)}
+                  className={cn(
+                    "bottom-20 right-8",
+                    classNames?.conversationScrollButton,
+                  )}
                 />
               </Conversation>
 
@@ -149,7 +168,7 @@ export default function ContextAgent(props: AgentProps) {
                 data-prompt-density={promptDensity}
                 className={cn(
                   "bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60",
-                  classNames?.prompt
+                  classNames?.prompt,
                 )}
               >
                 <PromptBar
