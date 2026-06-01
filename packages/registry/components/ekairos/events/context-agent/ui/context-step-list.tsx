@@ -4,6 +4,10 @@ import { cn } from "@/lib/utils";
 
 import type { ContextStepForUI } from "@ekairos/events/react";
 import type { AgentClassNames } from "../types";
+import {
+  getActionPartInfo,
+  normalizeContextEventParts,
+} from "../context-event-parts";
 import { MessageParts } from "./message-parts";
 
 type ContextStepListProps = {
@@ -90,6 +94,21 @@ function StepBody({
   );
 }
 
+function normalizedStepParts(step: ContextStepForUI) {
+  return normalizeContextEventParts(Array.isArray(step.parts) ? step.parts : []);
+}
+
+function countStepActions(step: ContextStepForUI) {
+  const actionCallIds = new Set<string>();
+  for (const part of normalizedStepParts(step)) {
+    const action = getActionPartInfo(part);
+    if (action?.actionCallId) {
+      actionCallIds.add(action.actionCallId);
+    }
+  }
+  return actionCallIds.size;
+}
+
 export function ContextStepList({
   steps = [],
   actionComponents = {},
@@ -104,24 +123,43 @@ export function ContextStepList({
 
   if (renderableSteps.length === 0) return null;
 
+  const runningStepCount = renderableSteps.filter(
+    (step) => step.status === "running",
+  ).length;
+
   return (
-    <div className={cn("mt-3 space-y-2", className)}>
-      {renderableSteps.map((step) => (
-        <div
-          data-status={String(step.status ?? "unknown")}
-          data-testid="context-step"
-          key={step.stepId}
-          className="min-w-0"
-        >
-          <StepBody
-            step={step}
-            actionComponents={actionComponents}
-            classNames={classNames}
-            showReasoning={showReasoning}
-            showDebug={showDebug}
-          />
-        </div>
-      ))}
+    <div
+      className={cn("mt-3 space-y-2", className)}
+      data-context-step-list
+      data-debug-enabled={showDebug ? "true" : "false"}
+      data-running-step-count={runningStepCount}
+      data-show-reasoning={showReasoning ? "true" : "false"}
+      data-step-count={renderableSteps.length}
+    >
+      {renderableSteps.map((step) => {
+        const normalizedParts = normalizedStepParts(step);
+        return (
+          <div
+            className="min-w-0"
+            data-context-step
+            data-step-action-count={countStepActions(step)}
+            data-step-has-debug={showDebug ? "true" : "false"}
+            data-step-live={step.status === "running" ? "true" : "false"}
+            data-step-part-count={normalizedParts.length}
+            data-step-status={String(step.status ?? "unknown")}
+            data-testid="context-step"
+            key={step.stepId}
+          >
+            <StepBody
+              actionComponents={actionComponents}
+              classNames={classNames}
+              showDebug={showDebug}
+              showReasoning={showReasoning}
+              step={step}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }
