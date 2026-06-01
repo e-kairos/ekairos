@@ -1,6 +1,6 @@
 "use client";
 
-import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { INPUT_TEXT_ITEM_TYPE, type ContextValue } from "@ekairos/events/react";
 import { id } from "@instantdb/react";
 import { DotmSquare10 } from "@/components/ui/dotm-square-10";
@@ -41,15 +41,47 @@ type ChatAttachment = PromptAttachment & {
 type FileSelection = FileList | File[];
 
 type ContextActivityTone = "neutral" | "info" | "warning" | "error";
+type ContextActivityPhase = "idle" | "live" | "finishing" | "error";
 
 type ContextActivityState = {
   label: string;
   title?: string;
   animated?: boolean;
   pattern: MatrixPattern;
+  phase?: ContextActivityPhase;
   speed: number;
   tone?: ContextActivityTone;
 };
+
+const FINISHING_ANIMATION_MS = 1550;
+const IDLE_AFTER_FINISH_MS = 850;
+const ACTIVITY_FADE_OUT_MS = 320;
+
+const IDLE_CONTEXT_ACTIVITY: ContextActivityState = {
+  label: "Listo",
+  animated: true,
+  pattern: "outline",
+  phase: "idle",
+  speed: 1,
+  tone: "neutral",
+};
+
+const FINISHING_CONTEXT_ACTIVITY: ContextActivityState = {
+  label: "Finalizando",
+  animated: true,
+  pattern: "diamond",
+  phase: "finishing",
+  speed: 1.4,
+  tone: "info",
+};
+
+function shouldPlayTerminalFinishing(
+  activity: ContextActivityState | null,
+): activity is ContextActivityState {
+  if (!activity) return false;
+  const phase = activity.phase ?? (activity.tone === "error" ? "error" : "live");
+  return phase === "live";
+}
 
 function buildChartEditFilePart(
   payload: ChartEditAttachmentPayload,
@@ -301,20 +333,76 @@ export function ContextActivityIndicator({
   activity: ContextActivityState | null;
   density?: "default" | "compact";
 }) {
-  if (!activity) return null;
+  const [displayActivity, setDisplayActivity] =
+    useState<ContextActivityState | null>(activity);
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const [loaderVersion, setLoaderVersion] = useState(0);
+  const lastLiveActivityRef = useRef<ContextActivityState | null>(
+    shouldPlayTerminalFinishing(activity) ? activity : null,
+  );
+
+  useEffect(() => {
+    if (activity) {
+      lastLiveActivityRef.current = shouldPlayTerminalFinishing(activity)
+        ? activity
+        : null;
+      setIsFadingOut(false);
+      setDisplayActivity(activity);
+      return;
+    }
+
+    const previousActivity = lastLiveActivityRef.current;
+    lastLiveActivityRef.current = null;
+
+    if (shouldPlayTerminalFinishing(previousActivity)) {
+      setIsFadingOut(false);
+      setDisplayActivity(FINISHING_CONTEXT_ACTIVITY);
+      setLoaderVersion((current) => current + 1);
+
+      let idleTimeoutId: number | undefined;
+      let fadeTimeoutId: number | undefined;
+      const finishingTimeoutId = window.setTimeout(() => {
+        setDisplayActivity(IDLE_CONTEXT_ACTIVITY);
+        setLoaderVersion((current) => current + 1);
+        idleTimeoutId = window.setTimeout(() => {
+          setIsFadingOut(true);
+          fadeTimeoutId = window.setTimeout(() => {
+            setDisplayActivity(null);
+            setIsFadingOut(false);
+          }, ACTIVITY_FADE_OUT_MS);
+        }, IDLE_AFTER_FINISH_MS);
+      }, FINISHING_ANIMATION_MS);
+
+      return () => {
+        window.clearTimeout(finishingTimeoutId);
+        if (idleTimeoutId !== undefined) {
+          window.clearTimeout(idleTimeoutId);
+        }
+        if (fadeTimeoutId !== undefined) {
+          window.clearTimeout(fadeTimeoutId);
+        }
+      };
+    }
+
+    setIsFadingOut(false);
+    setDisplayActivity(null);
+  }, [activity]);
+
+  if (!displayActivity) return null;
 
   const toneClassName =
-    activity.tone === "error"
+    displayActivity.tone === "error"
       ? "text-destructive"
-      : activity.tone === "warning"
+      : displayActivity.tone === "warning"
         ? "text-amber-700 dark:text-amber-400"
         : "text-muted-foreground";
 
   return (
     <div
       className={cn(
-        "mx-auto mb-1.5 flex w-full max-w-3xl justify-start px-1",
+        "mx-auto mb-1.5 flex w-full max-w-3xl justify-start px-1 transition-[opacity,transform] duration-300 ease-out",
         density === "compact" && "max-w-none",
+        isFadingOut && "-translate-x-3 opacity-0",
       )}
     >
       <TooltipProvider delayDuration={260}>
@@ -328,20 +416,23 @@ export function ContextActivityIndicator({
               )}
             >
               <DotmSquare10
-                ariaLabel={activity.label}
-                animated={activity.animated ?? true}
-                pattern={activity.pattern}
-                speed={activity.speed}
+                key={loaderVersion}
+                ariaLabel={displayActivity.label}
+                animated={displayActivity.animated ?? true}
+                pattern={displayActivity.pattern}
+                speed={displayActivity.speed}
                 size={density === "compact" ? 16 : 18}
                 dotSize={2}
                 cellPadding={density === "compact" ? 1.5 : 2}
-                opacityBase={activity.tone === "error" ? 0.2 : 0.1}
-                opacityMid={activity.tone === "error" ? 0.42 : 0.34}
-                opacityPeak={activity.tone === "error" ? 0.9 : 0.82}
+                opacityBase={displayActivity.tone === "error" ? 0.2 : 0.1}
+                opacityMid={displayActivity.tone === "error" ? 0.42 : 0.34}
+                opacityPeak={displayActivity.tone === "error" ? 0.9 : 0.82}
               />
             </div>
           </TooltipTrigger>
-          <TooltipContent>{activity.title ?? activity.label}</TooltipContent>
+          <TooltipContent>
+            {displayActivity.title ?? displayActivity.label}
+          </TooltipContent>
         </Tooltip>
       </TooltipProvider>
     </div>
