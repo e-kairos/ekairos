@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export type MessageArtifactProps = {
+  actionCallId?: string;
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -22,6 +23,7 @@ export type MessageArtifactProps = {
 };
 
 export function MessageArtifact({
+  actionCallId,
   actions,
   children,
   className,
@@ -36,6 +38,7 @@ export function MessageArtifact({
         "overflow-hidden rounded-md border-border/70 bg-muted/20 shadow-none",
         className
       )}
+      data-ek-artifact-anchor={actionCallId || undefined}
     >
       <ArtifactHeader className="gap-3 border-border/70 bg-muted/35 px-3 py-2">
         <div className="grid min-w-0 gap-0.5">
