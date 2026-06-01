@@ -52,6 +52,7 @@ function FileNameTooltip({ name }: { name: string }) {
 export function PromptFileChip({ file, onRemove }: { file: PromptAttachment; onRemove?: (id: string) => void }) {
   const isArtifactContext = file.kind === "artifact-context"
   const interactive = typeof file.onPress === "function"
+  const hasFilePart = Boolean(file.url || file.previewURL || file.artifactPayload)
 
   const mainClass = cn(
     "inline-flex min-w-0 max-w-full items-center gap-2 px-2.5 py-1.5 text-left",
@@ -81,23 +82,33 @@ export function PromptFileChip({ file, onRemove }: { file: PromptAttachment; onR
           ? "border-accent/35 bg-accent/10"
           : "border-border/65 bg-muted/45",
       )}
+      data-attachment-has-file-part={hasFilePart ? "true" : "false"}
+      data-attachment-has-return-action={interactive ? "true" : "false"}
+      data-attachment-kind={file.kind ?? "file"}
+      data-attachment-media-type={file.type}
+      data-attachment-name={file.name}
+      data-attachment-size={file.size}
+      data-attachment-status={file.status}
+      data-prompt-attachment
     >
       {interactive ? (
         <button
           type="button"
           className={mainClass}
+          data-prompt-attachment-main
           onClick={() => file.onPress?.()}
           aria-label={`${file.name} — ver en el hilo`}
         >
           {mainBody}
         </button>
       ) : (
-        <div className={mainClass}>{mainBody}</div>
+        <div className={mainClass} data-prompt-attachment-main>{mainBody}</div>
       )}
       {onRemove ? (
         <button
           type="button"
           className="rounded-r-xl px-1.5 py-1.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+          data-prompt-attachment-remove
           onClick={(e) => {
             e.stopPropagation()
             onRemove(file.id)

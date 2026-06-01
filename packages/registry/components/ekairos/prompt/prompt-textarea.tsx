@@ -6,7 +6,7 @@ export type PromptTextareaProps = React.ComponentProps<"textarea"> & {
   maxHeight?: number
 }
 
-export function PromptTextarea({
+export const PromptTextarea = React.forwardRef<HTMLTextAreaElement, PromptTextareaProps>(function PromptTextarea({
   className,
   placeholder = "Send a message...",
   minHeight = 52,
@@ -14,8 +14,20 @@ export function PromptTextarea({
   onChange,
   onKeyDown,
   ...props
-}: PromptTextareaProps) {
+}: PromptTextareaProps, forwardedRef) {
   const ref = useRef<HTMLTextAreaElement>(null)
+
+  const setTextareaRef = React.useCallback(
+    (element: HTMLTextAreaElement | null) => {
+      ref.current = element
+      if (typeof forwardedRef === "function") {
+        forwardedRef(element)
+      } else if (forwardedRef) {
+        forwardedRef.current = element
+      }
+    },
+    [forwardedRef],
+  )
 
   useEffect(() => {
     const el = ref.current
@@ -48,7 +60,7 @@ export function PromptTextarea({
 
   return (
     <textarea
-      ref={ref}
+      ref={setTextareaRef}
       name="message"
       data-testid="chat-input"
       placeholder={placeholder}
@@ -65,6 +77,6 @@ export function PromptTextarea({
       {...props}
     />
   )
-}
+})
 
 export default PromptTextarea
