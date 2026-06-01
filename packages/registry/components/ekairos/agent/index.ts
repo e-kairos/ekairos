@@ -1,12 +1,17 @@
 export {
   ContextAgent,
+  ContextActivityIndicator,
   ContextHistory,
   ContextNewButton,
   ContextReviewTranscript,
   ContextStepList,
+  MessageList,
+  MessageParts,
+  PromptBar,
   MessageArtifact,
   SourceWatchStatus,
   TemporalEvidenceList,
+  getContextActivityState,
 } from "@/components/ekairos/events/context-agent";
 
 export type {

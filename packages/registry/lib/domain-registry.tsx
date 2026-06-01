@@ -249,7 +249,7 @@ export function TenderAgent({ db, contextKey }) {
       id: "prompt-bar",
       label: "PromptBar",
       description:
-        "Context-aware prompt composer that handles text, files, chart-edit attachments, web search, reasoning, and stop state.",
+        "Context-aware prompt composer that handles text, files, artifact-context attachments, web search, reasoning, activity, and stop state.",
       href: "/events/components#prompt-bar",
       registryName: "prompt-bar",
       registryPath: "/r/prompt-bar.json",
