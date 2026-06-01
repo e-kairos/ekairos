@@ -261,6 +261,21 @@ export function TenderAgent({ db, contextKey }) {
       group: "Agent shell",
     },
     {
+      id: "context-activity-indicator",
+      label: "ContextActivityIndicator",
+      description:
+        "Agnostic live activity indicator and state derivation for upload, send, stream, reasoning, action, terminal, and idle context phases.",
+      href: "/events/components#context-activity-indicator",
+      registryName: "context-activity-indicator",
+      registryPath: "/r/context-activity-indicator.json",
+      target: "components/ekairos/events/context-agent/ui/context-activity-indicator.tsx",
+      dependency: "@ekairos/events@beta",
+      packageImport: "@ekairos/events/react",
+      status: "source",
+      kind: "component",
+      group: "Agent shell",
+    },
+    {
       id: "message-list",
       label: "MessageList",
       description:

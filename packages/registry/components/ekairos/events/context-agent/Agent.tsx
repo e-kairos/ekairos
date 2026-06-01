@@ -13,10 +13,8 @@ import { useOrgDb } from "@/lib/org-db-context";
 import type { AgentProps } from "./types";
 import { AgentPromptBridgeProvider } from "./agent-prompt-bridge";
 import { MessageList } from "./ui/message-list";
-import {
-  getContextActivityState,
-  PromptBar,
-} from "./ui/prompt-bar";
+import { getContextActivityState } from "./ui/context-activity-indicator";
+import { PromptBar } from "./ui/prompt-bar";
 
 export type { AgentProps, ContextHistoryItem } from "./types";
 

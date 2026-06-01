@@ -3,4 +3,5 @@
 export {
   ContextActivityIndicator,
   getContextActivityState,
-} from "@/components/ekairos/events/context-agent/ui/prompt-bar";
+} from "@/components/ekairos/events/context-agent/ui/context-activity-indicator";
+export type { ContextActivityState } from "@/components/ekairos/events/context-agent/ui/context-activity-indicator";

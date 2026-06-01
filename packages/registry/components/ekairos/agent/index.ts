@@ -16,6 +16,7 @@ export {
 
 export type {
   ContextAgentProps,
+  ContextActivityState,
   ContextHistoryItem,
   ContextReviewTranscriptProps,
   MessageArtifactProps,

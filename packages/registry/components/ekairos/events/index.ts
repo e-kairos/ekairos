@@ -17,6 +17,7 @@ export {
 } from "./context-agent";
 export type {
   ContextAgentProps,
+  ContextActivityState,
   ContextHistoryItem,
   ContextReviewTranscriptProps,
   MessageArtifactProps,

@@ -17,6 +17,11 @@ export type { MessageArtifactProps } from "./ui/message-artifact";
 export { MessageList } from "./ui/message-list";
 export { MessageParts } from "./ui/message-parts";
 export {
+  ContextActivityIndicator,
+  getContextActivityState,
+} from "./ui/context-activity-indicator";
+export type { ContextActivityState } from "./ui/context-activity-indicator";
+export {
   TemporalEvidenceList,
   formatTemporalEvidenceCount,
   formatTemporalEvidenceTime,
@@ -25,9 +30,5 @@ export type {
   TemporalEvidenceItem,
   TemporalEvidenceListProps,
 } from "./ui/temporal-evidence-list";
-export {
-  ContextActivityIndicator,
-  getContextActivityState,
-  PromptBar,
-} from "./ui/prompt-bar";
+export { PromptBar } from "./ui/prompt-bar";
 export type { ContextHistoryItem } from "./types";
