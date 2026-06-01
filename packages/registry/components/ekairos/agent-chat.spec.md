@@ -90,6 +90,7 @@ Context chat components do not expose provider-specific auth, IPC, or reactor co
 
 - Product shells pass context API URLs, request preparation, attachments, and action renderers into the shared chat UI.
 - The shared UI reads and renders agnostic events, steps, parts, actions, attachments, and status only.
+- `ContextAgent` root exposes `data-context-agent`, `data-context-id`, `data-context-key`, `data-context-status`, `data-context-send-status`, `data-context-event-count`, `data-context-empty`, `data-context-has-activity`, `data-context-has-visible-events`, `data-context-read-only`, and `data-context-prompt-density` so Workbench and product smoke tests can inspect shell state without raw provider event internals.
 - User-facing answers and artifact titles should describe the domain result, not the provider, reactor, script mode, or implementation path that produced it.
 - Debuggable row refs such as `sourceRef`, evidence links, and trace labels should use domain/data pipeline names, not provider or runtime names.
 - Context agent components expose action surfaces (`actionComponents`, action cards, action state). Provider `tool-*` payloads are adapter input only and must be normalized before rendering.

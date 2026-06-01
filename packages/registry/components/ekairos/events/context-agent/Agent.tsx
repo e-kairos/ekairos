@@ -85,6 +85,17 @@ export default function ContextAgent(props: AgentProps) {
     >
       <AgentPromptBridgeProvider>
         <div
+          data-context-agent="true"
+          data-context-empty={showEmptyState ? "true" : "false"}
+          data-context-event-count={listContext.events.length}
+          data-context-has-activity={activity ? "true" : "false"}
+          data-context-has-visible-events={hasVisibleEvents ? "true" : "false"}
+          data-context-id={context.contextId || undefined}
+          data-context-key={contextKey || undefined}
+          data-context-prompt-density={promptDensity}
+          data-context-read-only={layoutMockReadOnly ? "true" : "false"}
+          data-context-send-status={context.sendStatus}
+          data-context-status={context.contextStatus}
           data-testid="canvas-context-agent"
           className={cn(
             "relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground",
