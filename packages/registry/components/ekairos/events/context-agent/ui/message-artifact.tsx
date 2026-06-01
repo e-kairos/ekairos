@@ -38,7 +38,12 @@ export function MessageArtifact({
         "overflow-hidden rounded-md border-border/70 bg-muted/20 shadow-none",
         className
       )}
+      data-artifact-eyebrow={typeof eyebrow === "string" ? eyebrow : undefined}
+      data-artifact-title={typeof title === "string" ? title : undefined}
       data-ek-artifact-anchor={actionCallId || undefined}
+      data-has-actions={actions ? "true" : "false"}
+      data-has-description={description ? "true" : "false"}
+      data-message-artifact
     >
       <ArtifactHeader className="gap-3 border-border/70 bg-muted/35 px-3 py-2">
         <div className="grid min-w-0 gap-0.5">

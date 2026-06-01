@@ -45,6 +45,11 @@ export function TemporalEvidenceList({
         "grid gap-1.5 rounded-md border border-border/70 bg-muted/20 p-1.5 text-sm",
         className
       )}
+      data-evidence-count={items.length}
+      data-evidence-title={typeof title === "string" ? title : undefined}
+      data-max-items={maxItems}
+      data-temporal-evidence-list
+      data-visible-evidence-count={visibleItems.length}
       open
     >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-1 text-[10px] font-semibold uppercase tracking-normal text-muted-foreground [&::-webkit-details-marker]:hidden">
@@ -92,6 +97,10 @@ export function TemporalEvidenceList({
             <a
               aria-current={selected ? "true" : undefined}
               className={className}
+              data-cue-kind={item.kind || undefined}
+              data-cue-selected={selected ? "true" : "false"}
+              data-cue-time={typeof item.time === "number" && Number.isFinite(item.time) ? item.time : undefined}
+              data-temporal-evidence-cue
               href={item.href}
               key={key}
             >
@@ -101,6 +110,10 @@ export function TemporalEvidenceList({
             <button
               aria-pressed={selected}
               className={cn(className, "text-left")}
+              data-cue-kind={item.kind || undefined}
+              data-cue-selected={selected ? "true" : "false"}
+              data-cue-time={typeof item.time === "number" && Number.isFinite(item.time) ? item.time : undefined}
+              data-temporal-evidence-cue
               key={key}
               onClick={() => onSelectItem(item, index)}
               type="button"
@@ -110,6 +123,10 @@ export function TemporalEvidenceList({
           ) : (
             <div
               className={className}
+              data-cue-kind={item.kind || undefined}
+              data-cue-selected={selected ? "true" : "false"}
+              data-cue-time={typeof item.time === "number" && Number.isFinite(item.time) ? item.time : undefined}
+              data-temporal-evidence-cue
               key={key}
             >
               {content}

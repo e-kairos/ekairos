@@ -27,6 +27,7 @@ Message artifacts can queue virtual prompt context without coupling the message 
 
 - Artifact renderers emit a typed payload through the prompt bridge.
 - Message-owned previews use `MessageArtifact` as the adapter-owned visual shell.
+- `MessageArtifact` exposes `data-message-artifact`, optional `data-artifact-title` / `data-artifact-eyebrow`, `data-has-actions`, and `data-has-description` for product/workshop smoke assertions.
 - Product-specific preview classes and controls belong inside `MessageArtifact.children` or `MessageArtifact.actions`; the outer shell remains source-agnostic.
 - `MessageArtifact.actionCallId` marks `data-ek-artifact-anchor` so prompt chips can jump back to the originating artifact.
 - `PromptBar` renders that payload as a removable attachment chip.
@@ -50,6 +51,7 @@ Workbench and product review surfaces can render an agnostic turn transcript bef
 - Raw ids, step payloads, and part trees stay in Workshop/debug surfaces; the transcript is a review layer, not a replacement for event inspection.
 - Use `density="compact"` when the transcript lives inside a product rail or workbench side panel; keep the default density for full-width Workshop review.
 - `TemporalEvidenceList` renders source-agnostic timed cues with optional `href`; products decide whether a cue opens a replay timestamp, document source, trace row, or workbench panel.
+- `TemporalEvidenceList` exposes `data-temporal-evidence-list`, `data-evidence-count`, `data-visible-evidence-count`, `data-max-items`, and per-cue `data-temporal-evidence-cue`, `data-cue-kind`, `data-cue-time`, and `data-cue-selected` attributes.
 - `TemporalEvidenceList` may render cues as links or adapter-owned selection buttons through `onSelectItem`; selected state is keyed by the adapter, not by event internals.
 
 ## Source Watch Status
