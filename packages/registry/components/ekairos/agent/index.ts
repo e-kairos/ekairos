@@ -5,6 +5,7 @@ export {
   ContextReviewTranscript,
   ContextStepList,
   MessageArtifact,
+  SourceWatchStatus,
   TemporalEvidenceList,
 } from "@/components/ekairos/events/context-agent";
 
@@ -13,6 +14,10 @@ export type {
   ContextHistoryItem,
   ContextReviewTranscriptProps,
   MessageArtifactProps,
+  SourceWatchPhase,
+  SourceWatchStatusLabels,
+  SourceWatchStatusProps,
+  SourceWatchStatusValue,
   TemporalEvidenceItem,
   TemporalEvidenceListProps,
 } from "@/components/ekairos/events/context-agent";

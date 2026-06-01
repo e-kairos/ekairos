@@ -50,6 +50,7 @@ Product workbenches can show live source monitoring without baking polling rules
 
 - `SourceWatchStatus` renders an agnostic source state with phases: `checking`, `waiting`, `loading`, `loaded`, `empty`, and `error`.
 - The component only displays status, count, timestamp, label, path, and optional open action; source-specific polling/autoload rules stay in product logic.
+- Products may pass phase `labels` and `ariaLabelPrefix`; those are presentation labels, not source-specific state machines.
 - Use `waiting` for a candidate that must stabilize before loading, `loading` for automatic ingestion, and `loaded` for the active latest source.
 - File watchers, replay folders, imports, webhook streams, and task feeds should share this status shape instead of inventing product-specific chrome.
 

@@ -7,6 +7,7 @@ export type { ContextReviewTranscriptProps } from "./ui/context-review-transcrip
 export { SourceWatchStatus } from "./ui/source-watch-status";
 export type {
   SourceWatchPhase,
+  SourceWatchStatusLabels,
   SourceWatchStatusProps,
   SourceWatchStatusValue,
 } from "./ui/source-watch-status";

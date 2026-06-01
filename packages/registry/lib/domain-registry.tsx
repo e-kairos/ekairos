@@ -321,6 +321,21 @@ export function TenderAgent({ db, contextKey }) {
       group: "Renderers",
     },
     {
+      id: "source-watch-status",
+      label: "SourceWatchStatus",
+      description:
+        "Agnostic status surface for watched sources such as replay folders, imports, feeds, and webhook streams.",
+      href: "/events/components#source-watch-status",
+      registryName: "source-watch-status",
+      registryPath: "/r/source-watch-status.json",
+      target: "components/ekairos/events/context-agent/ui/source-watch-status.tsx",
+      dependency: "@ekairos/events@beta",
+      packageImport: "@ekairos/events/react",
+      status: "source",
+      kind: "component",
+      group: "Agent shell",
+    },
+    {
       id: "event-steps",
       label: "EventSteps",
       description:

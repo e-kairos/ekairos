@@ -29,19 +29,25 @@ export type SourceWatchStatusValue = {
   sourcePath?: string | null;
 };
 
+export type SourceWatchStatusLabels = Partial<Record<SourceWatchPhase, string>>;
+
 export type SourceWatchStatusProps = {
+  ariaLabelPrefix?: string;
   className?: string;
+  labels?: SourceWatchStatusLabels;
   onOpen?: () => void;
   status: SourceWatchStatusValue;
 };
 
 export function SourceWatchStatus({
+  ariaLabelPrefix = "Source watch",
   className,
+  labels,
   onOpen,
   status,
 }: SourceWatchStatusProps) {
   const Icon = iconForPhase(status.phase);
-  const label = labelForPhase(status.phase);
+  const label = labels?.[status.phase] ?? labelForPhase(status.phase);
   const checkedAt = formatCheckedAt(status.checkedAt);
   const count = status.sourceCount ?? 0;
   const detail =
@@ -87,7 +93,7 @@ export function SourceWatchStatus({
   if (onOpen) {
     return (
       <button
-        aria-label={`Source watch: ${label}`}
+        aria-label={`${ariaLabelPrefix}: ${label}`}
         className={sharedClassName}
         data-phase={status.phase}
         onClick={onOpen}
@@ -101,7 +107,7 @@ export function SourceWatchStatus({
 
   return (
     <div
-      aria-label={`Source watch: ${label}`}
+      aria-label={`${ariaLabelPrefix}: ${label}`}
       className={sharedClassName}
       data-phase={status.phase}
       title={title || undefined}

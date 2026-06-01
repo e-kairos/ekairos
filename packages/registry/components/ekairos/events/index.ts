@@ -21,6 +21,7 @@ export type {
   ContextReviewTranscriptProps,
   MessageArtifactProps,
   SourceWatchPhase,
+  SourceWatchStatusLabels,
   SourceWatchStatusProps,
   SourceWatchStatusValue,
   TemporalEvidenceItem,
