@@ -388,7 +388,6 @@ describeInstant("codex reactor + Instant integration", () => {
         durable: false,
         __benchmark: timer,
         options: {
-          silent: false,
           maxIterations: 1,
           maxModelSteps: 1,
           writable: collected.writable,

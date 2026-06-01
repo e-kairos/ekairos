@@ -82,7 +82,6 @@ export type OpenAIResponsesReactionStepArgs<
   previousReactorState?: Record<string, unknown>
   contextStepStream?: WritableStream<string>
   writable?: WritableStream<unknown>
-  silent: boolean
   includeStreamTraceInOutput?: boolean
   includeRawProviderEventsInOutput?: boolean
   maxPersistedStreamEvents?: number
@@ -1245,7 +1244,6 @@ export function createOpenAIResponsesReactor<
       previousReactorState,
       contextStepStream: params.contextStepStream,
       writable: params.writable as WritableStream<unknown> | undefined,
-      silent: params.silent,
       includeStreamTraceInOutput,
       includeRawProviderEventsInOutput,
       maxPersistedStreamEvents,

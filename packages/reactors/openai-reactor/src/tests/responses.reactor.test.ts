@@ -91,7 +91,6 @@ function baseArgs(overrides: Record<string, unknown> = {}) {
     iteration: 0,
     maxModelSteps: 1,
     actionSpecs: {},
-    silent: false,
     includeStreamTraceInOutput: true,
     includeRawProviderEventsInOutput: false,
     maxPersistedStreamEvents: 100,

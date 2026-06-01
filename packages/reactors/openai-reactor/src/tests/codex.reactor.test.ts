@@ -122,7 +122,6 @@ function createParams(params: {
     iteration: params.iteration ?? 0,
     maxModelSteps: 6,
     sendStart: true,
-    silent: false,
     writable: params.writable as WritableStream<UIMessageChunk>,
   }
 }

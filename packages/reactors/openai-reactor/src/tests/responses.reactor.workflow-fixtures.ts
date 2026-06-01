@@ -74,7 +74,6 @@ export async function openAIResponsesReactorWorkflowSmoke(
     iteration: 0,
     maxModelSteps: 1,
     actionSpecs: {},
-    silent: false,
   })
 
   if (options?.resetTransportBetweenSteps) {
@@ -100,7 +99,6 @@ export async function openAIResponsesReactorWorkflowSmoke(
     maxModelSteps: 1,
     actionSpecs: {},
     previousReactorState: asRecord(first.reactor?.state),
-    silent: false,
   })
 
   const { getWorkflowMetadata } = await import("workflow")

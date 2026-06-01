@@ -177,7 +177,6 @@ export type CodexExecuteTurnArgs<
   contextIdentifier?: unknown
   contextStepStream?: WritableStream<string>
   writable?: WritableStream<unknown>
-  silent: boolean
   emitChunk: (providerChunk: unknown) => Promise<void>
 }
 
@@ -201,7 +200,6 @@ export type CodexAppServerTurnStepArgs<
   contextIdentifier?: unknown
   contextStepStream?: WritableStream<string>
   writable?: WritableStream<unknown>
-  silent: boolean
 }
 
 export type CodexChunkMappingResult = {
@@ -2384,7 +2382,6 @@ export function createCodexReactor<
         contextIdentifier: params.contextIdentifier,
         contextStepStream: params.contextStepStream,
         writable: params.writable,
-        silent: params.silent,
         emitChunk,
       })
       : await executeCodexAppServerTurnStep({
@@ -2404,7 +2401,6 @@ export function createCodexReactor<
           contextIdentifier: params.contextIdentifier,
           contextStepStream: params.contextStepStream,
           writable: params.writable as WritableStream<unknown> | undefined,
-          silent: params.silent,
         })
     const finishedAtMs = Date.now()
     const returnedStreamTrace = asRecord(asRecord(turn.metadata).streamTrace)
