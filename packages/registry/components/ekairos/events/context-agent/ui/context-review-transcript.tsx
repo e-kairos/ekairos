@@ -22,6 +22,10 @@ export type ContextReviewTranscriptProps = {
   density?: "default" | "compact";
   maxTurns?: number;
   onSelectTurn?: (eventId: string) => void;
+  resolveCueHref?: (
+    item: unknown,
+    kind: "evidence" | "snapshot"
+  ) => string | null | undefined;
 };
 
 type ReviewTurn = {
@@ -57,6 +61,7 @@ export function ContextReviewTranscript({
   density = "default",
   maxTurns = 6,
   onSelectTurn,
+  resolveCueHref,
 }: ContextReviewTranscriptProps) {
   const turns = buildReviewTurns(context.events).slice(-maxTurns);
   const reviewMarkdown = useMemo(
@@ -160,6 +165,7 @@ export function ContextReviewTranscript({
               density={density}
               key={turn.id}
               onSelect={onSelectTurn ? () => onSelectTurn(turn.id) : undefined}
+              resolveCueHref={resolveCueHref}
               turn={turn}
             />
           ))}
@@ -256,10 +262,12 @@ export function buildContextReviewMarkdown(
 function ReviewTurnCard({
   density,
   onSelect,
+  resolveCueHref,
   turn,
 }: {
   density: "default" | "compact";
   onSelect?: () => void;
+  resolveCueHref?: ContextReviewTranscriptProps["resolveCueHref"];
   turn: ReviewTurn;
 }) {
   return (
@@ -298,6 +306,7 @@ function ReviewTurnCard({
           analysis={turn.analysis}
           density={density}
           label="output"
+          resolveCueHref={resolveCueHref}
           text={turn.outputText}
         />
       </div>
@@ -311,6 +320,7 @@ function ReviewMessage({
   attachments = [],
   density,
   label,
+  resolveCueHref,
   text,
 }: {
   actionErrors?: string[];
@@ -318,6 +328,7 @@ function ReviewMessage({
   attachments?: ReviewAttachment[];
   density: "default" | "compact";
   label: "input" | "output";
+  resolveCueHref?: ContextReviewTranscriptProps["resolveCueHref"];
   text: string;
 }) {
   return (
@@ -336,7 +347,12 @@ function ReviewMessage({
       </header>
 
       {analysis ? (
-        <AnalysisReview analysis={analysis} density={density} fallbackText={text} />
+        <AnalysisReview
+          analysis={analysis}
+          density={density}
+          fallbackText={text}
+          resolveCueHref={resolveCueHref}
+        />
       ) : (
         <div
           className={cn(
@@ -388,10 +404,12 @@ function AnalysisReview({
   analysis,
   density,
   fallbackText,
+  resolveCueHref,
 }: {
   analysis: ReviewAnalysisPayload;
   density: "default" | "compact";
   fallbackText: string;
+  resolveCueHref?: ContextReviewTranscriptProps["resolveCueHref"];
 }) {
   const answer = analysis.answer || fallbackText;
   const evidence = asArray(analysis.evidence);
@@ -400,6 +418,10 @@ function AnalysisReview({
   const snapshots = asArray(analysis.snapshots);
   const imagegen = asRecord(analysis.imagegen);
   const imageTitle = asText(imagegen.title);
+  const cues = [
+    ...evidence.map((item) => ({ item, kind: "evidence" as const })),
+    ...snapshots.map((item) => ({ item, kind: "snapshot" as const })),
+  ].slice(0, 4);
 
   return (
     <div className="grid gap-2">
@@ -428,18 +450,45 @@ function AnalysisReview({
         </p>
       ) : null}
 
-      {evidence.length ? (
+      {cues.length ? (
         <ul className="grid gap-1">
-          {evidence.slice(0, 3).map((item, index) => (
-            <li className="flex min-w-0 justify-between gap-2 text-xs" key={index}>
-              <strong className="min-w-0 truncate font-medium">
-                {asText(asRecord(item).label) || `evidence ${index + 1}`}
-              </strong>
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                {formatMoment(asRecord(item).time)}
-              </span>
-            </li>
-          ))}
+          {cues.map(({ item, kind }, index) => {
+            const record = asRecord(item);
+            const href = resolveCueHref?.(item, kind) || "";
+            const content = (
+              <>
+                <strong className="min-w-0 truncate font-medium">
+                  {asText(record.label) || `${kind} ${index + 1}`}
+                </strong>
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                  {formatMoment(record.time)}
+                </span>
+              </>
+            );
+
+            return (
+              <li
+                className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-xs"
+                key={`${kind}:${index}`}
+              >
+                {href ? (
+                  <a
+                    className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 text-inherit no-underline hover:text-accent"
+                    href={href}
+                  >
+                    {content}
+                  </a>
+                ) : (
+                  <span className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2">
+                    {content}
+                  </span>
+                )}
+                <em className="font-mono text-[9px] font-semibold not-italic uppercase text-muted-foreground/70">
+                  {kind}
+                </em>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>

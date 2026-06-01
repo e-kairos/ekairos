@@ -34,6 +34,7 @@ Workbench and product review surfaces can render an agnostic turn transcript bef
 - The transcript renders user input, assistant output, action counts, action errors, file/artifact attachments, and structured JSON answer summaries when available.
 - The transcript exposes copy/download Markdown review actions and `buildContextReviewMarkdown(...)` for adapter-controlled export flows.
 - Consumers may pass `actions` for explicit inspect/debug controls such as toggling message metadata; those controls must be user-initiated.
+- Consumers may pass `resolveCueHref` to make evidence or snapshot cues navigable; the component must treat href generation as adapter-owned.
 - The component preserves the event contract: files remain files, actions remain actions, and product-specific payloads only affect optional display summaries.
 - Raw ids, step payloads, and part trees stay in Workshop/debug surfaces; the transcript is a review layer, not a replacement for event inspection.
 - Use `density="compact"` when the transcript lives inside a product rail or workbench side panel; keep the default density for full-width Workshop review.
