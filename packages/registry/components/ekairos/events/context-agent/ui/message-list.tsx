@@ -112,6 +112,7 @@ const MessageList = memo(function MessageList({
             key={String(message?.id)}
             className={classNames?.message?.container}
           >
+            <MessageHeader message={message} />
             {!hasSteps ? (
               <MessageParts
                 message={message}
@@ -141,6 +142,52 @@ const MessageList = memo(function MessageList({
 });
 
 export { MessageList };
+
+function MessageHeader({ message }: { message: any }) {
+  const metadata = message?.metadata ?? {};
+  const chips = [
+    { label: "event", value: shortIdentifier(metadata.eventId) },
+    { label: "status", value: metadata.status },
+    { label: "channel", value: metadata.channel },
+  ].filter((chip) => typeof chip.value === "string" && chip.value.length > 0);
+
+  return (
+    <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+      <div className="text-[10px] font-semibold uppercase tracking-normal text-muted-foreground">
+        {message?.role === "user" ? "User" : "Assistant"}
+      </div>
+      {chips.length > 0 ? (
+        <div
+          aria-label="Event metadata"
+          className="flex min-w-0 flex-wrap justify-end gap-1"
+        >
+          {chips.map((chip) => (
+            <span
+              key={chip.label}
+              className={cn(
+                "inline-grid max-w-40 grid-cols-[auto_minmax(0,1fr)] overflow-hidden rounded-full",
+                "border border-border/70 bg-muted/30 text-[10px] font-medium leading-none text-muted-foreground",
+              )}
+            >
+              <b className="min-w-0 border-r border-border/60 px-1.5 py-1 uppercase text-muted-foreground/70">
+                {chip.label}
+              </b>
+              <span className="min-w-0 truncate px-1.5 py-1 text-foreground/80">
+                {chip.value}
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function shortIdentifier(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return text.length <= 12 ? text : text.slice(0, 8);
+}
 
 function hasRenderableMessage(message: any) {
   if (message.role === "user") {
