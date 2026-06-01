@@ -197,6 +197,7 @@ export function Prompt({
         data-prompt-busy={promptBusy ? "true" : "false"}
         data-prompt-density={density}
         data-prompt-status={promptStatus}
+        data-prompt-status-label={statusText}
         data-prompt-surface
         onClick={(event) => {
           const target = event.target as HTMLElement | null
@@ -263,7 +264,11 @@ export function Prompt({
             <PromptAttachButton onClick={handleAttachClick} disabled={controlsDisabled} variant={compact ? "ghost" : "default"} />
             <PromptWebButton active={Boolean(webSearch)} onToggle={onToggleWeb} disabled={controlsDisabled} variant={compact ? "ghost" : "default"} />
             <PromptReasoningButton value={reasoningLevel} onChange={onChangeReasoning} disabled={controlsDisabled} variant={compact ? "ghost" : "default"} />
-            <div className="ml-1 hidden min-w-0 items-center gap-1.5 text-[11px] leading-none text-muted-foreground sm:flex">
+            <div
+              aria-live="polite"
+              className="ml-1 hidden min-w-0 items-center gap-1.5 text-[11px] leading-none text-muted-foreground sm:flex"
+              role="status"
+            >
               <span
                 className={cn(
                   "h-1.5 w-1.5 shrink-0 rounded-full",
