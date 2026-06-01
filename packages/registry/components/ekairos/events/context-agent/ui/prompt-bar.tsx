@@ -21,7 +21,7 @@ import {
   getReasoningText,
 } from "../context-event-parts";
 import type { MatrixPattern } from "@/lib/dotmatrix-core";
-import type { ChartEditAttachmentPayload } from "../agent-prompt-bridge";
+import type { ArtifactPromptAttachmentPayload } from "../agent-prompt-bridge";
 import { useAgentPromptBridge } from "../agent-prompt-bridge";
 
 type FileUIPart = {
@@ -83,27 +83,38 @@ function shouldPlayTerminalFinishing(
   return phase === "live";
 }
 
-function buildChartEditFilePart(
-  payload: ChartEditAttachmentPayload,
+function buildArtifactContextFilePart(
+  payload: ArtifactPromptAttachmentPayload,
 ): FileUIPart {
   const body = {
-    intent: "chart-edit",
-    instruction:
-      "El usuario quiere editar este gráfico. Genera una nueva versión (misma herramienta / spec) según el mensaje de texto que acompaña.",
-    chart: payload,
+    data: payload.data,
+    instruction: payload.instruction,
+    kind: payload.kind,
+    mediaType: payload.mediaType,
+    metadata: payload.metadata,
+    subtitle: payload.subtitle,
+    title: payload.title,
   };
   const json = JSON.stringify(body, null, 2);
   const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(json)}`;
-  const baseName = sanitizeFileName(`${payload.title || "chart"}-edit`);
+  const baseName = sanitizeFileName(
+    payload.fileName?.replace(/\.json$/i, "") ||
+      `${payload.kind || "artifact"}-${payload.title || "context"}`,
+  );
   return {
     type: "file",
     url: dataUrl,
     mediaType: "application/json",
-    filename: `${baseName}.json`,
+    filename: payload.fileName
+      ? sanitizeFileName(payload.fileName)
+      : `${baseName}.json`,
     providerMetadata: {
       ekairos: {
-        kind: "chart-edit",
-        chart: payload,
+        artifactKind: payload.kind,
+        artifactMediaType: payload.mediaType,
+        kind: "artifact-context",
+        metadata: payload.metadata,
+        title: payload.title,
       },
     },
   };
@@ -113,17 +124,26 @@ function sanitizeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_") || "file";
 }
 
-function scrollToChartAnchor(actionCallId?: string) {
+function scrollToArtifactAnchor(actionCallId?: string) {
   if (!actionCallId || typeof document === "undefined") return;
-  const selector =
+  const escaped =
     typeof CSS !== "undefined" && typeof CSS.escape === "function"
-      ? `[data-ek-chart-anchor="${CSS.escape(actionCallId)}"]`
-      : `[data-ek-chart-anchor="${actionCallId.replace(/["\\]/g, "")}"]`;
+      ? CSS.escape(actionCallId)
+      : actionCallId.replace(/["\\]/g, "");
+  const selectors = [
+    `[data-ek-artifact-anchor="${escaped}"]`,
+    `[data-ek-chart-anchor="${escaped}"]`,
+  ];
   window.requestAnimationFrame(() => {
-    document.querySelector(selector)?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    });
+    for (const selector of selectors) {
+      const target = document.querySelector(selector);
+      if (!target) continue;
+      target.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      return;
+    }
   });
 }
 
@@ -469,17 +489,24 @@ const PromptBarInner = memo(function PromptBarInner({
     if (!promptBridge) return;
     return promptBridge.subscribe((payload) => {
       setAttachments((prev) => {
-        const withoutChartEdit = prev.filter((a) => a.kind !== "chart-edit");
+        const withoutSameArtifact = prev.filter(
+          (a) =>
+            a.kind !== "artifact-context" ||
+            a.artifactPayload?.kind !== payload.kind ||
+            a.artifactPayload?.actionCallId !== payload.actionCallId,
+        );
         return [
-          ...withoutChartEdit,
+          ...withoutSameArtifact,
           {
             id: id(),
-            name: `Editar gráfico · ${payload.title}`,
+            name: payload.title,
             status: "done",
-            kind: "chart-edit",
-            chartPayload: payload,
+            kind: "artifact-context",
+            artifactPayload: payload,
             size: "contexto",
-            onPress: () => scrollToChartAnchor(payload.actionCallId),
+            onPress: payload.actionCallId
+              ? () => scrollToArtifactAnchor(payload.actionCallId)
+              : undefined,
           },
         ];
       });
@@ -622,7 +649,7 @@ const PromptBarInner = memo(function PromptBarInner({
       attachments.some(
         (a) =>
           a.status === "done" &&
-          (Boolean(a.filePart) || a.kind === "chart-edit"),
+          (Boolean(a.filePart) || a.kind === "artifact-context"),
       ),
     [attachments],
   );
@@ -639,8 +666,8 @@ const PromptBarInner = memo(function PromptBarInner({
     if (trimmed) parts.push({ type: "text", text: trimmed });
     for (const att of attachments) {
       if (att.status !== "done") continue;
-      if (att.kind === "chart-edit" && att.chartPayload) {
-        parts.push(buildChartEditFilePart(att.chartPayload));
+      if (att.kind === "artifact-context" && att.artifactPayload) {
+        parts.push(buildArtifactContextFilePart(att.artifactPayload));
         continue;
       }
     }
