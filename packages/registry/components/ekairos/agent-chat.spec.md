@@ -16,3 +16,12 @@ The registry prompt composer is the shared baseline for context agents.
 - File, pasted large-text, and virtual-context attachments render as removable chips above the textarea.
 - Sending is valid when there is text or at least one ready non-text part.
 - Consumers may adapt storage, upload, or virtual attachment adapters, but the rendered event part contract stays agnostic: text parts and file parts are passed to `context.append(...)`.
+
+## Conversation Debug Boundary
+
+The default chat thread is user-facing; raw event metadata belongs in Workshop and explicit debug surfaces.
+
+- Message lists should not render `event`, `status`, or `channel` chips by default.
+- Step lists should not render raw `event_step`, iteration, or execution labels by default.
+- Event ids, context ids, part payloads, and execution details stay available to adapters and Workshop.
+- Product UIs may provide an explicit inspect/open-workshop action, but the message content should remain the primary visual signal.
