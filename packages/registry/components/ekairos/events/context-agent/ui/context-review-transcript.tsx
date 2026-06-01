@@ -481,7 +481,16 @@ function AnalysisReview({
   ].slice(0, 4);
 
   return (
-    <div className="grid gap-2">
+    <div
+      className="grid gap-2"
+      data-analysis-comment-count={comments.length}
+      data-analysis-control-count={controls.length}
+      data-analysis-cue-count={cues.length}
+      data-analysis-evidence-count={evidence.length}
+      data-analysis-has-imagegen={imageTitle ? "true" : "false"}
+      data-analysis-snapshot-count={snapshots.length}
+      data-review-analysis
+    >
       <div
         className={cn(
           "overflow-auto text-xs leading-5",
@@ -508,10 +517,11 @@ function AnalysisReview({
       ) : null}
 
       {cues.length ? (
-        <ul className="grid gap-1">
+        <ul className="grid gap-1" data-cue-count={cues.length} data-review-cue-list>
           {cues.map(({ item, kind }, index) => {
             const record = asRecord(item);
             const href = resolveCueHref?.(item, kind) || "";
+            const cueTime = formatDataMoment(record.time);
             const content = (
               <>
                 <strong className="min-w-0 truncate font-medium">
@@ -526,6 +536,10 @@ function AnalysisReview({
             return (
               <li
                 className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 text-xs"
+                data-cue-index={index}
+                data-cue-kind={kind}
+                data-cue-time={cueTime || undefined}
+                data-review-cue
                 key={`${kind}:${index}`}
               >
                 {href ? (
@@ -725,6 +739,10 @@ function formatMoment(value: unknown) {
   return typeof value === "number" && Number.isFinite(value)
     ? `${value.toFixed(1)}s`
     : "";
+}
+
+function formatDataMoment(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 }
 
 async function writeClipboardText(text: string) {
