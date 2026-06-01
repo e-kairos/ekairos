@@ -104,6 +104,8 @@ export function ContextReviewTranscript({
     URL.revokeObjectURL(url);
   }
 
+  const hasReviewMarkdown = reviewMarkdown.trim().length > 0;
+
   return (
     <section
       aria-label="Context review transcript"
@@ -114,7 +116,15 @@ export function ContextReviewTranscript({
           : "gap-3 px-4 py-3 md:px-6",
         className,
       )}
+      data-context-review-transcript
       data-density={density}
+      data-review-event-count={context.events.length}
+      data-review-link-count={normalizeReviewLinks(reviewLinks).length}
+      data-review-markdown-ready={hasReviewMarkdown ? "true" : "false"}
+      data-review-max-turns={maxTurns}
+      data-review-send-status={context.sendStatus}
+      data-review-status={context.contextStatus}
+      data-review-turn-count={turns.length}
     >
       <header className="flex min-w-0 flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
@@ -134,8 +144,10 @@ export function ContextReviewTranscript({
             {actions}
             <button
               className="min-h-7 rounded-sm border border-border bg-background px-2 font-mono text-[10px] text-muted-foreground hover:border-accent hover:text-accent disabled:opacity-50"
+              data-review-action="copy-markdown"
+              data-review-copy-state={copyState}
               data-testid="copy-context-review-markdown"
-              disabled={!reviewMarkdown.trim()}
+              disabled={!hasReviewMarkdown}
               onClick={() => void handleCopyMarkdown()}
               type="button"
             >
@@ -147,8 +159,9 @@ export function ContextReviewTranscript({
             </button>
             <button
               className="min-h-7 rounded-sm border border-border bg-background px-2 font-mono text-[10px] text-muted-foreground hover:border-accent hover:text-accent disabled:opacity-50"
+              data-review-action="download-markdown"
               data-testid="download-context-review-markdown"
-              disabled={!reviewMarkdown.trim()}
+              disabled={!hasReviewMarkdown}
               onClick={handleDownloadMarkdown}
               type="button"
             >
@@ -301,7 +314,16 @@ function ReviewTurnCard({
   turn: ReviewTurn;
 }) {
   return (
-    <article className="min-w-0 border border-border/70 bg-muted/15">
+    <article
+      className="min-w-0 border border-border/70 bg-muted/15"
+      data-action-count={turn.actionParts}
+      data-action-error-count={turn.actionErrors.length}
+      data-attachment-count={turn.attachments.length}
+      data-has-analysis={turn.analysis ? "true" : "false"}
+      data-review-turn
+      data-review-turn-id={turn.id}
+      data-review-turn-status={turn.status}
+    >
       <button
         className="flex min-h-9 w-full min-w-0 items-center justify-between gap-2 border-b border-border/70 bg-transparent px-3 py-2 text-left hover:bg-muted/35"
         disabled={!onSelect}
@@ -368,7 +390,12 @@ function ReviewMessage({
         "data-[kind=output]:border-l max-md:data-[kind=output]:border-l-0",
         "max-md:data-[kind=output]:border-t",
       )}
+      data-attachment-count={attachments.length}
+      data-has-action-errors={actionErrors.length > 0 ? "true" : "false"}
+      data-has-analysis={analysis ? "true" : "false"}
       data-kind={label}
+      data-review-message
+      data-text-length={text.length}
     >
       <header>
         <span className="font-mono text-[10px] font-semibold uppercase text-muted-foreground">
