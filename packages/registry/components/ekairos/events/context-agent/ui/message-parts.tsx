@@ -201,6 +201,29 @@ function formatCount(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
+function messageTextAttrs({
+  hasAnalysis,
+  role,
+  streaming,
+  surface,
+  text,
+}: {
+  hasAnalysis: boolean;
+  role: "assistant" | "user";
+  streaming: boolean;
+  surface: string;
+  text: string;
+}) {
+  return {
+    "data-has-analysis": hasAnalysis ? "true" : "false",
+    "data-message-role": role,
+    "data-message-streaming": streaming ? "true" : "false",
+    "data-message-surface": surface,
+    "data-message-text": "true",
+    "data-text-length": text.length,
+  } as const;
+}
+
 const MessageParts = memo(function MessageParts({
   message,
   status,
@@ -321,6 +344,13 @@ const MessageParts = memo(function MessageParts({
           <div
             key={i}
             data-testid="assistant-reply-part"
+            {...messageTextAttrs({
+              hasAnalysis: false,
+              role: message.role,
+              streaming: isStreaming,
+              surface,
+              text,
+            })}
             className="text-sm leading-6 text-foreground"
           >
             <MessageResponse>{text}</MessageResponse>
@@ -340,6 +370,13 @@ const MessageParts = memo(function MessageParts({
           )}
         >
           <MessageContent
+            {...messageTextAttrs({
+              hasAnalysis: false,
+              role: message.role,
+              streaming: isStreaming,
+              surface,
+              text,
+            })}
             className={cn(
               message.role === "user"
                 ? userContentChrome
@@ -719,6 +756,13 @@ const MessageParts = memo(function MessageParts({
               <div
                 key={i}
                 data-testid="message-part"
+                {...messageTextAttrs({
+                  hasAnalysis: false,
+                  role: message.role,
+                  streaming: isStreaming,
+                  surface,
+                  text,
+                })}
                 className="text-sm leading-6 text-foreground"
               >
                 <MessageResponse>{text}</MessageResponse>
@@ -739,6 +783,13 @@ const MessageParts = memo(function MessageParts({
                 )}
               >
                 <MessageContent
+                  {...messageTextAttrs({
+                    hasAnalysis: false,
+                    role: message.role,
+                    streaming: isStreaming,
+                    surface,
+                    text,
+                  })}
                   className={cn(
                     message.role === "user"
                       ? userContentChrome
@@ -757,6 +808,7 @@ const MessageParts = memo(function MessageParts({
                     <Button
                       size="icon"
                       className="h-7 w-7"
+                      data-message-action="copy"
                       variant="ghost"
                       onClick={() => handleCopy(text)}
                       title="Copy"

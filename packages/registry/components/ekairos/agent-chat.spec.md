@@ -78,6 +78,7 @@ Product workbenches can show live source monitoring without baking polling rules
 The default chat thread is user-facing; raw event metadata belongs in Workshop and explicit debug surfaces.
 
 - Message lists render as an agnostic transcript log (`role="log"`) with `aria-live`, `data-message-count`, `data-visible-message-count`, `data-turn-streaming`, and `data-at-bottom` so products and Workshop can inspect scroll/stream state without event-shape assumptions.
+- Rendered text blocks expose `data-message-text`, `data-message-role`, `data-message-surface`, `data-message-streaming`, `data-text-length`, and `data-has-analysis`; message buttons expose `data-message-action` for actions such as `copy` or adapter-owned analysis playback.
 - Message part containers expose `data-message-parts`, `data-message-role`, `data-message-surface`, `data-part-count`, `data-action-count`, and `data-attachment-count`; these counts describe rendered event parts, not provider internals.
 - Default action rows expose `data-context-action`, `data-action-name`, `data-action-call-id`, `data-action-state`, `data-action-status`, `data-has-input`, `data-has-output`, and `data-has-error`; these describe normalized actions, not provider tool payloads.
 - Message lists should not render `event`, `status`, or `channel` chips by default; consumers must opt in with `showMessageMetadata` for explicit inspect/debug layouts.
