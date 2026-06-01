@@ -210,10 +210,12 @@ function hasVisibleAssistantParts(parts: unknown[]): boolean {
     if (
       part.type === "source" ||
       part.type === "source-url" ||
-      part.type === "source-document" ||
-      part.type === "file"
+      part.type === "source-document"
     ) {
       return false;
+    }
+    if (part.type === "file") {
+      return true;
     }
     const action = getActionPartInfo(part);
     if (action) {
