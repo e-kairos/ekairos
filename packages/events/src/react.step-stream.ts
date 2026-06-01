@@ -173,7 +173,6 @@ function readProviderActionDetails(params: {
     params.rawItem.tool,
     params.rawItem.toolName,
     params.rawItem.name,
-    params.rawItem.command ? "sandbox_run_command" : "",
     params.raw.toolName,
     params.raw.name,
   );

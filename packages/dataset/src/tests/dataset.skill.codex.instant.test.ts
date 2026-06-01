@@ -89,7 +89,7 @@ function getCommandParts(event: ContextItem) {
     return (
       part?.type === "action" &&
       content?.status === "started" &&
-      content?.actionName === "sandbox_run_command"
+      content?.actionName === "executeCommand"
     )
   })
 }

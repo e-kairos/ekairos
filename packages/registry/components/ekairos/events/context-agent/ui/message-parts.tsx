@@ -46,7 +46,7 @@ export function humanizeActionName(actionName: string): string {
     createPricingRule: "Crear regla de precio",
     removePricingRule: "Eliminar regla de precio",
     read_dataset_rows: "Read dataset rows",
-    sandbox_run_command: "Run command",
+    executeCommand: "Run command",
     turnMetadata: "Turn metadata",
 
     // Control / escalation
@@ -128,7 +128,7 @@ function summarizeActionPart(view: ActionView): string {
       return formatCount(outputRecord.rows.length, "row");
     }
 
-    if (actionName === "sandbox_run_command") {
+    if (actionName === "executeCommand") {
       const status =
         typeof outputRecord.status === "string" ? outputRecord.status : "";
       const exitCode =

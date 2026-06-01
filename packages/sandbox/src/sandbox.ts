@@ -1,9 +1,14 @@
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import type { EkairosRuntime } from "@ekairos/domain/runtime"
 import { defineAction, type ContextAction } from "@ekairos/events"
-import { z } from "zod"
 
-import { SANDBOX_RUN_COMMAND_ACTION_NAME } from "./public.js"
+import {
+  SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
+  sandboxExecuteCommandInputSchema,
+  sandboxExecuteCommandOutputSchema,
+  type SandboxExecuteCommandInput,
+  type SandboxExecuteCommandOutput,
+} from "./contract.js"
 import type { CommandResult } from "./commands.js"
 import type { SandboxConfig, SandboxProvider } from "./types.js"
 
@@ -13,40 +18,10 @@ type SandboxRuntimeHandle<Runtime extends AnyDomainRuntime> = Runtime & {
   use(domain: unknown): Promise<any>
 }
 
-const sandboxRunCommandInputSchema = z
-  .object({
-    command: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    cwd: z.string().min(1).optional(),
-    env: z.record(z.string(), z.unknown()).optional(),
-    kind: z
-      .enum(["command", "service", "codex-app-server", "dev-server", "test-runner", "watcher"])
-      .optional(),
-    mode: z.enum(["foreground", "background"]).optional(),
-    metadata: z.record(z.string(), z.unknown()).optional(),
-  })
-  .strict()
-
-const sandboxRunCommandOutputSchema = z.object({
-  sandboxId: z.string().min(1).optional(),
-  processId: z.string().min(1).optional(),
-  streamId: z.string().min(1).optional(),
-  streamClientId: z.string().min(1).optional(),
-  success: z.boolean(),
-  exitCode: z.number().int().optional(),
-  output: z.string().optional(),
-  error: z.string().optional(),
-  command: z.string().optional(),
-  status: z.string().optional(),
-  durationMs: z.number().optional(),
-})
-
-export type SandboxRunCommandInput = z.infer<typeof sandboxRunCommandInputSchema>
-export type SandboxRunCommandOutput = z.infer<typeof sandboxRunCommandOutputSchema>
 export type SandboxActions = {
-  [SANDBOX_RUN_COMMAND_ACTION_NAME]: ContextAction<
-    typeof sandboxRunCommandInputSchema,
-    typeof sandboxRunCommandOutputSchema
+  [SANDBOX_EXECUTE_COMMAND_ACTION_NAME]: ContextAction<
+    typeof sandboxExecuteCommandInputSchema,
+    typeof sandboxExecuteCommandOutputSchema
   >
 }
 
@@ -138,9 +113,9 @@ function normalizeState(state: SerializedSandboxState): SerializedSandboxState {
 }
 
 export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
-  static readonly runCommandActionName = SANDBOX_RUN_COMMAND_ACTION_NAME
-  static readonly runCommandInputSchema = sandboxRunCommandInputSchema
-  static readonly runCommandOutputSchema = sandboxRunCommandOutputSchema
+  static readonly executeCommandActionName = SANDBOX_EXECUTE_COMMAND_ACTION_NAME
+  static readonly executeCommandInputSchema = sandboxExecuteCommandInputSchema
+  static readonly executeCommandOutputSchema = sandboxExecuteCommandOutputSchema
 
   private readonly runtime: SandboxRuntimeHandle<Runtime>
   private readonly stateValue: SerializedSandboxState
@@ -192,8 +167,8 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
     return { ...this.stateValue }
   }
 
-  async runCommand(input: SandboxRunCommandInput): Promise<SandboxRunCommandOutput> {
-    const parsed = sandboxRunCommandInputSchema.parse(input)
+  async executeCommand(input: SandboxExecuteCommandInput): Promise<SandboxExecuteCommandOutput> {
+    const parsed = sandboxExecuteCommandInputSchema.parse(input)
 
     const domain = await resolveSandboxDomain(this.runtime)
     const run = await domain.actions.runCommandProcess({
@@ -211,7 +186,7 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
     })
 
     if (!run.ok) {
-      return sandboxRunCommandOutputSchema.parse({
+      return sandboxExecuteCommandOutputSchema.parse({
         sandboxId: this.stateValue.sandboxId,
         success: false,
         error: run.error,
@@ -224,7 +199,7 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
 
     const result = (run.data.result ?? {}) as Partial<CommandResult>
     const exitCode = asNumber(result.exitCode)
-    return sandboxRunCommandOutputSchema.parse(
+    return sandboxExecuteCommandOutputSchema.parse(
       cleanRecord({
         sandboxId: this.stateValue.sandboxId,
         processId: run.data.processId,
@@ -242,11 +217,11 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
 
   actions(): SandboxActions {
     return {
-      [SANDBOX_RUN_COMMAND_ACTION_NAME]: defineAction({
+      [SANDBOX_EXECUTE_COMMAND_ACTION_NAME]: defineAction({
         description: "Run a shell command in this sandbox.",
-        input: sandboxRunCommandInputSchema,
-        output: sandboxRunCommandOutputSchema,
-        execute: async ({ input }) => this.runCommand(input),
+        input: sandboxExecuteCommandInputSchema,
+        output: sandboxExecuteCommandOutputSchema,
+        execute: async ({ input }) => this.executeCommand(input),
       }),
     } as const
   }

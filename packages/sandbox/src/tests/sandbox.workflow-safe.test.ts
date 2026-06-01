@@ -67,7 +67,7 @@ describe("sandbox workflow-safe boundary", () => {
     expect(restored.state).toEqual(serialized.state)
   })
 
-  it("exposes sandbox_run_command actions and matching context parts", () => {
+  it("exposes executeCommand actions and matching context parts", () => {
     const runtime = new SandboxWorkflowTestRuntime(env)
     const sandbox = Sandbox.from(runtime, {
       version: 1,
@@ -76,9 +76,9 @@ describe("sandbox workflow-safe boundary", () => {
     })
     const actions = sandbox.actions()
 
-    expect(Object.keys(actions)).toEqual([Sandbox.runCommandActionName])
+    expect(Object.keys(actions)).toEqual([Sandbox.executeCommandActionName])
     expect(
-      Sandbox.runCommandInputSchema.parse({
+      Sandbox.executeCommandInputSchema.parse({
         command: "pnpm",
         args: ["test"],
         cwd: "/workspace/app",
@@ -89,13 +89,13 @@ describe("sandbox workflow-safe boundary", () => {
       cwd: "/workspace/app",
     })
     expect(() =>
-      Sandbox.runCommandInputSchema.parse({
+      Sandbox.executeCommandInputSchema.parse({
         sandboxId: "sandbox_123",
         command: "pnpm",
       }),
     ).toThrow()
     expect(
-      Sandbox.runCommandOutputSchema.parse({
+      Sandbox.executeCommandOutputSchema.parse({
         sandboxId: "sandbox_123",
         success: true,
         exitCode: 0,
@@ -114,7 +114,7 @@ describe("sandbox workflow-safe boundary", () => {
         type: "action",
         content: {
           status: "started",
-          actionName: Sandbox.runCommandActionName,
+          actionName: Sandbox.executeCommandActionName,
           actionCallId: "call_1",
           input: {
             command: "pnpm",
@@ -126,7 +126,7 @@ describe("sandbox workflow-safe boundary", () => {
       type: "action",
       content: {
         status: "started",
-        actionName: Sandbox.runCommandActionName,
+        actionName: Sandbox.executeCommandActionName,
       },
     })
     expect(() =>
@@ -134,7 +134,7 @@ describe("sandbox workflow-safe boundary", () => {
         type: "action",
         content: {
           status: "started",
-          actionName: Sandbox.runCommandActionName,
+          actionName: Sandbox.executeCommandActionName,
           actionCallId: "call_1",
           input: {
             sandboxId: "sandbox_123",
@@ -148,7 +148,7 @@ describe("sandbox workflow-safe boundary", () => {
         type: "action",
         content: {
           status: "completed",
-          actionName: Sandbox.runCommandActionName,
+          actionName: Sandbox.executeCommandActionName,
           actionCallId: "call_1",
           output: {
             success: true,
@@ -161,7 +161,7 @@ describe("sandbox workflow-safe boundary", () => {
       type: "action",
       content: {
         status: "completed",
-        actionName: Sandbox.runCommandActionName,
+        actionName: Sandbox.executeCommandActionName,
       },
     })
     expect(() =>
@@ -214,7 +214,7 @@ describe("sandbox workflow-safe boundary", () => {
       provider: "sprites",
     })
 
-    const result = await sandbox.actions()[Sandbox.runCommandActionName].execute(
+    const result = await sandbox.actions()[Sandbox.executeCommandActionName].execute(
       {
         command: "pnpm",
         args: ["test"],

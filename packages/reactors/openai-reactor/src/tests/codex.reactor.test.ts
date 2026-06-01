@@ -15,7 +15,7 @@ import {
   type CodexMappedChunk,
   type CodexTurnResult,
 } from "../index.js"
-import { SANDBOX_RUN_COMMAND_ACTION_NAME } from "../shared.js"
+import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 
 type TestContext = Record<string, unknown>
 type TestEnv = ContextEnvironment & {
@@ -247,7 +247,7 @@ function buildAudit(params: {
     const content = asRecord(record.content)
     return (
       asString(record.type) === "action" &&
-      asString(content.actionName) === SANDBOX_RUN_COMMAND_ACTION_NAME
+      asString(content.actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME
     )
   })
   const assistantText = getAssistantTextPart(params.result.assistantEvent)
@@ -1013,7 +1013,7 @@ describe("createCodexReactor", () => {
     expect((audit.stream.emittedChunkTypes as Record<string, number>)["chunk.action_completed"]).toBeUndefined()
   })
 
-  it("maps Codex commandExecution notifications to sandbox_run_command action parts", async () => {
+  it("maps Codex commandExecution notifications to executeCommand action parts", async () => {
     const collected = collectWritableChunks()
     const commandId = "cmd-001"
     const providerChunks: Record<string, unknown>[] = [
@@ -1088,6 +1088,18 @@ describe("createCodexReactor", () => {
           providerContextId: "thr-command",
           turnId: "turn-command-001",
           assistantText: "",
+          metadata: {
+            sandbox: {
+              sandboxId: "sandbox-001",
+              commandProcesses: {
+                [commandId]: {
+                  processId: "process-001",
+                  streamId: "stream-001",
+                  streamClientId: "sandbox-process:process-001",
+                },
+              },
+            },
+          },
         }
       },
     })
@@ -1109,7 +1121,7 @@ describe("createCodexReactor", () => {
       const content = asRecord(part.content)
       return (
         asString(part.type) === "action" &&
-        asString(content.actionName) === SANDBOX_RUN_COMMAND_ACTION_NAME
+        asString(content.actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME
       )
     })
     const started = commandParts.find(
@@ -1124,19 +1136,38 @@ describe("createCodexReactor", () => {
     expect(commandParts).toHaveLength(2)
     expect(input).toMatchObject({
       command: "git status --short",
+      args: [],
       cwd: "/workspace/repo",
+      kind: "command",
+      mode: "foreground",
+      metadata: {
+        source: "codex.commandExecution",
+      },
     })
     expect(output).toMatchObject({
+      sandboxId: "sandbox-001",
+      processId: "process-001",
+      streamId: "stream-001",
+      streamClientId: "sandbox-process:process-001",
       success: true,
       exitCode: 0,
       output: "clean",
       command: "git status --short",
       durationMs: 12,
-      status: "completed",
+      status: "exited",
     })
     expect(asRecord(started?.reactorMetadata)).toMatchObject({
       reactorKind: "codex",
       source: "codex.timeline",
+      provider: {
+        codex: {
+          toolType: "commandExecution",
+          success: true,
+          response: {
+            outputText: "clean",
+          },
+        },
+      },
     })
   })
 

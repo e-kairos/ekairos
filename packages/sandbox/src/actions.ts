@@ -3,6 +3,13 @@ import { z } from "zod"
 
 import type { CommandResult } from "./commands.js"
 import {
+  SANDBOX_PROCESS_KINDS,
+  SANDBOX_PROCESS_MODES,
+  sandboxCommandResultSchema,
+  sandboxProcessRunResultSchema,
+  sandboxProcessStreamChunkSchema,
+} from "./contract.js"
+import {
   appendObservedProcessChunkStep,
   createCheckpointStep,
   createEkairosAppStep,
@@ -48,31 +55,10 @@ const serviceVoidResult = z.discriminatedUnion("ok", [
   serviceError,
 ])
 
-const commandResult = z.object({
-  success: z.boolean(),
-  exitCode: z.number().optional(),
-  output: z.string().optional(),
-  error: z.string().optional(),
-  streamingLogs: z.array(z.unknown()).optional(),
-  command: z.string().optional(),
-}).passthrough() as z.ZodType<CommandResult>
-
-const processStreamChunk = z.object({
-  version: z.literal(1),
-  at: z.string(),
-  seq: z.number(),
-  type: z.enum(["stdout", "stderr", "status", "exit", "error", "heartbeat", "metadata"]),
-  sandboxId: z.string(),
-  processId: z.string(),
-  data: z.record(z.string(), z.unknown()).optional(),
-}).passthrough() as z.ZodType<SandboxProcessStreamChunk>
-
-const processRunResult = z.object({
-  processId: z.string(),
-  streamId: z.string(),
-  streamClientId: z.string(),
-  result: commandResult.optional(),
-}).passthrough() as z.ZodType<SandboxProcessRunResult>
+const commandResult = sandboxCommandResultSchema as z.ZodType<CommandResult>
+const processStreamChunk =
+  sandboxProcessStreamChunkSchema as z.ZodType<SandboxProcessStreamChunk>
+const processRunResult = sandboxProcessRunResultSchema as z.ZodType<SandboxProcessRunResult>
 
 export const sandboxDomain = sandboxSchemaDomain
   .withActions({
@@ -128,8 +114,8 @@ export const sandboxDomain = sandboxSchemaDomain
         args: z.array(z.string()).optional(),
         cwd: z.string().optional(),
         env: z.record(z.string(), z.unknown()).optional(),
-        kind: z.enum(["command", "service", "codex-app-server", "dev-server", "test-runner", "watcher"]).optional(),
-        mode: z.enum(["foreground", "background"]).optional(),
+        kind: z.enum(SANDBOX_PROCESS_KINDS).optional(),
+        mode: z.enum(SANDBOX_PROCESS_MODES).optional(),
         metadata: z.record(z.string(), z.unknown()).optional(),
       }),
       output: serviceResult(processRunResult),
@@ -152,8 +138,8 @@ export const sandboxDomain = sandboxSchemaDomain
         args: z.array(z.string()).optional(),
         cwd: z.string().optional(),
         env: z.record(z.string(), z.unknown()).optional(),
-        kind: z.enum(["command", "service", "codex-app-server", "dev-server", "test-runner", "watcher"]).optional(),
-        mode: z.enum(["foreground", "background"]).optional(),
+        kind: z.enum(SANDBOX_PROCESS_KINDS).optional(),
+        mode: z.enum(SANDBOX_PROCESS_MODES).optional(),
         externalProcessId: z.string().optional(),
         metadata: z.record(z.string(), z.unknown()).optional(),
       }),

@@ -55,6 +55,12 @@
       "require": "./dist/public.js",
       "default": "./dist/public.js"
     },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.js",
+      "require": "./dist/contract.js",
+      "default": "./dist/contract.js"
+    },
     "./schema": {
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.js",

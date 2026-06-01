@@ -1,7 +1,6 @@
 import type { ContextItem } from "@ekairos/events"
+import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 export type AnyRecord = Record<string, unknown>
-
-export const SANDBOX_RUN_COMMAND_ACTION_NAME = "sandbox_run_command" as const
 
 export type CodexDynamicActionDetails = {
   actionCallId?: string
@@ -159,6 +158,15 @@ function codexProviderMetadata(params: {
       }),
     },
   })
+}
+
+function normalizeSandboxRunStatus(status: string, exitCode?: number): string {
+  const normalized = status.trim().toLowerCase()
+  if (normalized === "failed" || (typeof exitCode === "number" && exitCode !== 0)) return "failed"
+  if (normalized === "cancelled" || normalized === "canceled") return "killed"
+  if (normalized === "running" || normalized === "in_progress") return "running"
+  if (normalized === "detached") return "detached"
+  return "exited"
 }
 
 function normalizeCodexToolOutputContent(value: unknown): AnyRecord[] {
@@ -631,6 +639,8 @@ export function buildCodexParts(params: {
       typeof completed.exitCode === "number" ? completed.exitCode : undefined
     const resultMetadata = asRecord(params.result.metadata)
     const sandboxMetadata = asRecord(resultMetadata.sandbox)
+    const commandProcesses = asRecord(sandboxMetadata.commandProcesses)
+    const commandProcess = asRecord(commandProcesses[toolCallId])
     const sandboxId = asString(sandboxMetadata.sandboxId).trim()
     const commandText = asString(input.command)
     const failed = status === "failed" || (typeof exitCode === "number" && exitCode !== 0)
@@ -638,6 +648,7 @@ export function buildCodexParts(params: {
       status === "failed"
         ? asString(completed.error || completed.message || "command_execution_failed")
         : undefined
+    const sandboxStatus = normalizeSandboxRunStatus(status, exitCode)
     const reactorMetadata = cleanRecord({
       reactorKind: "codex",
       ...codexProviderMetadata({
@@ -647,6 +658,11 @@ export function buildCodexParts(params: {
         providerItemId: toolCallId,
         providerToolType: "commandExecution",
         success: !failed,
+        response: cleanRecord({
+          startedItem: input,
+          completedItem: command.completed ? completed : undefined,
+          outputText: outputText || undefined,
+        }),
         errorText,
       }),
     })
@@ -656,12 +672,16 @@ export function buildCodexParts(params: {
         type: "action",
         content: {
           status: "started",
-          actionName: SANDBOX_RUN_COMMAND_ACTION_NAME,
+          actionName: SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
           actionCallId: toolCallId,
           input: cleanRecord({
             command: commandText,
+            args: [],
             cwd: asString(input.cwd) || undefined,
+            kind: "command",
+            mode: "foreground",
             metadata: cleanRecord({
+              source: "codex.commandExecution",
               commandActions: asArray(input.commandActions),
             }),
           }),
@@ -676,10 +696,13 @@ export function buildCodexParts(params: {
         type: "action",
         content: {
           status: "completed",
-          actionName: SANDBOX_RUN_COMMAND_ACTION_NAME,
+          actionName: SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
           actionCallId: toolCallId,
           output: cleanRecord({
             sandboxId: sandboxId || undefined,
+            processId: asString(commandProcess.processId) || undefined,
+            streamId: asString(commandProcess.streamId) || undefined,
+            streamClientId: asString(commandProcess.streamClientId) || undefined,
             success: !failed,
             exitCode,
             output: outputText || undefined,
@@ -687,7 +710,7 @@ export function buildCodexParts(params: {
             command: commandText || undefined,
             durationMs:
               typeof completed.durationMs === "number" ? completed.durationMs : undefined,
-            status,
+            status: sandboxStatus,
           }),
         },
         reactorMetadata,

@@ -16,7 +16,7 @@ import {
   codexReactorDurableWorkflow,
   codexWorkflowContext,
 } from "./codex.reactor.workflow-fixtures.js"
-import { SANDBOX_RUN_COMMAND_ACTION_NAME } from "../shared.js"
+import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 import { verifyEventDomainRun } from "../../../../events/src/tests/context.reactor-contract.js"
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -217,7 +217,7 @@ describeWorkflowInstant("codex reactor + durable context engine workflow", () =>
       (part) =>
         asString(part.type) === "action" &&
         asString(asRecord(part.content).status) === "started" &&
-        asString(asRecord(part.content).actionName) === SANDBOX_RUN_COMMAND_ACTION_NAME,
+        asString(asRecord(part.content).actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
     )
     expect(commandCallPart).toBeTruthy()
     const commandCallJson = asRecord(asRecord(commandCallPart?.content).input)
@@ -227,7 +227,7 @@ describeWorkflowInstant("codex reactor + durable context engine workflow", () =>
       (part) =>
         asString(part.type) === "action" &&
         asString(asRecord(part.content).status) === "completed" &&
-        asString(asRecord(part.content).actionName) === SANDBOX_RUN_COMMAND_ACTION_NAME,
+        asString(asRecord(part.content).actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
     )
     const commandResultJson = asRecord(asRecord(commandResultPart?.content).output)
     expect(commandResultJson.success).toBe(true)

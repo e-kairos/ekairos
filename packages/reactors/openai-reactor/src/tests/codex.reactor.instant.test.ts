@@ -10,7 +10,7 @@ import { init } from "@instantdb/admin"
 import { readPersistedContextStepStream } from "@ekairos/events/runtime"
 
 import { createCodexReactor, type CodexConfig, type CodexExecuteTurnArgs, type CodexTurnResult } from "../index.js"
-import { SANDBOX_RUN_COMMAND_ACTION_NAME } from "../shared.js"
+import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 import { describeInstant, itInstant, destroyContextTestApp, provisionContextTestApp } from "./_env.ts"
 import { configureRuntime } from "../../../../domain/src/runtime.ts"
 
@@ -428,7 +428,7 @@ describeInstant("codex reactor + Instant integration", () => {
       const content = asRecord(record.content)
       return (
         asString(record.type) === "action" &&
-        asString(content.actionName) === SANDBOX_RUN_COMMAND_ACTION_NAME
+        asString(content.actionName) === SANDBOX_EXECUTE_COMMAND_ACTION_NAME
       )
     })
     const metadataPart = reactionParts.find((part) => {

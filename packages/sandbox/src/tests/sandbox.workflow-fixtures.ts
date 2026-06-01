@@ -4,7 +4,7 @@ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 
 import { sandboxDomain } from "../schema"
 import { Sandbox } from "../sandbox"
-import type { SandboxRunCommandInput } from "../sandbox"
+import type { SandboxExecuteCommandInput } from "../sandbox"
 
 export type SandboxWorkflowEnv = {
   appId: string
@@ -176,10 +176,10 @@ export async function createSandboxSerdeHandle(
 
 export async function executeSandboxSerdeHandle(
   sandbox: Sandbox<SandboxSerdeRuntime>,
-  input: SandboxRunCommandInput,
+  input: SandboxExecuteCommandInput,
 ) {
   "use step"
-  const result = await sandbox.actions()[Sandbox.runCommandActionName].execute(
+  const result = await sandbox.actions()[Sandbox.executeCommandActionName].execute(
     input,
     {} as any,
   )

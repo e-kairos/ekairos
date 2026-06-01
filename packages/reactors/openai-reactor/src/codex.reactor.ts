@@ -13,6 +13,7 @@ import {
   actionsToActionSpecs,
 } from "@ekairos/events"
 import type { ContextEnvironment } from "@ekairos/events/runtime"
+import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 import { randomUUID } from "node:crypto"
 
 import {
@@ -469,15 +470,60 @@ export function mapCodexAppServerNotification(
   const providerPartId = resolveProviderPartId(params, item)
   const hasItemError = Boolean(item.error)
   const actionDetails = readCodexDynamicActionDetails(params)
+  const isCommandExecutionItem = itemType === "commandexecution"
+  const isCommandExecutionOutputDelta = method === "item/commandExecution/outputDelta"
+  const commandExecutionInput = isCommandExecutionItem
+    ? cleanRecord({
+        command: asString(item.command),
+        args: [],
+        cwd: asString(item.cwd) || undefined,
+        kind: "command",
+        mode: "foreground",
+        metadata: cleanRecord({
+          source: "codex.commandExecution",
+          commandActions: Array.isArray(item.commandActions) ? item.commandActions : [],
+        }),
+      })
+    : undefined
+  const commandExecutionOutput = isCommandExecutionItem
+    ? cleanRecord({
+        success:
+          itemStatus === "failed"
+            ? false
+            : typeof item.exitCode === "number"
+              ? item.exitCode === 0
+              : undefined,
+        exitCode: typeof item.exitCode === "number" ? item.exitCode : undefined,
+        output: asString(item.aggregatedOutput) || undefined,
+        error: asString(item.error || item.message) || undefined,
+        command: asString(item.command) || undefined,
+        durationMs: typeof item.durationMs === "number" ? item.durationMs : undefined,
+        status:
+          itemStatus === "failed" || (typeof item.exitCode === "number" && item.exitCode !== 0)
+            ? "failed"
+            : itemStatus === "completed"
+              ? "exited"
+              : itemStatus || undefined,
+      })
+    : undefined
 
   const mappedData = toJsonSafe(
     cleanRecord({
       method,
       params,
       actionCallId: actionDetails.actionCallId,
-      actionName: actionDetails.actionName,
-      input: actionDetails.input,
-      output: actionDetails.output,
+      actionName:
+        actionDetails.actionName ||
+        (isCommandExecutionItem || isCommandExecutionOutputDelta
+          ? SANDBOX_EXECUTE_COMMAND_ACTION_NAME
+          : undefined),
+      input: actionDetails.input ?? commandExecutionInput,
+      output:
+        actionDetails.output ??
+        commandExecutionOutput ??
+        (isCommandExecutionOutputDelta
+          ? cleanRecord({ output: asString(params.delta) || undefined })
+          : undefined),
       success: actionDetails.success,
       errorText: actionDetails.errorText,
     }),
@@ -1120,6 +1166,14 @@ async function executeCodexSandboxTurn(
       seq: number
     }
   >()
+  const observedCommandProcessResults = new Map<
+    string,
+    {
+      processId: string
+      streamId: string
+      streamClientId: string
+    }
+  >()
 
   let sandboxId = String(sandboxConfig.sandboxId ?? "").trim()
   if (!sandboxId) {
@@ -1223,6 +1277,11 @@ async function executeCodexSandboxTurn(
         streamClientId,
         writer,
         seq: 1,
+      })
+      observedCommandProcessResults.set(codexItemId, {
+        processId,
+        streamId,
+        streamClientId,
       })
       return
     }
@@ -1530,6 +1589,7 @@ async function executeCodexSandboxTurn(
         processId: "",
         streamId: "",
         streamClientId: "",
+        commandProcesses: Object.fromEntries(observedCommandProcessResults.entries()),
         checkpoints,
       },
       providerResponse: asRecord(turn.metadata).providerResponse,
