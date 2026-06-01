@@ -38,6 +38,7 @@ Workbench and product review surfaces can render an agnostic turn transcript bef
 - `ContextReviewTranscript` accepts a `ContextValue`-like object and derives input/output turns from events, steps, and parts.
 - The transcript renders user input, assistant output, action counts, action errors, file/artifact attachments, and structured JSON answer summaries when available.
 - The transcript exposes copy/download Markdown review actions and `buildContextReviewMarkdown(...)` for adapter-controlled export flows.
+- Review transcript defaults to the latest six turns and renders text through Markdown with HTML skipped, so workbench `.md` review and in-app transcript stay aligned.
 - Markdown export titles and download filenames stay generic (`Ekairos Context Review`, `context-review.md`); product identity belongs in `reviewLinks`, attachments, and adapter-owned surrounding chrome.
 - Consumers may pass `reviewLinks` so copied/downloaded Markdown preserves product or Workshop review URLs needed to reproduce a run.
 - Consumers may pass `actions` for explicit inspect/debug controls such as toggling message metadata; those controls must be user-initiated.
