@@ -9,6 +9,8 @@ import {
   failTaskExecute,
   getTaskExecute,
   openTaskExecute,
+  releaseTaskExecute,
+  startTaskExecute,
 } from "./actions.js"
 
 const storedOutcomeSchema = z.object({
@@ -20,12 +22,14 @@ const taskRecordSchema = z.object({
   id: z.string(),
   kind: z.string(),
   key: z.string(),
-  state: z.enum(["open", "completed", "cancelled", "failed"]),
+  state: z.enum(["open", "in_progress", "completed", "cancelled", "failed"]),
   instructions: z.string(),
   context: z.unknown(),
   outcomeKind: z.string().optional(),
   outcomeSchema: storedOutcomeSchema.optional(),
   resolvedOutcome: z.unknown().optional(),
+  activeRunId: z.string().optional(),
+  lastProgress: z.unknown().optional(),
   errorText: z.string().optional(),
   createdAt: z.unknown().optional(),
   updatedAt: z.unknown().optional(),
@@ -70,16 +74,31 @@ const decideTaskInputSchema = z.object({
   id: z.string(),
   outcome: z.unknown(),
   resumeWorkflow: z.boolean().optional(),
+  runId: z.string().optional(),
 })
 
 const cancelTaskInputSchema = z.object({
   id: z.string(),
   reason: z.string().optional(),
+  runId: z.string().optional(),
 })
 
 const failTaskInputSchema = z.object({
   id: z.string(),
   errorText: z.string(),
+  runId: z.string().optional(),
+})
+
+const startTaskInputSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+})
+
+const releaseTaskInputSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  actor: z.unknown().optional(),
+  comment: z.string().optional(),
 })
 
 const getTaskInputSchema = z.object({
@@ -102,6 +121,8 @@ export const tasksSchemaDomain = domain("tasks")
         outcomeKind: i.string().optional().indexed(),
         outcomeSchema: i.json().optional(),
         outcome: i.json().optional(),
+        activeRunId: i.string().optional().indexed(),
+        lastProgress: i.json().optional(),
         errorText: i.string().optional(),
         createdAt: i.date().indexed(),
         updatedAt: i.date().indexed(),
@@ -114,8 +135,8 @@ export const tasksSchemaDomain = domain("tasks")
 
 export const tasksDomain = tasksSchemaDomain
   .withActions({
-    openTask: defineAction({
-      name: "tasks.openTask",
+    createTask: defineAction({
+      name: "tasks.createTask",
       input: openTaskInputSchema,
       output: taskServiceResultSchema,
       execute: openTaskExecute,
@@ -132,8 +153,14 @@ export const tasksDomain = tasksSchemaDomain
       output: taskOutcomeResultSchema,
       execute: awaitOutcomeExecute,
     }),
-    decideTask: defineAction({
-      name: "tasks.decideTask",
+    startTask: defineAction({
+      name: "tasks.startTask",
+      input: startTaskInputSchema,
+      output: taskServiceResultSchema,
+      execute: startTaskExecute,
+    }),
+    completeTask: defineAction({
+      name: "tasks.completeTask",
       input: decideTaskInputSchema,
       output: taskServiceResultSchema,
       execute: decideTaskExecute,
@@ -149,5 +176,11 @@ export const tasksDomain = tasksSchemaDomain
       input: failTaskInputSchema,
       output: taskServiceResultSchema,
       execute: failTaskExecute,
+    }),
+    releaseTask: defineAction({
+      name: "tasks.releaseTask",
+      input: releaseTaskInputSchema,
+      output: taskServiceResultSchema,
+      execute: releaseTaskExecute,
     }),
   })

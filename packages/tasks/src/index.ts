@@ -13,6 +13,7 @@ export {
   type TaskData,
   type TaskHandle,
   type TaskOutcomeSchema,
+  type TaskRunHandle,
   type TaskState,
   type TaskStoredOutcomeSchema,
 } from "./task.js"

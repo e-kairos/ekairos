@@ -13,6 +13,7 @@ import {
   type TaskData,
   type TaskHandle,
   type TaskOutcomeSchema,
+  type TaskRunHandle,
   type TaskState,
   type TaskStoredOutcomeSchema,
 } from "./task.js"
@@ -49,16 +50,31 @@ export type TaskDecideActionInput = {
   id: string
   outcome: unknown
   resumeWorkflow?: boolean
+  runId?: string
 }
 
 export type TaskCancelActionInput = {
   id: string
   reason?: string
+  runId?: string
 }
 
 export type TaskFailActionInput = {
   id: string
   errorText: string
+  runId?: string
+}
+
+export type TaskStartActionInput = {
+  id: string
+  runId: string
+}
+
+export type TaskReleaseActionInput = {
+  id: string
+  runId: string
+  actor?: unknown
+  comment?: string
 }
 
 export type TaskGetActionInput = {
@@ -123,6 +139,11 @@ function unwrapOutcomeResult(result: ServiceResult<unknown>): unknown {
   return result.data
 }
 
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
 function createDomainTaskHandle<TOutcome, TContext = unknown>(
   runtime: TasksClientRuntime,
   record: TaskRecord<TContext, TOutcome>,
@@ -139,6 +160,82 @@ function createDomainTaskHandle<TOutcome, TContext = unknown>(
           { id: record.id },
         ) as ServiceResult<unknown>,
       )
+    },
+    async start(data, work) {
+      const runId = newEntityId()
+      let terminal = false
+      let lastRecord: TaskRecord<TContext, TOutcome> | null = null
+
+      const completeWith = async (outcome: TOutcome) => {
+        lastRecord = unwrapTaskResult(
+          await runTaskDomainAction(runtime, "completeTask", {
+            id: data.id,
+            runId,
+            outcome,
+          }) as ServiceResult<TaskRecord>,
+        ) as TaskRecord<TContext, TOutcome>
+        terminal = true
+        return lastRecord
+      }
+
+      const releaseWith = async (input?: { actor?: unknown; comment?: string }) => {
+        lastRecord = unwrapTaskResult(
+          await runTaskDomainAction(runtime, "releaseTask", {
+            id: data.id,
+            runId,
+            actor: input?.actor,
+            comment: input?.comment,
+          }) as ServiceResult<TaskRecord>,
+        ) as TaskRecord<TContext, TOutcome>
+        terminal = true
+        return lastRecord
+      }
+
+      await runTaskDomainAction(runtime, "startTask", {
+        id: data.id,
+        runId,
+      })
+
+      const run: TaskRunHandle<TOutcome> = {
+        id: runId,
+        taskId: data.id,
+        completed: completeWith,
+        release: releaseWith,
+      }
+
+      try {
+        const returned = await work(run)
+        if (returned) {
+          if (returned.state === "in_progress") {
+            throw new Error(
+              "Task.start callback returned an in_progress task. A started task must finish with completed outcome or release.",
+            )
+          }
+          return returned
+        }
+        if (!terminal) {
+          throw new Error(
+            "Task.start callback finished without completing or releasing the task.",
+          )
+        }
+        if (!lastRecord) {
+          throw new Error("Task.start callback did not return a task record.")
+        }
+        return lastRecord
+      } catch (error) {
+        if (!terminal) {
+          try {
+            await runTaskDomainAction(runtime, "failTask", {
+              id: data.id,
+              runId,
+              errorText: errorText(error),
+            })
+          } catch {
+            // Preserve the original runner failure.
+          }
+        }
+        throw error
+      }
     },
   })
 }
@@ -160,6 +257,7 @@ function normalizeTaskState(state: unknown): TaskState {
   if (
     state === "open" ||
     state === "completed" ||
+    state === "in_progress" ||
     state === "cancelled" ||
     state === "failed"
   ) {
@@ -181,6 +279,8 @@ function rowToTaskRecord<TContext = unknown, TOutcome = unknown>(
     outcomeKind: typeof row.outcomeKind === "string" ? row.outcomeKind : undefined,
     outcomeSchema: row.outcomeSchema as TaskStoredOutcomeSchema | undefined,
     resolvedOutcome: row.outcome as TOutcome,
+    activeRunId: typeof row.activeRunId === "string" ? row.activeRunId : undefined,
+    lastProgress: row.lastProgress,
     errorText: typeof row.errorText === "string" ? row.errorText : undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -226,6 +326,40 @@ async function resumeTaskOutcome<TOutcome>(id: string, outcome: TOutcome) {
     }
     throw error
   }
+}
+
+async function resumeTaskFailure(id: string, error: string) {
+  const { resumeHook } = await import("workflow/api")
+  try {
+    await resumeHook(taskOutcomeToken(id), {
+      __ekairosTaskFailure: true,
+      error,
+    })
+  } catch (error) {
+    if (error instanceof Error && error.name === "HookNotFoundError") {
+      return
+    }
+    throw error
+  }
+}
+
+function failureOutcomeError(task: TaskRecord) {
+  if (task.state === "failed") {
+    return task.errorText || "task_failed"
+  }
+  if (task.state === "cancelled") {
+    return task.errorText || "task_cancelled"
+  }
+  return `task_not_open:${task.state}`
+}
+
+function isFailureHookPayload(value: unknown): value is {
+  __ekairosTaskFailure: true
+  error?: unknown
+} {
+  return !!value &&
+    typeof value === "object" &&
+    (value as { __ekairosTaskFailure?: unknown }).__ekairosTaskFailure === true
 }
 
 function createTaskOutcomeHook<TOutcome>(id: string) {
@@ -298,8 +432,14 @@ export class TaskService {
 
     const task = await this.getTaskRecord(input.id)
     if (!task) return { ok: false, error: "task_not_found" }
-    if (task.state !== "open") {
-      return { ok: false, error: `task_not_open:${task.state}` }
+    if (task.state !== "open" && task.state !== "in_progress") {
+      return { ok: false, error: `task_not_decidable:${task.state}` }
+    }
+    if (task.state === "in_progress" && !input.runId?.trim()) {
+      return { ok: false, error: "task_run_id_required" }
+    }
+    if (task.state === "in_progress" && task.activeRunId !== input.runId) {
+      return { ok: false, error: "task_run_mismatch" }
     }
 
     const validation = validateStoredOutcome(task.outcomeSchema, input.outcome)
@@ -310,7 +450,13 @@ export class TaskService {
     await db.transact([
       db.tx.task_tasks[input.id].update({
         state: "completed",
+        activeRunId: "",
         outcome: validation.data,
+        lastProgress: {
+          type: "completed",
+          runId: input.runId,
+          createdAt: now.toISOString(),
+        },
         resolvedAt: now,
         updatedAt: now,
       }),
@@ -330,8 +476,14 @@ export class TaskService {
 
     const task = await this.getTaskRecord(input.id)
     if (!task) return { ok: false, error: "task_not_found" }
-    if (task.state !== "open") {
-      return { ok: false, error: `task_not_open:${task.state}` }
+    if (task.state !== "open" && task.state !== "in_progress") {
+      return { ok: false, error: `task_not_cancellable:${task.state}` }
+    }
+    if (task.state === "in_progress" && !input.runId?.trim()) {
+      return { ok: false, error: "task_run_id_required" }
+    }
+    if (task.state === "in_progress" && task.activeRunId !== input.runId) {
+      return { ok: false, error: "task_run_mismatch" }
     }
 
     const db = this.db()
@@ -339,7 +491,14 @@ export class TaskService {
     await db.transact([
       db.tx.task_tasks[input.id].update({
         state: "cancelled",
+        activeRunId: "",
         errorText: input.reason,
+        lastProgress: {
+          type: "cancelled",
+          runId: input.runId,
+          comment: input.reason,
+          createdAt: now.toISOString(),
+        },
         resolvedAt: now,
         updatedAt: now,
       }),
@@ -356,8 +515,14 @@ export class TaskService {
 
     const task = await this.getTaskRecord(input.id)
     if (!task) return { ok: false, error: "task_not_found" }
-    if (task.state !== "open") {
-      return { ok: false, error: `task_not_open:${task.state}` }
+    if (task.state !== "open" && task.state !== "in_progress") {
+      return { ok: false, error: `task_not_failable:${task.state}` }
+    }
+    if (task.state === "in_progress" && !input.runId?.trim()) {
+      return { ok: false, error: "task_run_id_required" }
+    }
+    if (task.state === "in_progress" && task.activeRunId !== input.runId) {
+      return { ok: false, error: "task_run_mismatch" }
     }
 
     const db = this.db()
@@ -365,11 +530,20 @@ export class TaskService {
     await db.transact([
       db.tx.task_tasks[input.id].update({
         state: "failed",
+        activeRunId: "",
         errorText: input.errorText,
+        lastProgress: {
+          type: "failed",
+          runId: input.runId,
+          comment: input.errorText,
+          createdAt: now.toISOString(),
+        },
         resolvedAt: now,
         updatedAt: now,
       }),
     ])
+
+    await resumeTaskFailure(input.id, input.errorText)
 
     const failed = await this.getTaskRecord(input.id)
     if (!failed) return { ok: false, error: "task_not_found_after_fail" }
@@ -396,27 +570,107 @@ export class TaskService {
       return validateStoredOutcome(task.outcomeSchema, task.resolvedOutcome)
     }
 
-    if (task.state !== "open") {
+    if (task.state === "failed" || task.state === "cancelled") {
+      return { ok: false, error: failureOutcomeError(task) }
+    }
+
+    if (task.state !== "open" && task.state !== "in_progress") {
       return { ok: false, error: `task_not_open:${task.state}` }
     }
 
     const hook = createTaskOutcomeHook<unknown>(input.id)
     try {
-      return validateStoredOutcome(task.outcomeSchema, await hook)
+      const outcome = await hook
+      if (isFailureHookPayload(outcome)) {
+        return { ok: false, error: String(outcome.error || "task_failed") }
+      }
+      return validateStoredOutcome(task.outcomeSchema, outcome)
     } finally {
       hook.dispose()
     }
   }
 
+  async start(input: TaskStartActionInput): Promise<ServiceResult<TaskRecord>> {
+    if (!input.id.trim()) return { ok: false, error: "task_id_required" }
+    if (!input.runId.trim()) return { ok: false, error: "task_run_id_required" }
+
+    const task = await this.getTaskRecord(input.id)
+    if (!task) return { ok: false, error: "task_not_found" }
+    if (task.state !== "open") {
+      return { ok: false, error: `task_not_open:${task.state}` }
+    }
+
+    const db = this.db()
+    const now = new Date()
+    await db.transact([
+      db.tx.task_tasks[input.id].update({
+        state: "in_progress",
+        activeRunId: input.runId,
+        lastProgress: {
+          type: "started",
+          runId: input.runId,
+          createdAt: now.toISOString(),
+        },
+        updatedAt: now,
+      }),
+    ])
+
+    const started = await this.getTaskRecord(input.id)
+    if (!started) return { ok: false, error: "task_not_found_after_start" }
+    return { ok: true, data: started }
+  }
+
+  async release(input: TaskReleaseActionInput): Promise<ServiceResult<TaskRecord>> {
+    if (!input.id.trim()) return { ok: false, error: "task_id_required" }
+    if (!input.runId.trim()) return { ok: false, error: "task_run_id_required" }
+
+    const task = await this.getTaskRecord(input.id)
+    if (!task) return { ok: false, error: "task_not_found" }
+    if (task.state !== "in_progress") {
+      return { ok: false, error: `task_not_in_progress:${task.state}` }
+    }
+    if (task.activeRunId !== input.runId) {
+      return { ok: false, error: "task_run_mismatch" }
+    }
+
+    const db = this.db()
+    const now = new Date()
+    await db.transact([
+      db.tx.task_tasks[input.id].update({
+        state: "open",
+        activeRunId: "",
+        lastProgress: {
+          type: "released",
+          runId: input.runId,
+          actor: input.actor,
+          comment: input.comment?.trim() || undefined,
+          createdAt: now.toISOString(),
+        },
+        updatedAt: now,
+      }),
+    ])
+
+    const released = await this.getTaskRecord(input.id)
+    if (!released) return { ok: false, error: "task_not_found_after_release" }
+    return { ok: true, data: released }
+  }
+
 }
 
 export class Task {
+  static async create<TOutcome, TContext = unknown>(
+    runtime: TasksClientRuntime,
+    input: TaskOpenInput<TOutcome, TContext>,
+  ): Promise<TaskHandle<TOutcome, TContext>> {
+    return await Task.open(runtime, input)
+  }
+
   static async open<TOutcome, TContext = unknown>(
     runtime: TasksClientRuntime,
     input: TaskOpenInput<TOutcome, TContext>,
   ): Promise<TaskHandle<TOutcome, TContext>> {
     const opened = unwrapTaskResult(
-      await runTaskDomainAction(runtime, "openTask", {
+      await runTaskDomainAction(runtime, "createTask", {
         id: input.id,
         kind: input.kind,
         key: input.key,

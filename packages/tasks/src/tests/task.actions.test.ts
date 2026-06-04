@@ -26,19 +26,21 @@ async function executeAction(
 describe("tasks domain actions", () => {
   it("exposes the canonical task action API", () => {
     expect(Object.values(tasksDomain.actions).map((action) => action.name)).toEqual([
-      "tasks.openTask",
+      "tasks.createTask",
       "tasks.getTask",
       "tasks.awaitOutcome",
-      "tasks.decideTask",
+      "tasks.startTask",
+      "tasks.completeTask",
       "tasks.cancelTask",
       "tasks.failTask",
+      "tasks.releaseTask",
     ])
   })
 
-  it("opens and decides a task through domain actions without a waiting workflow", async () => {
+  it("creates and completes a task through domain actions without a waiting workflow", async () => {
     const runtime = createMemoryTaskRuntime()
 
-    const opened = await executeAction(runtime, "openTask", {
+    const opened = await executeAction(runtime, "createTask", {
       id: "task_action_1",
       kind: "review",
       key: "review:action:1",
@@ -68,7 +70,7 @@ describe("tasks domain actions", () => {
       },
     })
 
-    const decided = await executeAction(runtime, "decideTask", {
+    const decided = await executeAction(runtime, "completeTask", {
       id: "task_action_1",
       outcome: { accepted: true },
     })
@@ -95,7 +97,7 @@ describe("tasks domain actions", () => {
   it("validates action decisions against the stored outcome schema", async () => {
     const runtime = createMemoryTaskRuntime()
 
-    const opened = await executeAction(runtime, "openTask", {
+    const opened = await executeAction(runtime, "createTask", {
       id: "task_action_2",
       kind: "review",
       key: "review:action:2",
@@ -105,7 +107,7 @@ describe("tasks domain actions", () => {
     })
     expect((opened as { ok: boolean }).ok).toBe(true)
 
-    const invalid = await executeAction(runtime, "decideTask", {
+    const invalid = await executeAction(runtime, "completeTask", {
       id: "task_action_2",
       outcome: { accepted: "yes" },
       resumeWorkflow: false,

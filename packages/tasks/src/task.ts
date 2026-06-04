@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export type TaskState = "open" | "completed" | "cancelled" | "failed"
+export type TaskState = "open" | "in_progress" | "completed" | "cancelled" | "failed"
 
 export type TaskStoredOutcomeSchema = {
   type: "json-schema"
@@ -17,15 +17,31 @@ export type TaskData<TContext = unknown, TOutcome = unknown> = {
   outcomeKind?: string
   outcomeSchema?: TaskStoredOutcomeSchema
   resolvedOutcome?: TOutcome
+  activeRunId?: string
+  lastProgress?: unknown
+  errorText?: string
   createdAt?: Date | string
   updatedAt?: Date | string
   resolvedAt?: Date | string
+}
+
+export type TaskRunHandle<TOutcome> = {
+  id: string
+  taskId: string
+  completed(outcome: TOutcome): Promise<TaskData<unknown, TOutcome>>
+  release(input?: {
+    actor?: unknown
+    comment?: string
+  }): Promise<TaskData<unknown, TOutcome>>
 }
 
 export type TaskHandle<TOutcome, TContext = unknown> =
   & TaskData<TContext, TOutcome>
   & {
     outcome(): Promise<TOutcome>
+    start(
+      work: (run: TaskRunHandle<TOutcome>) => Promise<TaskData<unknown, TOutcome> | void>,
+    ): Promise<TaskData<unknown, TOutcome>>
   }
 
 export type TaskOutcomeSchema<TOutcome> = z.ZodType<TOutcome>
@@ -101,6 +117,10 @@ export function assertStoredOutcomeSchemaMatches<TOutcome>(
 
 type TaskHandleOptions<TOutcome, TContext> = {
   awaitOutcome?: () => Promise<unknown>
+  start?: (
+    data: TaskData<TContext, TOutcome>,
+    work: (run: TaskRunHandle<TOutcome>) => Promise<TaskData<unknown, TOutcome> | void>,
+  ) => Promise<TaskData<unknown, TOutcome>>
 }
 
 export function createTaskHandle<TOutcome, TContext = unknown>(
@@ -124,6 +144,12 @@ export function createTaskHandle<TOutcome, TContext = unknown>(
       }
 
       throw new Error(`Task ${data.id} cannot resolve an outcome without an awaitOutcome action.`)
+    },
+    async start(work) {
+      if (!options.start) {
+        throw new Error(`Task ${data.id} cannot start without a startTask action.`)
+      }
+      return await options.start(data, work)
     },
   }
 }
