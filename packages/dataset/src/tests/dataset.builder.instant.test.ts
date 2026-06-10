@@ -92,17 +92,28 @@ async function getDatasetSnapshot(datasetId: string) {
       $: { where: { datasetId } as any, limit: 1 },
       dataFile: {},
       context: {},
+      records: {},
     } as any,
   })
 
   const datasetRow = query.dataset_datasets?.[0]
   expect(datasetRow?.datasetId).toBe(datasetId)
   const linkedFile = Array.isArray(datasetRow?.dataFile) ? datasetRow.dataFile[0] : datasetRow?.dataFile
-  expect(typeof linkedFile?.url).toBe("string")
-  const response = await fetch(linkedFile.url)
-  expect(response.ok).toBe(true)
-  const jsonlText = await response.text()
-  const rows = parseJsonl(jsonlText).filter((entry) => entry?.type === "row").map((entry) => entry.data)
+  const linkedRecords = Array.isArray(datasetRow?.records) ? datasetRow.records : []
+  let rows: any[]
+
+  if (linkedRecords.length > 0) {
+    rows = linkedRecords
+      .slice()
+      .sort((a: any, b: any) => Number(a.order ?? 0) - Number(b.order ?? 0))
+      .map((record: any) => record.rowContent)
+  } else {
+    expect(typeof linkedFile?.url).toBe("string")
+    const response = await fetch(linkedFile.url)
+    expect(response.ok).toBe(true)
+    const jsonlText = await response.text()
+    rows = parseJsonl(jsonlText).filter((entry) => entry?.type === "row").map((entry) => entry.data)
+  }
 
   return {
     dataset: datasetRow,
@@ -243,6 +254,121 @@ describeInstant("dataset() builder direct API", () => {
     expect(snapshot.dataset.context?.resources?.[0]?.type).toBe("query")
     expect(snapshot.dataset.sandboxId ?? null).toBeNull()
   })
+
+  it("multiple resources + asObject can complete directly without executeCommand", async () => {
+    const reactor = createScriptedReactor({
+      steps: [
+        scriptedToolStep(
+          "completeObject",
+          {
+            data: {
+              status: "passed",
+              score: 92,
+              justification: "The available evidence satisfies the criterion.",
+            },
+            summary: "technical evaluation object complete",
+          },
+          "complete object directly",
+        ),
+      ],
+    })
+
+    const result = await dataset(testRuntime)
+      .sandbox({ sandboxId: suiteSandboxId! })
+      .from({
+        kind: "text",
+        name: "criterion.json",
+        mimeType: "application/json",
+        text: JSON.stringify({ title: "Operational safety" }),
+      })
+      .from({
+        kind: "text",
+        name: "evidence.json",
+        mimeType: "application/json",
+        text: JSON.stringify([{ refId: "email:1", excerpt: "Safety plan attached." }]),
+      })
+      .instructions("Evaluate one award against one criterion.")
+      .schema({
+        title: "TechnicalEvaluationObject",
+        description: "One technical evaluation object",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            status: { type: "string", enum: ["passed", "failed", "needs_review"] },
+            score: { type: "number", minimum: 0, maximum: 100 },
+            justification: { type: "string" },
+          },
+          required: ["status", "score", "justification"],
+        },
+      })
+      .reactor(reactor)
+      .asObject()
+      .build({ datasetId: "direct_object_transform_v1" })
+
+    expect(result.object).toEqual({
+      status: "passed",
+      score: 92,
+      justification: "The available evidence satisfies the criterion.",
+    })
+    const snapshot = await getDatasetSnapshot(result.datasetId)
+    expect(snapshot.rows).toHaveLength(1)
+  }, 240000)
+
+  it("multiple resources can replace rows directly without executeCommand", async () => {
+    const reactor = createScriptedReactor({
+      steps: [
+        scriptedToolStep(
+          "replaceRows",
+          {
+            rows: [
+              { sku: "A1", eligible: true },
+              { sku: "A2", eligible: false },
+            ],
+            summary: "eligibility rows complete",
+          },
+          "replace rows directly",
+        ),
+      ],
+    })
+
+    const result = await dataset(testRuntime)
+      .sandbox({ sandboxId: suiteSandboxId! })
+      .from({
+        kind: "text",
+        name: "items.json",
+        mimeType: "application/json",
+        text: JSON.stringify([{ sku: "A1" }, { sku: "A2" }]),
+      })
+      .from({
+        kind: "text",
+        name: "rules.json",
+        mimeType: "application/json",
+        text: JSON.stringify({ rule: "A1 eligible only" }),
+      })
+      .instructions("Classify item eligibility.")
+      .schema({
+        title: "EligibilityRow",
+        description: "One eligibility row",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            sku: { type: "string" },
+            eligible: { type: "boolean" },
+          },
+          required: ["sku", "eligible"],
+        },
+      })
+      .reactor(reactor)
+      .build({ datasetId: "direct_rows_transform_v1" })
+
+    const snapshot = await getDatasetSnapshot(result.datasetId)
+    expect(snapshot.rows).toEqual([
+      { sku: "A1", eligible: true },
+      { sku: "A2", eligible: false },
+    ])
+  }, 240000)
 
   it("fromQuery(domain, query) with instructions + schema + first() produces a one-row dataset", async () => {
     const { electronicsCategory } = await seedSampleRows(`summary-${Date.now()}`)
@@ -514,32 +640,38 @@ describeInstant("dataset() builder direct API", () => {
       ])
   }, 240000)
 
-  it("multiple text resources materialize raw rows before the transform reactor runs", async () => {
+  it("multiple text resources are materialized lazily when executeCommand runs", async () => {
     const reactor = createScriptedReactor({
       steps: [
         scriptedToolStep(
           "executeCommand",
           {
             scriptName: "combine_text_resources",
+            commandDescription:
+              "Read materialized context text resources from the resources manifest and combine two JSON documents into dataset rows.",
             pythonCode: [
-              "import json",
-              `items_path = ${JSON.stringify(`${getDatasetResourcesDir("combined_text_resources_v1")}/resource_combined_text_resources_v1__text_0.jsonl`)}`,
-              `criteria_path = ${JSON.stringify(`${getDatasetResourcesDir("combined_text_resources_v1")}/resource_combined_text_resources_v1__text_1.jsonl`)}`,
+              "import json, os",
+              "manifest_path = os.environ['EKAIROS_CONTEXT_RESOURCES_MANIFEST']",
+              "with open(manifest_path, 'r', encoding='utf-8') as src:",
+              "  manifest = json.load(src)",
+              "def resource_file(prefix):",
+              "  for resource in manifest['resources']:",
+              "    if resource['key'].startswith(prefix):",
+              "      files = resource.get('files') or []",
+              "      if files:",
+              "        return files[0]['path']",
+              "  raise RuntimeError(f'missing resource file for {prefix}')",
+              "items_path = resource_file('text:0:')",
+              "criteria_path = resource_file('text:1:')",
               `output_path = ${JSON.stringify(getDatasetOutputPath("combined_text_resources_v1"))}`,
-              "def read_rows(path):",
-              "  rows = []",
+              "def read_json(path):",
               "  with open(path, 'r', encoding='utf-8') as src:",
-              "    for line in src:",
-              "      if not line.strip():",
-              "        continue",
-              "      rows.append(json.loads(line).get('data') or {})",
-              "  return rows",
-              "items = read_rows(items_path)",
-              "criteria = read_rows(criteria_path)",
-              "criterion = criteria[0]['title']",
+              "    return json.load(src)",
+              "items = read_json(items_path)",
+              "criterion = read_json(criteria_path)['title']",
               "with open(output_path, 'w', encoding='utf-8') as out:",
               "  for item in items:",
-              "    payload = {'type': 'row', 'data': {'sku': item['sku'], 'criterion': criterion}}",
+                "    payload = {'type': 'row', 'data': {'sku': item['sku'], 'criterion': criterion}}",
               "    out.write(json.dumps(payload) + '\\n')",
               "print('combined text resources')",
             ].join("\n"),

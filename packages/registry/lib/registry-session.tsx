@@ -41,8 +41,9 @@ const APP_TITLE_STORAGE_KEY = "ekairos.registry.examples.title";
 const RegistrySessionContext = React.createContext<RegistrySessionContextValue | null>(null);
 
 function routeNeedsSession(pathname: string | null): boolean {
-  if (!pathname) return false;
-  return pathname.startsWith("/examples") || pathname.startsWith("/showcases");
+  // General pattern: entering the registry creates a temporary InstantDB app.
+  // Domains push their schema on entry; pages seed their demo data.
+  return pathname !== null;
 }
 
 function createVisitorId(): string {

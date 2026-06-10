@@ -2,10 +2,6 @@ import { createFileParseContext } from "../file/file-dataset.agent.js"
 import { readInstantFileStep } from "../file/steps.js"
 import { createTransformDatasetContext } from "../transform/transform-dataset.agent.js"
 import {
-  ensureTransformInputsInSandboxStep,
-  generateTransformInputPreviewsStep,
-} from "../transform/transform-dataset.steps.js"
-import {
   datasetGetByIdStep,
   datasetInferAndUpdateSchemaStep,
   datasetPreviewRowsStep,
@@ -439,29 +435,14 @@ export async function prepareDatasetResourcesStep<Runtime extends AnyDatasetRunt
     }
   }
 
-  const initialized = await ensureTransformInputsInSandboxStep({
-    runtime: params.runtime,
-    sandboxId: params.sandboxId,
-    datasetId: params.datasetId,
-    inputDatasetIds: params.inputDatasetIds,
-    state: { initialized: false, inputPaths: [] },
-  })
-
-  const inputPreviews = await generateTransformInputPreviewsStep({
-    runtime: params.runtime,
-    sandboxId: params.sandboxId,
-    datasetId: params.datasetId,
-    inputPaths: initialized.inputPaths,
-  })
-
   return {
     kind: "transform",
     datasetId: params.datasetId,
     sandboxId: params.sandboxId,
     inputDatasetIds: params.inputDatasetIds,
     outputSchema: params.outputSchema,
-    sandboxState: initialized.state,
-    inputPreviews,
+    sandboxState: { initialized: false, inputPaths: [] },
+    inputPreviews: undefined,
   }
 }
 
@@ -701,12 +682,9 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
   const sandboxId = resolveDatasetSandboxId(state, targetDatasetId)
   const stateWithSandbox = { ...state, sandboxId }
 
-  const normalizedResources: string[] = []
-  for (let index = 0; index < stateWithSandbox.resources.length; index++) {
-    normalizedResources.push(
-      await normalizeResourceToDatasetId(stateWithSandbox, stateWithSandbox.resources[index], targetDatasetId, index),
-    )
-  }
+  const inputDatasetIds = (stateWithSandbox.contextResources ?? []).map((resource, index) =>
+    String((resource as any).datasetId ?? resource.key ?? `resource_${index + 1}`),
+  )
 
   const transformSchema =
     stateWithSandbox.outputSchema ??
@@ -730,19 +708,20 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
     schema: transformSchema,
   })
 
-  const prepared = await prepareDatasetResourcesStep({
+  const prepared: PreparedTransformDatasetContext = {
     kind: "transform",
-    runtime: stateWithSandbox.runtime,
     datasetId: targetDatasetId,
     sandboxId,
-    inputDatasetIds: normalizedResources,
+    inputDatasetIds,
     outputSchema: transformSchema,
-  })
+    sandboxState: { initialized: false, inputPaths: [] },
+    inputPreviews: undefined,
+  }
 
   const context = await initializeDatasetContextStep({
     prepared,
     instructions: buildTransformInstructions(
-      normalizedResources.length,
+      inputDatasetIds.length,
       stateWithSandbox.instructions,
       stateWithSandbox.outputSchema,
     ),
@@ -761,6 +740,7 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
     sandboxId: context.sandboxId,
     sandboxState: context.sandboxState,
     inputPreviews: context.inputPreviews,
+    contextResources: stateWithSandbox.contextResources ?? [],
   })
 
   await transformContext.transform(stateWithSandbox.runtime as any, {
@@ -774,6 +754,7 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
       sandboxId: context.sandboxId,
       sandboxState: context.sandboxState,
       inputPreviews: context.inputPreviews,
+      contextResources: stateWithSandbox.contextResources ?? [],
     },
   })
 

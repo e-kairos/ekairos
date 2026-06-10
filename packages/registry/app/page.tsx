@@ -52,8 +52,9 @@ export default function HomePage() {
               Ekairos Registry.
             </h1>
             <p className="mt-6 max-w-2xl text-balance text-base leading-7 text-white/72 md:text-xl md:leading-8">
-              Technical marketing for the real domain system: schema, actions, and installable UI
-              that can move into Workbench, templates, and product apps.
+              The home of the Ekairos domains: schema, actions, and installable UI that run on
+              InstantDB. Browse a domain, try its components on a live temporary database, install
+              them with one command.
             </p>
 
             <div className="mt-8 flex flex-wrap justify-center gap-3">
@@ -73,7 +74,7 @@ export default function HomePage() {
               </Link>
             </div>
 
-            <div className="mt-9 grid w-full max-w-3xl grid-cols-2 border border-white/12 bg-black/60 text-left shadow-[0_24px_90px_rgba(0,0,0,0.5)] backdrop-blur-[2px] md:grid-cols-4">
+            <div className="mt-9 grid w-full max-w-3xl grid-cols-2 border border-white/12 bg-black/60 text-left shadow-[0_24px_90px_rgba(0,0,0,0.5)] backdrop-blur-[2px] md:grid-cols-5">
               {domainRegistry.map((domain, index) => (
                 <Link
                   key={domain.id}
@@ -137,7 +138,7 @@ export default function HomePage() {
               Domain map
             </p>
             <h2 className="mt-5 max-w-xl text-4xl font-semibold leading-[0.95] md:text-6xl">
-              Four routes become the technical front door.
+              Five routes become the technical front door.
             </h2>
             <p className="mt-6 max-w-xl text-base leading-7 text-white/65">
               Each domain has one public landing, one UI surface, and one library page. The package
@@ -156,7 +157,7 @@ export default function HomePage() {
               Domains
             </p>
             <h2 className="mt-5 max-w-xl text-4xl font-semibold leading-[0.95] md:text-6xl">
-              Events, Sandbox, Dataset, Task.
+              Events, Channel, Sandbox, Dataset, Task.
             </h2>
           </div>
 

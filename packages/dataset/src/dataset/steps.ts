@@ -1,6 +1,7 @@
 import { DatasetService } from "../service.js"
 import { datasetDomain } from "../schema.js"
 import { inferDatasetSchema } from "../builder/schemaInference.js"
+import { rowsToJsonl } from "../builder/rows.js"
 
 export async function getDatasetRuntimeDb(runtime: any) {
   if (!runtime) {
@@ -35,6 +36,7 @@ export async function datasetReadOutputJsonlStep(params: {
 }): Promise<{ contentBase64: string }> {
   "use step"
   const db = await getDatasetRuntimeDb(params.runtime)
+  const service = new DatasetService(db)
   for (let attempt = 1; attempt <= 20; attempt++) {
     const query: any = await db.query({
       dataset_datasets: {
@@ -49,6 +51,17 @@ export async function datasetReadOutputJsonlStep(params: {
     if (url) {
       const fileBuffer = await fetch(url).then((r) => r.arrayBuffer())
       return { contentBase64: Buffer.from(fileBuffer).toString("base64") }
+    }
+
+    const directRows = await service.readRows({
+      datasetId: params.datasetId,
+      cursor: 0,
+      limit: 100_000,
+    })
+    if (directRows.ok && directRows.data.rows.length > 0) {
+      return {
+        contentBase64: Buffer.from(rowsToJsonl(directRows.data.rows), "utf-8").toString("base64"),
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, 250 * attempt))

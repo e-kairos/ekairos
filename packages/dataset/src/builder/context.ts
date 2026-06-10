@@ -1,6 +1,8 @@
 import { eventsDomain } from "@ekairos/events"
 
 import { createDatasetId } from "../id.js"
+import { datasetDomain } from "../schema.js"
+import { DatasetService } from "../service.js"
 import { getDomainDescriptor } from "./rows.js"
 import type {
   AnyDatasetRuntime,
@@ -14,6 +16,7 @@ import type {
 type DatasetContextResolution = {
   contextId: string
   resources: InternalDatasetResource[]
+  contextResources: DatasetContextResourceRecord[]
 }
 
 type DatasetContextResourceRecord = {
@@ -30,6 +33,11 @@ function getContextWhere(context: DatasetContextResourceRef) {
 
 async function getEventsDb(runtime: AnyDatasetRuntime) {
   const scoped = await (runtime as any).use(eventsDomain)
+  return scoped.db as any
+}
+
+async function getDatasetDb(runtime: AnyDatasetRuntime) {
+  const scoped = await (runtime as any).use(datasetDomain)
   return scoped.db as any
 }
 
@@ -112,28 +120,72 @@ async function createDatasetResourceContextStep(params: {
   "use step"
 
   const db = await getEventsDb(params.runtime)
-  const contextId = createDatasetId()
+  const contextKey = `dataset:${params.datasetId}`
+  const existing = await db.query({
+    event_contexts: {
+      $: { where: { key: contextKey } as any, limit: 1 },
+    },
+  })
+  const contextId = existing.event_contexts?.[0]?.id ?? createDatasetId()
   const now = new Date()
+  const resources = await enrichDatasetContextResources(params.runtime, params.resources)
 
   await db.transact([
-    db.tx.event_contexts[contextId].create({
+    db.tx.event_contexts[contextId].update({
+      key: contextKey,
       createdAt: now,
       updatedAt: now,
-      name: `Dataset ${params.datasetId} resource context`,
+      name: `Dataset ${params.datasetId}`,
       status: "open_idle",
       content: {
         datasetId: params.datasetId,
-        resourceCount: params.resources.length,
+        resourceCount: resources.length,
       },
-      resources: params.resources,
-      description: `Dataset materialization context for ${params.datasetId}.`,
-      goal: "Materialize the dataset from the resources declared in this context.",
+      resources,
+      description: `Dataset execution context for ${params.datasetId}.`,
+      goal: "Produce the dataset output from the resources declared in this context.",
     }),
   ])
 
   return {
     contextId,
   }
+}
+
+async function enrichDatasetContextResources(
+  runtime: AnyDatasetRuntime,
+  resources: DatasetContextResourceRecord[],
+): Promise<DatasetContextResourceRecord[]> {
+  const datasetResources = resources.filter(
+    (resource) => resource.type === "dataset" && typeof resource.datasetId === "string",
+  )
+  if (datasetResources.length === 0) return resources
+
+  const db = await getDatasetDb(runtime)
+  const service = new DatasetService(db)
+  const enriched: DatasetContextResourceRecord[] = []
+  for (const resource of resources) {
+    if (resource.type !== "dataset" || typeof resource.datasetId !== "string") {
+      enriched.push(resource)
+      continue
+    }
+
+    const preview = await service.previewRows(resource.datasetId, 20)
+    if (!preview.ok) {
+      enriched.push({
+        ...resource,
+        previewError: preview.error,
+      })
+      continue
+    }
+
+    enriched.push({
+      ...resource,
+      previewRows: preview.data,
+      previewLimit: 20,
+    })
+  }
+  return enriched
 }
 
 function contextResourceToDatasetResource(resource: DatasetContextResourceRecord): InternalDatasetResource {
@@ -210,9 +262,17 @@ async function readExistingContext(params: {
     throw new Error("dataset_context_resources_required")
   }
 
+  const sourceContextId = String(row.id)
+  const copiedResources = resources.map((resource) => ({
+    ...resource,
+    sourceContextId: (resource as any).sourceContextId ?? sourceContextId,
+    sourceResourceKey: (resource as any).sourceResourceKey ?? resource.key,
+  }))
+
   return {
-    contextId: String(row.id),
+    contextId: sourceContextId,
     resources: resources.map((resource) => contextResourceToDatasetResource(resource)),
+    contextResources: copiedResources,
   }
 }
 
@@ -233,7 +293,16 @@ export async function resolveDatasetResourceContext<Runtime extends AnyDatasetRu
     if (resources.length > 1) {
       throw new Error("dataset_context_resource_is_exclusive")
     }
-    return await readExistingContext({ runtime, context: contextRefs[0] })
+    const source = await readExistingContext({ runtime, context: contextRefs[0] })
+    const created = await createDatasetResourceContextStep({
+      runtime,
+      datasetId,
+      resources: source.contextResources,
+    })
+    return {
+      ...source,
+      contextId: created.contextId,
+    }
   }
 
   const contextResourceRecords = resources.map((resource, index) =>
@@ -248,5 +317,6 @@ export async function resolveDatasetResourceContext<Runtime extends AnyDatasetRu
   return {
     contextId: created.contextId,
     resources,
+    contextResources: contextResourceRecords,
   }
 }

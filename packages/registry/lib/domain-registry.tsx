@@ -37,6 +37,12 @@ export type DomainRegistryRoute = {
   description: string;
 };
 
+export type DomainRegistryLadderStep = {
+  level: string;
+  title: string;
+  body: string;
+};
+
 export type DomainRegistryEntry = {
   id: string;
   title: string;
@@ -51,6 +57,7 @@ export type DomainRegistryEntry = {
   heroLabel: string;
   heroTitle: string;
   heroBody: string;
+  ladder: DomainRegistryLadderStep[];
   schemaEntities: DomainRegistrySchemaEntity[];
   actions: DomainRegistryAction[];
   usageTitle: string;
@@ -97,6 +104,23 @@ export const eventsDomainEntry: DomainRegistryEntry = {
   heroTitle: "The interaction layer for AI workflows.",
   heroBody:
     "Events owns the durable conversation and execution trail. UI components render that surface, while the package keeps context state, model reactions, domain actions, and replay out of the registry.",
+  ladder: [
+    {
+      level: "in one sentence",
+      title: "A durable memory for AI conversations.",
+      body: "Everything the agent saw, said, and did — saved as data you can read back anytime.",
+    },
+    {
+      level: "how it works",
+      title: "Append a message, the agent reacts, every step lands as a record.",
+      body: "You open a context for a conversation and append items to it. The agent reacts with the model and your domain actions, and each piece of its work — text, reasoning, action calls — is persisted as it happens. UI reads that same record reactively, so what you render is always what actually occurred.",
+    },
+    {
+      level: "under the hood",
+      title: "Contexts, items, executions, steps, and parts on a typed schema.",
+      body: "event_contexts is the aggregate root; event_items hold the turn history while event_executions and event_steps track each reaction run, and event_parts are the canonical replay surface. Actions like createContext, defineAction, and createAiSdkReactor wire models and typed domain actions into that durable trail.",
+    },
+  ],
   schemaEntities: [
     {
       name: "event_contexts",
@@ -569,6 +593,23 @@ export const sandboxDomainEntry: DomainRegistryEntry = {
   heroTitle: "Durable sandboxes without provider lock-in.",
   heroBody:
     "Sandbox turns Vercel, Daytona, Sprites, and future providers into a domain surface: create an environment, stream commands, write files, expose ports, and reconnect by durable ids.",
+  ladder: [
+    {
+      level: "in one sentence",
+      title: "A safe computer your agent can use.",
+      body: "Run commands, edit files, open ports — all inside an isolated environment that can't touch anything else.",
+    },
+    {
+      level: "how it works",
+      title: "Create an environment once, then keep coming back to it by id.",
+      body: "You create a sandbox with a provider and runtime, and get back a durable id. From then on the agent runs commands, writes files, and previews running apps through that id — and can reconnect to the same environment later, even across restarts.",
+    },
+    {
+      level: "under the hood",
+      title: "Provider-agnostic records for sandboxes and their processes.",
+      body: "sandbox_sandboxes stores provider, runtime, purpose, and status while sandbox_processes tracks each command run with its stream output. Actions like createSandbox, runCommandProcess, writeFiles, createCheckpoint, and getPortUrl keep Vercel, Daytona, and Sprites behind one domain surface.",
+    },
+  ],
   schemaEntities: [
     {
       name: "sandbox_sandboxes",
@@ -653,6 +694,23 @@ export const datasetDomainEntry: DomainRegistryEntry = {
   heroTitle: "Domain data packaged for AI work.",
   heroBody:
     "Dataset converts domain state into durable rows and artifacts. It can snapshot queries directly or use sandbox-backed reactors for files, transforms, instructions, and multi-source work.",
+  ladder: [
+    {
+      level: "in one sentence",
+      title: "Turn your domain data into tidy rows an AI can actually work with.",
+      body: "Messy queries, files, and text become clean, durable datasets ready for analysis.",
+    },
+    {
+      level: "how it works",
+      title: "Point it at a source, choose a shape, and build.",
+      body: "You start from a domain query, a file, another dataset, or plain text, and decide whether the output should be rows or a single structured object. Simple query snapshots materialize directly; richer parsing and transforms run inside a sandbox. Either way the result lands as a durable dataset you can query and reuse.",
+    },
+    {
+      level: "under the hood",
+      title: "Datasets and records built through a runtime-first builder.",
+      body: "dataset_datasets holds metadata, source analysis, output mode, and linked files while dataset_records stores the materialized rows. The dataset(runtime) builder chains fromQuery, from, fromText, asRows, and build, with materializeDataset exposing the same flow as an agent-callable action.",
+    },
+  ],
   schemaEntities: [
     {
       name: "dataset_datasets",
@@ -735,6 +793,23 @@ export const tasksDomainEntry: DomainRegistryEntry = {
   heroTitle: "Typed human work inside AI workflows.",
   heroBody:
     "Tasks keeps the durable state small and strict: open a task, wait for a typed outcome, decide/cancel/fail it, and let product domains own assignment and notification policy.",
+  ladder: [
+    {
+      level: "in one sentence",
+      title: "A pause button for workflows.",
+      body: "The workflow stops, a human decides, and the workflow continues with that decision.",
+    },
+    {
+      level: "how it works",
+      title: "Open a task, wait for the outcome, keep going.",
+      body: "A workflow opens a task describing what needs to be decided and what shape the answer must have. It then waits — minutes or days — until someone records an outcome, cancels, or fails it. The moment a decision lands, the workflow picks up exactly where it paused, with a typed result in hand.",
+    },
+    {
+      level: "under the hood",
+      title: "One strict record with a schema-validated outcome.",
+      body: "task_tasks stores kind, key, state, instructions, context, and a zod outcome schema that validates the decision before it closes the task. openTask is idempotent by key, awaitOutcome blocks until a terminal state, and decideTask, cancelTask, and failTask resolve it — assignment and notifications stay in your product domain.",
+    },
+  ],
   schemaEntities: [
     {
       name: "task_tasks",
@@ -797,8 +872,186 @@ const outcome = await task.outcome();`,
   demos: [],
 };
 
+export const channelDomainEntry: DomainRegistryEntry = {
+  id: "channel",
+  title: "Channel",
+  summary:
+    "Unified multichannel communication for agent threads: one canonical message model across web, email, whatsapp, slack, teams and more — persisted on InstantDB.",
+  href: "/channel",
+  componentsHref: "/channel/components",
+  domainHref: "/channel/domain",
+  schemaPackage: "@ekairos/channel",
+  packageDependency: "@ekairos/channel@beta",
+  aggregateRoot: "channel_messages",
+  durableSurface: "channel_state",
+  heroLabel: "Communication runtime",
+  heroTitle: "Every channel. One thread.",
+  heroBody:
+    "Channel turns platform conversations into domain state: every inbound and outbound message — web, email, whatsapp, slack — lands as a canonical channel_messages record on the agent's context. UI reads it reactively from InstantDB; delivery internals stay contained inside the package.",
+  ladder: [
+    {
+      level: "in one sentence",
+      title: "One conversation across whatsapp, email, slack, and the web.",
+      body: "Your agent answers wherever people write, and it all reads as a single thread.",
+    },
+    {
+      level: "how it works",
+      title: "Messages come in from any platform, land in one place, and replies go back out.",
+      body: "Each platform delivers messages through a webhook, and every one of them becomes the same canonical record attached to the agent's conversation. Your agent reacts once, and the reply travels back through whichever channel the person used. The UI just reads the thread — it never cares which platform a message came from.",
+    },
+    {
+      level: "under the hood",
+      title: "Canonical messages plus the delivery machinery to keep them ordered.",
+      body: "channel_messages is the cross-platform record — kind, direction, role, parts, status — linked to event_contexts and event_items, while channel_locks, channel_queues, channel_subscriptions, and channel_state keep delivery serialized and durable. createChannels boots the runtime from platform credentials and two callbacks, exposing one webhook handler per platform.",
+    },
+  ],
+  schemaEntities: [
+    {
+      name: "channel_messages",
+      description:
+        "Canonical message crossing any channel: kind, direction, role, text/parts, status, externalId, participant — linked to event_contexts and event_items.",
+    },
+    {
+      name: "channel_state",
+      description: "Internal runtime key/value state with TTL for platform delivery (caches, lists).",
+    },
+    {
+      name: "channel_locks",
+      description: "Per-conversation delivery locks (token + TTL) so one handler runs at a time.",
+    },
+    {
+      name: "channel_subscriptions",
+      description: "Conversations the runtime is subscribed to, durable across restarts.",
+    },
+    {
+      name: "channel_queues",
+      description: "Pending inbound entries per conversation while a handler is running.",
+    },
+  ],
+  actions: [
+    {
+      name: "createChannels",
+      description:
+        "Boots the multichannel runtime: configured platforms feed one inbound pipeline and expose one webhook handler each.",
+    },
+    {
+      name: "inbound.reply",
+      description: "Posts a reply on the same platform conversation and persists the outbound message.",
+    },
+    {
+      name: "ChannelRegistry.send",
+      description: "Sends an outbound message through a registered channel adapter by kind.",
+    },
+    {
+      name: "createChannelMessage",
+      description: "Constructs a canonical message record ready to persist and link.",
+    },
+    {
+      name: "useThread (agent)",
+      description:
+        "The agent hook queries channel_messages alongside context items, so timelines span every channel for free.",
+    },
+  ],
+  usageTitle: "Configure platforms. Everything else is domain state.",
+  usageBody:
+    "Apps configure platform credentials and two callbacks; messages, subscriptions, locks and queues persist on InstantDB through the channel domain.",
+  usageCode: `import { createChannels } from "@ekairos/channel";
+
+const channels = await createChannels({
+  db,
+  userName: "ekairos",
+  platforms: {
+    slack: { botToken: process.env.SLACK_BOT_TOKEN!, signingSecret: process.env.SLACK_SIGNING_SECRET! },
+    telegram: { botToken: process.env.TELEGRAM_BOT_TOKEN! },
+  },
+  resolveContextId: async ({ channel, threadKey }) =>
+    ensureThreadContext(\`\${channel}:\${threadKey}\`),
+  react: async (inbound) => {
+    const reaction = await agentThread(inbound.contextId).react(inbound.message);
+    return reaction.text;
+  },
+});
+
+// app/api/channels/[platform]/route.ts
+export const POST = (req: Request, { params }) =>
+  channels.webhooks[params.platform](req);`,
+  componentSurface:
+    "Channel UI is plug & play: components query the channel_messages schema on InstantDB directly. The only custom code an app writes is the send endpoint and the webhook mount.",
+  componentBacklog: [],
+  routes: domainRoutes("channel"),
+  components: [
+    {
+      id: "channel-timeline",
+      label: "ChannelTimeline",
+      description:
+        "The whole conversation across every channel: queries channel_messages reactively from InstantDB by contextId and renders the interleaved timeline.",
+      href: "/channel/components#channel-timeline",
+      registryName: "channel-timeline",
+      registryPath: "/r/channel-timeline.json",
+      target: "components/ekairos/channel/channel-timeline.tsx",
+      dependency: "@ekairos/channel@beta",
+      packageImport: "@ekairos/channel",
+      status: "published",
+      kind: "component",
+      group: "Timeline",
+    },
+    {
+      id: "channel-message",
+      label: "ChannelMessageBubble",
+      description:
+        "Canonical message bubble: direction, role, platform badge, participant, status and timestamp for any channel_messages record.",
+      href: "/channel/components#channel-message",
+      registryName: "channel-message",
+      registryPath: "/r/channel-message.json",
+      target: "components/ekairos/channel/channel-message.tsx",
+      dependency: "@ekairos/channel@beta",
+      packageImport: "@ekairos/channel",
+      status: "published",
+      kind: "component",
+      group: "Timeline",
+    },
+    {
+      id: "channel-badge",
+      label: "ChannelBadge",
+      description: "Platform identity chip (web, email, whatsapp, slack, teams, discord, telegram) with per-channel accent.",
+      href: "/channel/components#channel-badge",
+      registryName: "channel-badge",
+      registryPath: "/r/channel-badge.json",
+      target: "components/ekairos/channel/channel-badge.tsx",
+      dependency: "@ekairos/channel@beta",
+      packageImport: "@ekairos/channel",
+      status: "published",
+      kind: "component",
+      group: "Primitives",
+    },
+    {
+      id: "channel-composer",
+      label: "ChannelComposer",
+      description:
+        "Outbound composer: picks a channel and posts to your send endpoint — the one piece of custom code an app owns.",
+      href: "/channel/components#channel-composer",
+      registryName: "channel-composer",
+      registryPath: "/r/channel-composer.json",
+      target: "components/ekairos/channel/channel-composer.tsx",
+      dependency: "@ekairos/channel@beta",
+      packageImport: "@ekairos/channel",
+      status: "published",
+      kind: "component",
+      group: "Primitives",
+    },
+  ],
+  demos: [
+    {
+      label: "Multichannel demo",
+      href: "/channel/demo",
+      description: "Live simulated thread spanning whatsapp, email, slack and web.",
+    },
+  ],
+};
+
 export const domainRegistry = [
   eventsDomainEntry,
+  channelDomainEntry,
   sandboxDomainEntry,
   datasetDomainEntry,
   tasksDomainEntry,

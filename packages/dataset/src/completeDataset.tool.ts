@@ -11,7 +11,7 @@ interface CompleteDatasetToolParams {
 
 export function createCompleteDatasetTool({ datasetId, sandboxId, runtime, outputPath }: CompleteDatasetToolParams) {
     return tool({
-        description: "Mark the dataset as completed. Use only when output.jsonl has been successfully generated and is ready for validation.",
+        description: "Validate and complete the dataset from output.jsonl. The result includes the JSONL outputPath and storagePath used for completion.",
         inputSchema: z.object({
             summary: z.string().describe("Summary of the completed dataset including record count and structure"),
         }),
@@ -36,12 +36,19 @@ export function didCompleteDatasetSucceed(event: { content?: { parts?: any[] } }
     const parts = Array.isArray(event?.content?.parts) ? event.content.parts : []
 
     return parts.some((part) => {
-        if (part?.type === "action" && part?.content?.actionName === "completeDataset") {
+        if (
+            part?.type === "action" &&
+            ["completeDataset", "completeObject", "replaceRows"].includes(part?.content?.actionName)
+        ) {
             const output = part.content.output
             return part.content.status === "completed" && output?.success === true && output?.status === "completed"
         }
 
-        if (part?.type === "tool-completeDataset") {
+        if (
+            part?.type === "tool-completeDataset" ||
+            part?.type === "tool-completeObject" ||
+            part?.type === "tool-replaceRows"
+        ) {
             const output = part.output ?? part.result
             return part.state === "output-available" && output?.success === true && output?.status === "completed"
         }

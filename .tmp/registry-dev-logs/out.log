@@ -1,0 +1,22 @@
+
+> registry@1.21.83-beta.0 dev C:\ekairos-projects\workspace\ekairos-base\packages\registry
+> node scripts/dev.mjs
+
+[registry-dev] auto bridge enabled -> CODEX_APP_SERVER_URL=http://127.0.0.1:4500/turn
+[codex-bridge] listening on http://127.0.0.1:4500
+   ▲ Next.js 16.0.7 (Turbopack)
+   - Local:         http://localhost:3030
+   - Network:       http://192.168.1.23:3030
+
+ ✓ Starting...
+ ✓ Ready in 1185ms
+ GET /events/components 200 in 4.0s (compile: 2.6s, render: 1351ms)
+ GET /events/components 200 in 407ms (compile: 5ms, render: 402ms)
+ POST /api/examples/tenant/init 500 in 880ms (compile: 864ms, render: 16ms)
+ GET /events/components 200 in 353ms (compile: 4ms, render: 349ms)
+ POST /api/examples/tenant/init 500 in 9ms (compile: 4ms, render: 5ms)
+ ✓ Compiled in 158ms
+[?25h
+C:\ekairos-projects\workspace\ekairos-base\packages\registry:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  registry@1.21.83-beta.0 dev: `node scripts/dev.mjs`
+Exit status 4294967295

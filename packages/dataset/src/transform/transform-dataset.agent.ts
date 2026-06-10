@@ -15,9 +15,11 @@ import { datasetUpdateSchemaStep } from "../dataset/steps.js"
 import { getDatasetOutputPath } from "../datasetFiles.js"
 import { createExecuteCommandTool } from "../executeCommand.tool.js"
 import {
+  createCompleteObjectTool,
+  createReplaceRowsTool,
+} from "../writeDatasetRows.tool.js"
+import {
   buildTransformDatasetPromptStep,
-  ensureTransformInputsInSandboxStep,
-  generateTransformInputPreviewsStep,
 } from "./transform-dataset.steps.js"
 import { createDatasetId } from "../id.js"
 import type {
@@ -84,29 +86,11 @@ function createTransformDatasetContextDefinition<Env extends { orgId: string }>(
 
       const initialized =
         sandboxState.initialized && Array.isArray(sandboxState.inputPaths)
-          ? {
-              inputPaths: sandboxState.inputPaths,
-              outputPath: previous?.sandboxConfig?.outputPath ?? getDatasetOutputPath(datasetId),
-              state: sandboxState,
-            }
-          : await ensureTransformInputsInSandboxStep({
-              runtime,
-              sandboxId,
-              datasetId,
-              inputDatasetIds,
-              state: sandboxState,
-            })
+          ? sandboxState
+          : { initialized: false, inputPaths: [] }
 
-      let inputPreviews =
-        previous?.inputPreviews ?? params.inputPreviews ?? undefined
-      if (!inputPreviews) {
-        inputPreviews = await generateTransformInputPreviewsStep({
-          runtime,
-          sandboxId,
-          datasetId,
-          inputPaths: initialized.inputPaths,
-        })
-      }
+      const inputPreviews =
+        previous?.inputPreviews ?? params.inputPreviews ?? []
 
       await datasetUpdateSchemaStep({
         runtime,
@@ -121,9 +105,10 @@ function createTransformDatasetContextDefinition<Env extends { orgId: string }>(
         outputSchema,
         sandboxConfig: {
           inputPaths: initialized.inputPaths,
-          outputPath: initialized.outputPath,
+          outputPath: previous?.sandboxConfig?.outputPath ?? getDatasetOutputPath(datasetId),
         },
         inputPreviews: inputPreviews.length > 0 ? inputPreviews : undefined,
+        contextResources: previous?.contextResources ?? params.contextResources ?? [],
         errors: [],
       }
 
@@ -149,14 +134,18 @@ function createTransformDatasetContextDefinition<Env extends { orgId: string }>(
         outputSchema,
         instructions,
         sandboxId,
-        sandboxState: initialized.state,
+        sandboxState: initialized,
+        contextResources: previous?.contextResources ?? params.contextResources ?? [],
         system,
         sandboxConfig: {
           inputPaths: initialized.inputPaths,
-          outputPath: initialized.outputPath,
+          outputPath: previous?.sandboxConfig?.outputPath ?? getDatasetOutputPath(datasetId),
         },
       }
     })
+    .resources(({ content }: any) =>
+      Array.isArray(content?.contextResources) ? content.contextResources : [],
+    )
     .narrative(async (stored: any) => {
       return String(stored?.content?.system ?? "")
     })
@@ -166,6 +155,18 @@ function createTransformDatasetContextDefinition<Env extends { orgId: string }>(
       if (!datasetId) throw new Error("dataset_id_required")
       if (!sandboxId) throw new Error("dataset_sandbox_required")
       return {
+        completeObject: createCompleteObjectTool({
+          datasetId,
+          sandboxId,
+          runtime,
+          schema: stored?.content?.outputSchema,
+        }),
+        replaceRows: createReplaceRowsTool({
+          datasetId,
+          sandboxId,
+          runtime,
+          schema: stored?.content?.outputSchema,
+        }),
         executeCommand: createExecuteCommandTool({
           datasetId,
           sandboxId,
@@ -213,6 +214,7 @@ export function createTransformDatasetContext<Env extends { orgId: string }>(
     reactor?: ContextReactor<any, any>
     sandboxState?: TransformSandboxState
     inputPreviews?: Array<{ datasetId: string; preview: TransformInputPreviewContext }>
+    contextResources?: any[]
   },
 ) {
   const datasetId = params.datasetId ?? createDatasetId()
@@ -226,6 +228,7 @@ export function createTransformDatasetContext<Env extends { orgId: string }>(
     reactor: params.reactor,
     sandboxState: params.sandboxState,
     inputPreviews: params.inputPreviews,
+    contextResources: params.contextResources,
   })
 
   return {
@@ -275,6 +278,7 @@ export function createTransformDatasetContext<Env extends { orgId: string }>(
           sandboxId: params.sandboxId ?? "",
           sandboxState: params.sandboxState ?? { initialized: false, inputPaths: [] },
           inputPreviews: params.inputPreviews,
+          contextResources: params.contextResources ?? [],
         },
       })
       await awaitContextRun(shell.run)

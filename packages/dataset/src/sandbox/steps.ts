@@ -59,8 +59,10 @@ async function runLocalSandboxCommand(params: {
   const args = params.args ?? []
 
   if (cmd === "mkdir") {
-    const target = args[args.length - 1]
-    await fs.mkdir(String(target ?? ""), { recursive: true })
+    const targets = args.filter((arg) => !String(arg).startsWith("-"))
+    for (const target of targets) {
+      await fs.mkdir(String(target ?? ""), { recursive: true })
+    }
     return { exitCode: 0, stdout: "", stderr: "" }
   }
 

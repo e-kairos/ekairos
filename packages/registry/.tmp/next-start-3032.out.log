@@ -1,0 +1,10 @@
+   ▲ Next.js 16.0.7
+   - Local:         http://localhost:3032
+   - Network:       http://192.168.1.23:3032
+
+ ✓ Starting...
+ ✓ Ready in 839ms
+undefined
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "next" not found
+
+Did you mean "pnpm exec next"?

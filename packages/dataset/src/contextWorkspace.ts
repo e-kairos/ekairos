@@ -33,6 +33,7 @@ export type PreparedContextExecutionWorkspace = {
   root: string
   contextRoot: string
   eventsDir: string
+  resourcesDir: string
   outputDir: string
   scriptsDir: string
   tmpDir: string
@@ -59,6 +60,10 @@ function sanitizePathSegment(value: string, fallback: string): string {
     .slice(0, 160)
 
   return normalized || fallback
+}
+
+export function sanitizeContextWorkspacePathSegment(value: string, fallback: string): string {
+  return sanitizePathSegment(value, fallback)
 }
 
 function filenameFromContentDisposition(value: string | undefined, fallback: string): string {
@@ -125,6 +130,13 @@ export function getContextEventsDir(params: {
   return `${getContextWorkspaceRoot(params)}/events`
 }
 
+export function getContextResourcesDir(params: {
+  contextId: string
+  root?: string
+}): string {
+  return `${getContextWorkspaceRoot(params)}/resources`
+}
+
 export function getContextExecutionWorkspaceDirs(params: {
   contextId: string
   executionId: string
@@ -133,10 +145,12 @@ export function getContextExecutionWorkspaceDirs(params: {
   const root = getContextExecutionWorkspaceRoot(params)
   const contextRoot = getContextWorkspaceRoot(params)
   const eventsDir = getContextEventsDir(params)
+  const resourcesDir = getContextResourcesDir(params)
   return {
     root,
     contextRoot,
     eventsDir,
+    resourcesDir,
     outputDir: `${root}/output`,
     scriptsDir: `${root}/scripts`,
     tmpDir: `${root}/tmp`,
@@ -150,7 +164,15 @@ export function getContextExecutionWorkspaceStandardDirs(params: {
   root?: string
 }): string[] {
   const dirs = getContextExecutionWorkspaceDirs(params)
-  return [dirs.contextRoot, dirs.eventsDir, dirs.root, dirs.outputDir, dirs.scriptsDir, dirs.tmpDir]
+  return [
+    dirs.contextRoot,
+    dirs.eventsDir,
+    dirs.resourcesDir,
+    dirs.root,
+    dirs.outputDir,
+    dirs.scriptsDir,
+    dirs.tmpDir,
+  ]
 }
 
 export function extractContextWorkspaceFilesFromEventItems(

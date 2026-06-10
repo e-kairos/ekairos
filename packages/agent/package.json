@@ -1,0 +1,78 @@
+{
+  "name": "@ekairos/agent",
+  "version": "1.22.0",
+  "description": "Ekairos Agent - channel-agnostic agent hosting over @ekairos/events contexts",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-kairos/ekairos.git",
+    "directory": "packages/agent"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js",
+      "require": "./dist/schema.js",
+      "default": "./dist/schema.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "require": "./dist/react.js",
+      "default": "./dist/react.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "schema": [
+        "dist/schema.d.ts"
+      ],
+      "react": [
+        "dist/react.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "watch": "tsc -p tsconfig.json --watch",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ekairos/channel": "workspace:*",
+    "@ekairos/domain": "workspace:*",
+    "@ekairos/events": "workspace:*",
+    "@instantdb/core": "0.22.142"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@ekairos/tsconfig": "workspace:*",
+    "@types/node": "^24.5.0",
+    "@types/react": "^19.2.2",
+    "react": "^19.2.0",
+    "typescript": "^5.9.2"
+  }
+}

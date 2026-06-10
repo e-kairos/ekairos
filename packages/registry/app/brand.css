@@ -1,0 +1,123 @@
+/* ============================================================================
+   Ekairos Brand — design system tokens & primitives
+   One file, four surfaces: marketing (vanilla CSS), registry (tailwind),
+   platform (next/tailwind), electron (tailwind). Import it first; map
+   framework themes onto the variables instead of redefining values.
+   ========================================================================== */
+
+:root {
+  /* surfaces */
+  --ek-bg: #000;
+  --ek-panel: #050607;
+  --ek-panel-soft: #0a0d0f;
+  --ek-surface: #f4f7f8; /* frost — light alternating sections */
+  --ek-surface-muted: #d9e1e5;
+
+  /* ink */
+  --ek-text: #f4f7f8;
+  --ek-ink: #090c0e;
+  --ek-ink-soft: #253038;
+  --ek-muted: rgba(244, 247, 248, 0.68);
+  --ek-muted-strong: rgba(244, 247, 248, 0.84);
+
+  /* hairlines */
+  --ek-line: rgba(255, 255, 255, 0.14);
+  --ek-line-dark: rgba(0, 0, 0, 0.16);
+
+  /* brand accents */
+  --ek-red: #ff5c67;
+  --ek-red-deep: #a51f2a;
+  --ek-red-hover: #cf2835;
+  --ek-cyan: #7defff;
+  --ek-cyan-deep: #1c5964;
+  --ek-sky: #75aadb;   /* AFA celeste — live/demo states */
+  --ek-gold: #d4af37;  /* completion / premium */
+  --ek-lilac: #cfc3f5; /* tornasol component */
+
+  /* type */
+  --ek-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ek-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ek-h1: clamp(3.25rem, 7.8vw, 8.9rem);
+  --ek-h2: clamp(2.35rem, 5.8vw, 5.7rem);
+  --ek-lead: clamp(1.08rem, 1.9vw, 1.42rem);
+  --ek-kicker-size: 0.76rem;
+  --ek-kicker-tracking: 0.08em;
+
+  /* rhythm */
+  --ek-section-y: clamp(56px, 9vw, 118px);
+  --ek-section-x: clamp(22px, 6vw, 84px);
+  --ek-container: 1440px;
+  --ek-radius: 0px;
+  --ek-radius-cta: 2px;
+}
+
+/* --- primitives ----------------------------------------------------------- */
+
+.ek-kicker {
+  font-family: var(--ek-font-mono);
+  font-size: var(--ek-kicker-size);
+  font-weight: 800;
+  letter-spacing: var(--ek-kicker-tracking);
+  text-transform: uppercase;
+  color: var(--ek-cyan);
+}
+.ek-kicker--light { color: var(--ek-red-deep); }
+
+.ek-card {
+  border: 1px solid var(--ek-line);
+  background: var(--ek-panel);
+  border-radius: var(--ek-radius);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.ek-card:hover {
+  border-color: var(--ek-cyan);
+  background: var(--ek-panel-soft);
+}
+
+.ek-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: var(--ek-radius-cta);
+  background: var(--ek-red-deep);
+  border: 1px solid color-mix(in oklab, var(--ek-red) 56%, #000 18%);
+  color: #fff;
+  font-weight: 850;
+  text-decoration: none;
+  transition: transform 140ms ease, background 140ms ease;
+}
+.ek-btn:hover {
+  transform: translateY(-2px);
+  background: var(--ek-red-hover);
+}
+
+.ek-grid-overlay {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* tornasol — iridescent sweep for in-progress / live states */
+@keyframes ek-tornasol-pan {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.ek-tornasol {
+  background-image: linear-gradient(110deg, var(--ek-sky) 0%, #eaf6ff 22%, var(--ek-gold) 44%, var(--ek-lilac) 62%, #8ecae6 80%, var(--ek-sky) 100%);
+  background-size: 220% 100%;
+  animation: ek-tornasol-pan 5.5s linear infinite;
+}
+.ek-tornasol-text {
+  background-image: linear-gradient(110deg, var(--ek-sky) 0%, #eaf6ff 25%, var(--ek-gold) 50%, var(--ek-lilac) 70%, var(--ek-sky) 100%);
+  background-size: 220% 100%;
+  animation: ek-tornasol-pan 5.5s linear infinite;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ek-tornasol, .ek-tornasol-text { animation: none; }
+}

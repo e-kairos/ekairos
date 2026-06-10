@@ -47,11 +47,14 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
         return {
             success: false,
             status: "missing_output",
+            rowSource: "jsonl",
             validRows: 0,
             rowRecordCount: 0,
             validation: [],
             error: message,
             message,
+            outputPath: resolvedOutputPath,
+            storagePath,
         }
     }
 
@@ -65,11 +68,14 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
         return {
             success: false,
             status: "dataset_not_found",
+            rowSource: "jsonl",
             validRows: 0,
             rowRecordCount: 0,
             validation: [],
             error: datasetResult.error,
             message: datasetResult.error,
+            outputPath: resolvedOutputPath,
+            storagePath,
         }
     }
 
@@ -79,11 +85,14 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
         return {
             success: false,
             status: "schema_missing",
+            rowSource: "jsonl",
             validRows: 0,
             rowRecordCount: 0,
             validation: [],
             error: "Schema not found in database. Please generate schema first.",
             message: "Schema not found in database. Please generate schema first.",
+            outputPath: resolvedOutputPath,
+            storagePath,
         }
     }
 
@@ -99,11 +108,14 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
         return {
             success: false,
             status: "schema_invalid",
+            rowSource: "jsonl",
             validRows: 0,
             rowRecordCount: 0,
             validation: [],
             error: `Failed to compile schema: ${message}`,
             message: `Failed to compile schema: ${message}`,
+            outputPath: resolvedOutputPath,
+            storagePath,
         }
     }
 
@@ -117,7 +129,12 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     })
 
     if (!validationResult.success) {
-        return validationResult
+        return {
+            ...validationResult,
+            rowSource: "jsonl",
+            outputPath: resolvedOutputPath,
+            storagePath,
+        }
     }
 
     const totalValidRows = validationResult.validRowCount ?? 0
@@ -130,11 +147,14 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
         return {
             success: false,
             status: "empty_output",
+            rowSource: "jsonl",
             validRows: 0,
             rowRecordCount: 0,
             validation: [],
             error: "Empty file content",
             message: "Empty file content",
+            outputPath: resolvedOutputPath,
+            storagePath,
         }
     }
 
@@ -151,11 +171,14 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
         return {
             success: false,
             status: "upload_failed",
+            rowSource: "jsonl",
             validRows: totalValidRows,
             rowRecordCount,
             validation: validationResult.validation,
             error: uploadResult.error,
             message: uploadResult.error,
+            outputPath: resolvedOutputPath,
+            storagePath,
         }
     }
 
@@ -173,23 +196,31 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
         return {
             success: false,
             status: "status_update_failed",
+            rowSource: "jsonl",
             validRows: totalValidRows,
             rowRecordCount,
             validation: validationResult.validation,
             error: statusResult.error,
             message: statusResult.error,
+            outputPath: resolvedOutputPath,
+            storagePath,
+            dataFileId: uploadResult.data.fileId,
         }
     }
 
     console.log(`[Dataset ${datasetId}] Dataset marked as COMPLETED (${totalValidRows} valid rows)`)
     console.log(`[Dataset ${datasetId}] ========================================`)
 
-    return {
-        success: true,
-        status: "completed",
-        records: totalValidRows,
-        summary: summary ?? `Dataset completed with ${totalValidRows} records.`,
-    }
+        return {
+            success: true,
+            status: "completed",
+            rowSource: "jsonl",
+            records: totalValidRows,
+            summary: summary ?? `Dataset completed with ${totalValidRows} records.`,
+            outputPath: resolvedOutputPath,
+            storagePath,
+            dataFileId: uploadResult.data.fileId,
+        }
 }
 
 function resolveExecutionStoragePath(outputPath: string, datasetId: string): string {

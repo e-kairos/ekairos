@@ -552,8 +552,56 @@ export class DatasetService {
         }
     }
 
+    async readLinkedRecords(datasetId: string): Promise<ServiceResult<Array<{ rowContent: any; order: number }>>> {
+        try {
+            const query: any = await this.db.query({
+                dataset_datasets: {
+                    $: {
+                        where: { datasetId },
+                        limit: 1,
+                    },
+                    records: {},
+                } as any,
+            })
+
+            const datasetRecord = query.dataset_datasets?.[0]
+            if (!datasetRecord) {
+                return { ok: false, error: `Dataset not found with id: ${datasetId}` }
+            }
+
+            const linkedRecords = Array.isArray(datasetRecord?.records)
+                ? datasetRecord.records
+                : []
+
+            return {
+                ok: true,
+                data: linkedRecords
+                    .slice()
+                    .sort((a: any, b: any) => Number(a?.order ?? 0) - Number(b?.order ?? 0))
+                    .map((record: any) => ({
+                        rowContent: record?.rowContent,
+                        order: Number(record?.order ?? 0),
+                    })),
+            }
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            return { ok: false, error: message }
+        }
+    }
+
     async previewRows(datasetId: string, limit: number = 20): Promise<ServiceResult<any[]>> {
         try {
+            const linkedRecords = await this.readLinkedRecords(datasetId)
+            if (linkedRecords.ok && linkedRecords.data.length > 0) {
+                return {
+                    ok: true,
+                    data: linkedRecords.data
+                        .slice(0, Math.max(0, Number(limit ?? 20)))
+                        .map((record) => record.rowContent),
+                }
+            }
+
             const readResult = await this.readRecordsFromFile(datasetId)
             if (!readResult.ok) {
                 return readResult as ServiceResult<any[]>
@@ -581,13 +629,29 @@ export class DatasetService {
         limit?: number
     }): Promise<ServiceResult<{ rows: any[]; cursor: number; done: boolean }>> {
         try {
+            const start = Math.max(0, Number(params.cursor ?? 0))
+            const limit = Math.max(1, Number(params.limit ?? 200))
+
+            const linkedRecords = await this.readLinkedRecords(params.datasetId)
+            if (linkedRecords.ok && linkedRecords.data.length > 0) {
+                const rows = linkedRecords.data
+                    .slice(start, start + limit)
+                    .map((record) => record.rowContent)
+                return {
+                    ok: true,
+                    data: {
+                        rows,
+                        cursor: start + rows.length,
+                        done: start + rows.length >= linkedRecords.data.length,
+                    },
+                }
+            }
+
             const readResult = await this.readRecordsFromFile(params.datasetId)
             if (!readResult.ok) {
                 return readResult as ServiceResult<{ rows: any[]; cursor: number; done: boolean }>
             }
 
-            const start = Math.max(0, Number(params.cursor ?? 0))
-            const limit = Math.max(1, Number(params.limit ?? 200))
             const rows: any[] = []
             let index = 0
             let hasMore = false

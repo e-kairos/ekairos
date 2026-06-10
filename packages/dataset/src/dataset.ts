@@ -205,6 +205,7 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
       )
       stateWithBuildOptions.resources = context.resources
       stateWithBuildOptions.contextId = context.contextId
+      stateWithBuildOptions.contextResources = context.contextResources as any
       const effectiveState: DatasetBuilderState<Runtime> =
         stateWithBuildOptions.output === "object"
           ? {

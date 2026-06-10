@@ -33,8 +33,9 @@ export function buildObjectOutputInstructions(userInstructions?: string) {
   const base = String(userInstructions ?? "").trim()
   const objectContract = [
     "Output mode is object.",
-    "Produce exactly one JSONL row in output.jsonl.",
-    "That row must be {\"type\":\"row\",\"data\":<the final object>}.",
+    "Produce exactly one final object.",
+    "completeObject({ data: <the final object>, summary }) is available to complete the dataset directly.",
+    "If you use output.jsonl instead, produce exactly one row: {\"type\":\"row\",\"data\":<the final object>}.",
     "Do not emit multiple rows, headers, summaries, or metadata rows.",
   ].join("\n")
 

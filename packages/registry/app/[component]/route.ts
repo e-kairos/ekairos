@@ -97,6 +97,7 @@ const runtimeProvidedDependencies = new Set(["next", "react", "react-dom"]);
 const versionlessDependencies = new Set(["ai", "streamdown"]);
 const packageVersionOverrides: Record<string, string> = {
   "@ekairos/events": process.env.EKAIROS_EVENTS_PACKAGE_VERSION ?? "beta",
+  "@ekairos/channel": process.env.EKAIROS_CHANNEL_PACKAGE_VERSION ?? "beta",
   ai: "^5.0.102",
   streamdown: "^1.3.0",
 };
@@ -152,6 +153,10 @@ const toComponentName = (relativePath: string) =>
 
 const PUBLISHED_EKAIROS_NAMES: Record<string, string> = {
   "ekairos/events/event-context-panel": "event-context-panel",
+  "ekairos/channel/channel-badge": "channel-badge",
+  "ekairos/channel/channel-message": "channel-message",
+  "ekairos/channel/channel-timeline": "channel-timeline",
+  "ekairos/channel/channel-composer": "channel-composer",
 };
 
 function shouldPublishSource(relativePath: string) {
@@ -166,10 +171,19 @@ function getRegistryName(relativePath: string) {
   return toComponentName(relativePath);
 }
 
+const KNOWN_TITLES: Record<string, string> = {
+  "ekairos/events/event-context-panel": "EventContextPanel",
+  "ekairos/channel/channel-badge": "ChannelBadge",
+  "ekairos/channel/channel-message": "ChannelMessageBubble",
+  "ekairos/channel/channel-timeline": "ChannelTimeline",
+  "ekairos/channel/channel-composer": "ChannelComposer",
+};
+
 const toTitle = (relativePath: string) => {
   const basePath = stripExtension(relativePath);
-  if (basePath === "ekairos/events/event-context-panel") {
-    return "EventContextPanel";
+  const knownTitle = KNOWN_TITLES[basePath];
+  if (knownTitle) {
+    return knownTitle;
   }
 
   return basePath
@@ -194,6 +208,14 @@ const toDescription = (relativePath: string) => {
   switch (basePath) {
     case "ekairos/events/event-context-panel":
       return "Client event context panel that uses @ekairos/events/react directly.";
+    case "ekairos/channel/channel-badge":
+      return "Platform identity chip for canonical channel messages.";
+    case "ekairos/channel/channel-message":
+      return "Canonical message bubble for any channel_messages record.";
+    case "ekairos/channel/channel-timeline":
+      return "Reactive multichannel conversation timeline over the channel_messages InstantDB schema.";
+    case "ekairos/channel/channel-composer":
+      return "Outbound composer that posts to your send endpoint with channel selection.";
     default: {
       const humanPath = basePath.replace(/\//g, " / ");
       return `Ekairos UI component defined in ${humanPath}.`;

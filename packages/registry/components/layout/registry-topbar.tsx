@@ -19,10 +19,17 @@ const NAV_ITEMS = [
       pathname.startsWith("/docs/domains"),
   },
   {
+    href: "/registries",
+    label: "Registries",
+    match: (pathname: string) => pathname.startsWith("/registries"),
+  },
+  {
     href: "/registry",
     label: "Manifest",
     match: (pathname: string) =>
-      pathname.startsWith("/registry") || pathname.startsWith("/r/"),
+      pathname === "/registry" ||
+      pathname.startsWith("/registry/") ||
+      pathname.startsWith("/r/"),
   },
 ] as const;
 

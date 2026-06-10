@@ -1,7 +1,7 @@
 import type { InstaQLParams, ValidQuery } from "@instantdb/core"
 import type { DomainInstantSchema, DomainSchemaResult } from "@ekairos/domain"
 import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
-import type { ContextIdentifier, ContextReactor } from "@ekairos/events"
+import type { ContextIdentifier, ContextReactor, StoredContextResource } from "@ekairos/events"
 
 import { datasetDomain } from "../schema.js"
 
@@ -118,6 +118,7 @@ export type DatasetBuilderState<Runtime extends AnyDatasetRuntime> = {
   runtime: Runtime
   env: Runtime["env"] & DatasetRuntimeEnv
   resources: InternalDatasetResource[]
+  contextResources?: StoredContextResource[]
   title?: string
   sandboxId?: string
   contextId?: string

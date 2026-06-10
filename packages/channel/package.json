@@ -1,0 +1,92 @@
+{
+  "name": "@ekairos/channel",
+  "version": "1.22.0",
+  "description": "Ekairos Channel - unified multichannel communication (web, email, whatsapp, ...) for agent threads",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-kairos/ekairos.git",
+    "directory": "packages/channel"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js",
+      "require": "./dist/schema.js",
+      "default": "./dist/schema.js"
+    },
+    "./platforms": {
+      "types": "./dist/platforms.d.ts",
+      "import": "./dist/platforms.js",
+      "require": "./dist/platforms.js",
+      "default": "./dist/platforms.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "schema": [
+        "dist/schema.d.ts"
+      ],
+      "platforms": [
+        "dist/platforms.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "watch": "tsc -p tsconfig.json --watch",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ekairos/domain": "workspace:*",
+    "@ekairos/events": "workspace:*",
+    "@instantdb/core": "0.22.142",
+    "chat": "^4.30.0"
+  },
+  "peerDependencies": {
+    "@chat-adapter/discord": "*",
+    "@chat-adapter/gchat": "*",
+    "@chat-adapter/slack": "*",
+    "@chat-adapter/teams": "*",
+    "@chat-adapter/telegram": "*"
+  },
+  "peerDependenciesMeta": {
+    "@chat-adapter/discord": {
+      "optional": true
+    },
+    "@chat-adapter/gchat": {
+      "optional": true
+    },
+    "@chat-adapter/slack": {
+      "optional": true
+    },
+    "@chat-adapter/teams": {
+      "optional": true
+    },
+    "@chat-adapter/telegram": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@ekairos/tsconfig": "workspace:*",
+    "@types/node": "^24.5.0",
+    "typescript": "^5.9.2"
+  }
+}

@@ -57,6 +57,39 @@ export function DomainLandingPage({ domain }: { domain: DomainRegistryEntry }) {
         </div>
       </section>
 
+      <section id="from-simple-to-complex" className="border-b border-border bg-background">
+        <div className="mx-auto w-full max-w-[94rem] px-5 py-14 md:px-10 md:py-20 lg:px-14">
+          <p className="font-mono text-xs font-semibold uppercase tracking-[0.3em] text-red-700">
+            From simple to complex
+          </p>
+          <h2 className="mt-5 max-w-xl text-4xl font-semibold leading-[0.95] md:text-6xl">
+            The same idea, three depths.
+          </h2>
+
+          <div className="mt-10 border-t border-black/20">
+            {domain.ladder.map((step, index) => (
+              <div
+                key={step.level}
+                className="grid gap-4 border-b border-black/20 py-7 md:grid-cols-[4rem_14rem_1fr] md:gap-8"
+              >
+                <span className="font-mono text-xs uppercase tracking-[0.24em] text-red-700">
+                  0{index + 1}
+                </span>
+                <p className="font-mono text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                  {step.level}
+                </p>
+                <div className="min-w-0">
+                  <p className="text-lg font-semibold leading-7">{step.title}</p>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+                    {step.body}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="border-b border-border bg-[#f4f6f7]">
         <div className="mx-auto grid w-full max-w-[94rem] gap-10 px-5 py-14 md:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)] md:px-10 md:py-20 lg:px-14">
           <div className="min-w-0">

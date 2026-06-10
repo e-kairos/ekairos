@@ -18,6 +18,75 @@
           "target": "components/ekairos/events/event-context-panel.tsx"
         }
       ]
+    },
+    {
+      "name": "channel-badge",
+      "type": "registry:component",
+      "title": "ChannelBadge",
+      "description": "Platform identity chip for canonical channel messages.",
+      "dependencies": [],
+      "files": [
+        {
+          "path": "components/ekairos/channel/channel-badge.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/channel/channel-badge.tsx"
+        }
+      ]
+    },
+    {
+      "name": "channel-message",
+      "type": "registry:component",
+      "title": "ChannelMessageBubble",
+      "description": "Canonical message bubble for any channel_messages record.",
+      "dependencies": [
+        "@ekairos/channel@beta"
+      ],
+      "registryDependencies": [
+        "https://registry.ekairos.dev/r/channel-badge.json"
+      ],
+      "files": [
+        {
+          "path": "components/ekairos/channel/channel-message.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/channel/channel-message.tsx"
+        }
+      ]
+    },
+    {
+      "name": "channel-timeline",
+      "type": "registry:component",
+      "title": "ChannelTimeline",
+      "description": "Reactive multichannel conversation timeline over the channel_messages InstantDB schema.",
+      "dependencies": [
+        "@ekairos/channel@beta"
+      ],
+      "registryDependencies": [
+        "https://registry.ekairos.dev/r/channel-message.json"
+      ],
+      "files": [
+        {
+          "path": "components/ekairos/channel/channel-timeline.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/channel/channel-timeline.tsx"
+        }
+      ]
+    },
+    {
+      "name": "channel-composer",
+      "type": "registry:component",
+      "title": "ChannelComposer",
+      "description": "Outbound composer that posts to your send endpoint with channel selection.",
+      "dependencies": [],
+      "registryDependencies": [
+        "https://registry.ekairos.dev/r/channel-badge.json"
+      ],
+      "files": [
+        {
+          "path": "components/ekairos/channel/channel-composer.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/channel/channel-composer.tsx"
+        }
+      ]
     }
   ]
 }

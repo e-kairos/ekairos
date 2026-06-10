@@ -1,0 +1,9 @@
+   ▲ Next.js 16.0.7
+   - Local:         http://localhost:3031
+   - Network:       http://192.168.1.23:3031
+
+ ✓ Starting...
+ ✓ Ready in 778ms
+undefined
+C:\ekairos-projects\workspace\ekairos-base\packages\registry:
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "next" not found

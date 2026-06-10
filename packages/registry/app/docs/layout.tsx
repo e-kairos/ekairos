@@ -30,7 +30,9 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
     pathname.startsWith(`/${domainId}`);
   const isComponentActive = (itemId: string) => pathname === `/docs/components/${itemId}`;
   const componentLinks = domainRegistry.flatMap((domain) =>
-    domain.components.map((component) => ({ domain, component })),
+    domain.components
+      .filter((component) => component.status === "published")
+      .map((component) => ({ domain, component })),
   );
   const activeComponent =
     componentLinks.find(({ component }) => isComponentActive(component.id)) ?? null;

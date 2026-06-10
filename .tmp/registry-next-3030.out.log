@@ -1,0 +1,23 @@
+   ▲ Next.js 16.0.7 (Turbopack)
+   - Local:         http://localhost:3030
+   - Network:       http://192.168.1.23:3030
+
+ ✓ Starting...
+ ✓ Ready in 1096ms
+ GET / 200 in 3.1s (compile: 2.6s, render: 486ms)
+ GET / 200 in 123ms (compile: 5ms, render: 119ms)
+ GET /events/components 200 in 977ms (compile: 539ms, render: 438ms)
+ GET /registry 200 in 391ms (compile: 331ms, render: 60ms)
+ GET /registry/event-context-panel 200 in 1001ms (compile: 927ms, render: 73ms)
+ GET /r/use-context.json 404 in 1027ms (compile: 959ms, render: 68ms)
+ GET / 200 in 168ms (compile: 5ms, render: 163ms)
+ GET / 200 in 284ms (compile: 138ms, render: 146ms)
+ GET /events/components 200 in 656ms (compile: 168ms, render: 488ms)
+ GET /registry 200 in 169ms (compile: 106ms, render: 63ms)
+ GET /registry/event-context-panel 200 in 204ms (compile: 126ms, render: 78ms)
+ GET /r/use-context.json 404 in 86ms (compile: 12ms, render: 74ms)
+[?25h
+undefined
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "next" not found
+
+Did you mean "pnpm exec next"?

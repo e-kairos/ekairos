@@ -97,7 +97,7 @@ function getPlatformApiUri(): string | undefined {
   return raw.length > 0 ? raw : undefined;
 }
 
-function getPlatformApi(): PlatformApi {
+export function getPlatformApi(): PlatformApi {
   const token = getInstantProvisionToken();
   const apiURI = getPlatformApiUri();
   return new PlatformApi({
@@ -185,6 +185,10 @@ export async function ensureDemoTenant(params: {
   }
 
   const api = getPlatformApi();
+  // Disposable per-visitor app born with the base site schema. Domain schemas
+  // are pushed on demand when a visitor enters a domain. (Native temporary
+  // apps reject later schemaPush calls, so these are owned apps with a
+  // visitor-scoped title, destroyed via the tenant destroy endpoint.)
   const created = await api.createApp({
     title: buildTenantTitle(visitorId),
     schema: schema as any,
