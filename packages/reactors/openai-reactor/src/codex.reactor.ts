@@ -26,6 +26,7 @@ import {
 } from "./shared.js"
 
 export type CodexConfig = {
+  /** base URL of a codex app-server bridge; "local" with mode:"local" */
   appServerUrl: string
   repoPath: string
   providerContextId?: string
@@ -34,6 +35,8 @@ export type CodexConfig = {
   approvalPolicy?: string
   sandboxPolicy?: Record<string, unknown>
   sandbox?: CodexSandboxConfig
+  /** mode:"local" — TOML `-c` overrides for the encapsulated app-server */
+  localOverrides?: string[]
 }
 
 type CodexActionSpec = {
@@ -1818,7 +1821,18 @@ export async function executeCodexAppServerTurnStep<
 >(args: CodexAppServerTurnStepArgs<Config>): Promise<CodexTurnResult> {
   "use step"
 
-  const baseUrl = normalizeAppServerBaseUrl(args.config.appServerUrl)
+  // mode:"local": the reactor owns the codex process — spawn the native
+  // binary + loopback bridge lazily and route the turn through it
+  let appServerUrl = args.config.appServerUrl
+  if (
+    args.config.mode === "local" ||
+    !appServerUrl ||
+    appServerUrl === "local"
+  ) {
+    const { ensureLocalCodexAppServerUrl } = await import("./codex.local.js")
+    appServerUrl = await ensureLocalCodexAppServerUrl(args.config.localOverrides)
+  }
+  const baseUrl = normalizeAppServerBaseUrl(appServerUrl)
   if (!baseUrl) throw new Error("codex_app_server_url_required")
 
   let sequence = 0
