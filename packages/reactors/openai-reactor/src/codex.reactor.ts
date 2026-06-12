@@ -463,9 +463,24 @@ export function mapCodexAppServerNotification(
     }
   }
 
-  const params = asRecord(chunk.params)
-  const item = asRecord(params.item)
+  let params = asRecord(chunk.params)
+  let item = asRecord(params.item)
+  let sanitizedProviderChunk = providerChunk
   const itemType = normalizeLower(item.type)
+  const isImageGenerationItem =
+    itemType === "imagegeneration" || itemType === "image_generation_call"
+  // image generation items embed the FULL image as base64 (1MB+) — strip
+  // it before the chunk hits streams/parts (the file lands on disk anyway
+  // under ~/.codex/generated_images/<threadId>/)
+  if (
+    isImageGenerationItem &&
+    typeof item.result === "string" &&
+    item.result.length > 2048
+  ) {
+    item = { ...item, result: `[image_base64_omitted:${item.result.length}b]` }
+    params = { ...params, item }
+    sanitizedProviderChunk = { ...chunk, params }
+  }
   const itemStatus = normalizeLower(item.status)
   const actionRef = resolveActionRef(params, item)
   const providerPartId = resolveProviderPartId(params, item)
@@ -508,6 +523,20 @@ export function mapCodexAppServerNotification(
       })
     : undefined
 
+  const imageGenerationInput = isImageGenerationItem
+    ? cleanRecord({
+        prompt: asString(item.revisedPrompt) || undefined,
+      })
+    : undefined
+  const imageGenerationOutput =
+    isImageGenerationItem && method === "item/completed"
+      ? cleanRecord({
+          revisedPrompt: asString(item.revisedPrompt) || undefined,
+          status: itemStatus || undefined,
+          note: "imagen generada — el archivo queda en ~/.codex/generated_images/<threadId>/",
+        })
+      : undefined
+
   const mappedData = toJsonSafe(
     cleanRecord({
       method,
@@ -517,11 +546,14 @@ export function mapCodexAppServerNotification(
         actionDetails.actionName ||
         (isCommandExecutionItem || isCommandExecutionOutputDelta
           ? SANDBOX_EXECUTE_COMMAND_ACTION_NAME
-          : undefined),
-      input: actionDetails.input ?? commandExecutionInput,
+          : isImageGenerationItem
+            ? "image_gen"
+            : undefined),
+      input: actionDetails.input ?? commandExecutionInput ?? imageGenerationInput,
       output:
         actionDetails.output ??
         commandExecutionOutput ??
+        imageGenerationOutput ??
         (isCommandExecutionOutputDelta
           ? cleanRecord({ output: asString(params.delta) || undefined })
           : undefined),
@@ -540,7 +572,7 @@ export function mapCodexAppServerNotification(
       partSlot: descriptor?.partSlot,
       actionRef: chunkType.startsWith("chunk.action_") ? actionRef : undefined,
       data: mappedData,
-      raw: toJsonSafe(providerChunk),
+      raw: toJsonSafe(sanitizedProviderChunk),
     }
   }
 
@@ -592,6 +624,8 @@ export function mapCodexAppServerNotification(
       if (itemType === "agentmessage") return map("chunk.text_start")
       if (itemType === "reasoning") return map("chunk.reasoning_start")
       if (itemType === "usermessage") return map("chunk.message_metadata")
+      // native image generation surfaces as a live action ("image_gen")
+      if (isImageGenerationItem) return map("chunk.action_started")
       if (isActionItemType(itemType)) return map("chunk.action_started")
       return map("chunk.message_metadata")
     }
@@ -599,6 +633,12 @@ export function mapCodexAppServerNotification(
       if (itemType === "agentmessage") return map("chunk.text_end")
       if (itemType === "reasoning") return map("chunk.reasoning_end")
       if (itemType === "usermessage") return map("chunk.message_metadata")
+      if (isImageGenerationItem) {
+        if (hasItemError || itemStatus === "failed") {
+          return map("chunk.action_failed")
+        }
+        return map("chunk.action_completed")
+      }
       if (isActionItemType(itemType)) {
         if (hasItemError || itemStatus === "failed" || itemStatus === "declined") {
           return map("chunk.action_failed")
