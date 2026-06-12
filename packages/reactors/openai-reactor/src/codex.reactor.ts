@@ -2197,7 +2197,11 @@ export function createCodexReactor<
       })
     }
 
-    const persistCompletedReactionParts = async () => {
+    // Mid-turn part persistence is a progressive enhancement: the engine
+    // persists the authoritative parts when the step completes. A failure
+    // here (e.g. transient Instant write conflicts) must never abort the
+    // provider turn.
+    const persistCompletedReactionPartsUnsafe = async () => {
       if (!params.persistReactionParts) return
       const completedParts = buildCodexParts({
         toolName,
@@ -2223,7 +2227,23 @@ export function createCodexReactor<
       await params.persistReactionParts(completedParts)
     }
 
-    const emitChunk = async (providerChunk: unknown) => {
+    // Serialized + non-fatal: concurrent persists raced each other on the
+    // same event_parts lookup keys ("Record not unique: triple"), poisoning
+    // the step and aborting the whole turn.
+    let persistChain: Promise<void> = Promise.resolve()
+    const persistCompletedReactionParts = (): Promise<void> => {
+      persistChain = persistChain
+        .then(() => persistCompletedReactionPartsUnsafe())
+        .catch((error) => {
+          console.warn(
+            "[codex-reactor] mid-turn part persist failed (non-fatal):",
+            error instanceof Error ? error.message : String(error),
+          )
+        })
+      return persistChain
+    }
+
+    const emitChunkUnsafe = async (providerChunk: unknown) => {
       const mapped = options.mapChunk
         ? options.mapChunk(providerChunk)
         : defaultMapCodexChunk(providerChunk)
@@ -2363,6 +2383,24 @@ export function createCodexReactor<
       }
     }
 
+    // Serialize chunk processing: providers fire events synchronously and a
+    // fire-and-forget emitChunk would run bodies concurrently — interleaving
+    // getWriter() on the step stream (throws while locked) and racing the
+    // part persistence. One chain keeps ordering and single ownership; chunk
+    // failures are logged, never thrown into the provider event loop.
+    let emitChain: Promise<void> = Promise.resolve()
+    const emitChunk = (providerChunk: unknown): Promise<void> => {
+      emitChain = emitChain
+        .then(() => emitChunkUnsafe(providerChunk))
+        .catch((error) => {
+          console.warn(
+            "[codex-reactor] chunk emit failed (non-fatal):",
+            error instanceof Error ? error.message : String(error),
+          )
+        })
+      return emitChain
+    }
+
     const turn = options.executeTurn
       ? await options.executeTurn({
         runtime: params.runtime,
@@ -2402,6 +2440,9 @@ export function createCodexReactor<
           contextStepStream: params.contextStepStream,
           writable: params.writable as WritableStream<unknown> | undefined,
         })
+    // drain pending chunk work before assembling the result
+    await emitChain
+    await persistChain
     const finishedAtMs = Date.now()
     const returnedStreamTrace = asRecord(asRecord(turn.metadata).streamTrace)
     const returnedChunks = Array.isArray(returnedStreamTrace.chunks)
