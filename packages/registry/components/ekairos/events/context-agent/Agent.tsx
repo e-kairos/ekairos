@@ -13,7 +13,10 @@ import { useOrgDb } from "@/lib/org-db-context";
 import type { AgentProps } from "./types";
 import { AgentPromptBridgeProvider } from "./agent-prompt-bridge";
 import { MessageList } from "./ui/message-list";
-import { getContextActivityState } from "./ui/context-activity-indicator";
+import {
+  ContextActivityIndicator,
+  getContextActivityState,
+} from "./ui/context-activity-indicator";
 import { PromptBar } from "./ui/prompt-bar";
 
 export type { AgentProps, ContextHistoryItem } from "./types";
@@ -150,6 +153,12 @@ export default function ContextAgent(props: AgentProps) {
                     actionComponents={actionComponents || {}}
                     classNames={classNames}
                     showReasoning={showReasoning ?? true}
+                  />
+                  {/* live turn feedback: fills the model's pre-first-token
+                      silence (Preparando / Pensando / Trabajando · tool) */}
+                  <ContextActivityIndicator
+                    activity={activity}
+                    density={promptDensity}
                   />
                   <div
                     className={cn("h-4", classNames?.conversationEndSpacer)}
