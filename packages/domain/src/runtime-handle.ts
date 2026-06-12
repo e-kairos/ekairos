@@ -1,5 +1,6 @@
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { ensureDomEvents } from "./polyfills/dom-events.js"
+import { reportRuntimeEnvToPlatform } from "./platform-sync.js"
 
 ensureDomEvents()
 
@@ -154,6 +155,7 @@ export abstract class EkairosRuntime<
 
   public async db(options?: RuntimeResolveOptions): Promise<DB> {
     ensureDomEvents()
+    reportRuntimeEnvToPlatform(this.env)
     return await this.resolveDb(this.env, options)
   }
 

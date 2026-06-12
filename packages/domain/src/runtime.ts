@@ -14,6 +14,7 @@ export {
   type RuntimeLike,
   type ExplicitRuntimeLike,
 } from "./runtime-handle.js";
+export { reportRuntimeEnvToPlatform } from "./platform-sync.js";
 import type { InstantAdminDatabase } from "@instantdb/admin";
 import type { InstantSchemaDef } from "@instantdb/core";
 
