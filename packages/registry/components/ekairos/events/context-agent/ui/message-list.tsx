@@ -318,10 +318,12 @@ function hasVisibleAssistantParts(parts: unknown[]): boolean {
     }
     const action = getActionPartInfo(part);
     if (action) {
-      return (
-        action.actionName === "createMessage" &&
-        getCreateMessageText(part).trim().length > 0
-      );
+      if (action.actionName === "createMessage") {
+        return getCreateMessageText(part).trim().length > 0;
+      }
+      // tool actions render as cards: a started call must surface the
+      // assistant message immediately (live "Ejecutando" while streaming)
+      return true;
     }
     return getPartText(part).trim().length > 0;
   });
