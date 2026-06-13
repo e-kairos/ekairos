@@ -208,10 +208,13 @@ export async function finalizeBuildResult<Runtime extends AnyDatasetRuntime>(
     },
   }
 
+  const notation = (datasetResult.data?.notation ?? null) as DatasetNotation | null
+
   if (!withFirst) {
     return {
       datasetId,
       dataset: datasetResult.data,
+      notation,
       previewRows: previewResult.rows,
       reader,
     }
@@ -222,6 +225,7 @@ export async function finalizeBuildResult<Runtime extends AnyDatasetRuntime>(
   return {
     datasetId,
     dataset: datasetResult.data,
+    notation,
     previewRows: previewResult.rows,
     reader,
     firstRow: firstResult.row,
@@ -255,6 +259,7 @@ export function createDatasetBuildResult<Runtime extends AnyDatasetRuntime>(
   return {
     datasetId: params.datasetId,
     dataset: params.dataset,
+    notation: (params.dataset?.notation ?? null) as DatasetNotation | null,
     previewRows: params.previewRows,
     reader,
     ...(params.firstRow !== undefined ? { firstRow: params.firstRow } : {}),

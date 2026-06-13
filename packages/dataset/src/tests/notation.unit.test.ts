@@ -92,31 +92,31 @@ describe("notation checks (arithmetic)", () => {
 })
 
 describe("notation lifecycle (iteration)", () => {
-  it("revisions bump versions and keep the discovery trail", () => {
+  it("is the PLAN while building and the RESULT once final; keeps the trail", () => {
     const initial = reviseDatasetNotation(null, {
       latex: "D = \\{ r \\mid r \\in F \\}",
       symbols: [{ name: "D", kind: "set", description: "dataset" }],
       predicates: [],
-      reason: "initial proposal",
+      reason: "initial definition",
     })
     expect(initial.version).toBe(1)
-    expect(initial.status).toBe("proposed")
+    expect(initial.status).toBe("plan")
 
     const refined = reviseDatasetNotation(initial, {
       latex: "D = \\{ r \\mid r \\in F \\wedge r.amount > 0 \\}",
       reason: "discovered amount must be positive",
     })
     expect(refined.version).toBe(2)
-    expect(refined.status).toBe("refined")
+    expect(refined.status).toBe("plan") // still the plan while iterating
     expect(refined.history).toHaveLength(2)
     expect(refined.symbols).toHaveLength(1)
 
-    const final = reviseDatasetNotation(refined, {
+    const result = reviseDatasetNotation(refined, {
       latex: refined.latex,
-      reason: "matches produced rows",
+      reason: "describes produced rows",
       final: true,
     })
-    expect(final.status).toBe("final")
+    expect(result.status).toBe("result")
   })
 
   it("evidence annotation is advisory and never changes the formal status", () => {
@@ -137,17 +137,17 @@ describe("notation lifecycle (iteration)", () => {
     })
 
     const annotated = annotateNotationEvidence(notation, ROWS)
-    // formal lifecycle status is preserved — no verified/violated verdict
-    expect(annotated.status).toBe("final")
+    // the role (plan/result) is preserved — no verified/violated verdict
+    expect(annotated.status).toBe("result")
     expect(annotated.checks).toEqual([
       expect.objectContaining({ predicateId: "card", status: "supported" }),
       expect.objectContaining({ predicateId: "funny", status: "asserted" }),
     ])
 
-    // arithmetic evidence can contradict, but the notation stays "final"
+    // arithmetic evidence can contradict, but the notation stays "result"
     // (the dataset's validity is trusted, not voted down by a check)
     const contradicted = annotateNotationEvidence(notation, ROWS.slice(0, 2))
-    expect(contradicted.status).toBe("final")
+    expect(contradicted.status).toBe("result")
     expect(
       contradicted.checks?.find((c) => c.predicateId === "card")?.status,
     ).toBe("contradicted")
@@ -158,21 +158,22 @@ describe("notation lifecycle (iteration)", () => {
 })
 
 describe("query-backed deterministic notation", () => {
-  it("derives a final notation with arithmetic predicates from query + schema + rows", () => {
+  it("is immediately the RESULT, with arithmetic predicates from query + schema + rows", () => {
     const notation = inferQueryNotation({
       entityNames: ["order_orders"],
       rowCount: 3,
       schema: { schema: { orderId: "string", amount: "number" } },
       explanation: "paid orders snapshot",
     })
-    expect(notation.status).toBe("final")
+    // a query defines the set deterministically, so it is the result at once
+    expect(notation.status).toBe("result")
     expect(notation.latex).toContain("\\mathcal{D}")
     expect(notation.predicates.length).toBeGreaterThanOrEqual(2)
 
     // query datasets are the special case where the formal claims are fully
-    // mechanical, so the evidence supports them — but status stays "final"
+    // mechanical, so the evidence supports them — but the role stays "result"
     const annotated = annotateNotationEvidence(notation, ROWS)
-    expect(annotated.status).toBe("final")
+    expect(annotated.status).toBe("result")
     expect(annotated.checks?.every((c) => c.status === "supported")).toBe(true)
   })
 })

@@ -1,29 +1,31 @@
 /**
- * Formal notation for datasets.
+ * Formal notation for datasets — the dataset stated intensionally.
  *
- * A dataset is the materialization of a set defined by FORMAL NOTATION:
- * LaTeX (set-builder, relational algebra, quantified predicates) that
- * EXPLAINS the data — what sets it draws from, what variables it binds,
- * what every member satisfies. The definition is a logical proposition,
- * possibly DERIVED (a syllogism), so it is NOT, in general, mechanically
- * verifiable: a predicate may be semantic ("x es una frase divertida"),
- * and the set is still perfectly well-formed. We TRUST that the formality
- * and the produced dataset are valid — formal notation is the planning
- * and explanatory artifact, not a proof obligation.
+ * A dataset has TWO CO-EQUAL FACES at the same level:
+ * - its formal DEFINITION (this notation: the proposition that defines the
+ *   set, in LaTeX), and
+ * - its MATERIALIZATION (the rows + the code that produces them).
+ * The notation is not a comment about the data; it IS the dataset, written
+ * as a logical statement. The materialization is the same set written
+ * extensionally. Neither is subordinate to the other.
  *
- * It is the planning artifact: it starts as a proposal from the first look
- * at the resources and is ITERATED as the analysis discovers new sets,
- * variables and constraints. The notation is not definitive — discovery is
- * the point.
+ * The SAME notation plays two roles across the lifecycle: it is the PLAN
+ * (status "plan": stated first, the materialization is built to realize it)
+ * and, once finalized, the RESULT (status "result": it describes exactly
+ * what was produced). It is iterated in between — every revision keeps the
+ * prior version in `history`, so the discovery trail stays visible.
+ *
+ * The definition is a logical proposition, possibly DERIVED (a syllogism),
+ * so it is NOT, in general, mechanically verifiable: a predicate may be
+ * semantic ("x es una frase divertida") and the set is still well-formed.
+ * We TRUST the formality and the produced dataset — there is no verdict.
  *
  * SOME predicates happen to be arithmetic (a row count, a field type, a
- * preserved total). For those, and only those, we can attach OPTIONAL
- * arithmetic evidence computed over the produced rows. That evidence is
- * advisory: a contradiction is a hint worth surfacing, never a verdict
- * that the dataset is invalid. Predicates with no arithmetic form are
- * "asserted" — formal claims we trust. Nothing here blocks or changes a
- * dataset build; the notation simply rides alongside on
- * dataset_datasets.notation.
+ * preserved total). For those, and only those, we attach OPTIONAL evidence
+ * computed over the rows. It is advisory: a contradiction is a hint, never
+ * a claim that the dataset is invalid. Predicates with no arithmetic form
+ * are "asserted" — trusted. Nothing here blocks or changes a build; the
+ * notation rides on dataset_datasets.notation.
  */
 
 /* ── types ──────────────────────────────────────────────────────── */
@@ -116,12 +118,14 @@ export type DatasetNotationRevision = {
 }
 
 /**
- * Lifecycle of the formal notation. There is intentionally NO
- * "verified"/"violated" verdict — the dataset's validity is trusted, not
- * proven. Advisory arithmetic evidence (when any predicate has it) lives
- * in `checks`, separate from this status.
+ * The role the notation currently plays — the two ends of its life:
+ * - "plan":   stated before/while building; the materialization realizes it
+ * - "result": finalized; it describes the dataset that was produced
+ * There is intentionally NO "verified"/"violated" verdict — validity is
+ * trusted, not proven. Iteration is tracked by `version`/`history`; advisory
+ * arithmetic evidence lives in `checks`, separate from this role.
  */
-export type DatasetNotationStatus = "proposed" | "refined" | "final"
+export type DatasetNotationStatus = "plan" | "result"
 
 export type DatasetNotation = {
   version: number
@@ -166,7 +170,7 @@ export function reviseDatasetNotation(
   }
   return {
     version,
-    status: input.final ? "final" : previous ? "refined" : "proposed",
+    status: input.final ? "result" : "plan",
     latex: input.latex,
     symbols: input.symbols ?? previous?.symbols ?? [],
     predicates: input.predicates ?? previous?.predicates ?? [],

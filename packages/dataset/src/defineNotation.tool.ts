@@ -10,7 +10,7 @@ import {
   type NotationCheck,
 } from "./notation.js"
 
-interface ProposeNotationToolParams {
+interface DefineNotationToolParams {
   datasetId: string
   runtime: any
 }
@@ -60,28 +60,38 @@ async function getDatasetService(runtime: any): Promise<DatasetService> {
 }
 
 /**
- * proposeNotation — declare or ITERATE the formal notation of the dataset.
+ * defineNotation — author or REFINE the formal DEFINITION of the dataset.
  *
- * The notation is the planning artifact: call it FIRST with the initial
- * set definition derived from the resources, and call it AGAIN whenever
- * the analysis discovers new sets, variables, constraints or corrections.
- * Every call appends a revision (the discovery trail is preserved). Mark
- * the last call with final=true so the notation describes the produced
- * dataset. Predicates may be formal/semantic (we trust them); the few that
- * are arithmetic get optional advisory evidence after completion.
+ * A dataset has two co-equal faces: its formal definition (the notation —
+ * the proposition that defines the set, in LaTeX) and its materialization
+ * (the rows + the code that produces them). They sit at the SAME level: the
+ * definition is not a side note about the data, it IS the dataset stated
+ * intensionally. The same notation is the PLAN (you state it first and the
+ * materialization realizes it) and, finalized, the RESULT (it describes what
+ * you produced).
+ *
+ * Call it FIRST with the initial definition derived from the resources, and
+ * AGAIN whenever the analysis discovers new sets, variables, constraints or
+ * corrections — every call keeps the prior version in history. Mark the last
+ * call with final=true so the definition describes the produced dataset.
+ * Predicates may be formal/semantic (trusted); the few that are arithmetic
+ * MAY carry optional advisory evidence.
  */
-export function createProposeNotationTool({ datasetId, runtime }: ProposeNotationToolParams) {
+export function createDefineNotationTool({ datasetId, runtime }: DefineNotationToolParams) {
   return tool({
     description: [
-      "Declare or refine the FORMAL NOTATION of the dataset: the dataset as a",
-      "set defined in LaTeX (set-builder, relational algebra, quantified or",
-      "even semantic predicates) plus the symbols it binds. The definition is",
-      "a logical proposition, possibly derived — it does not need to be",
-      "mechanically provable; we trust the formality. This is your PLANNING",
-      "artifact — propose it before writing any code, and revise it whenever",
-      "the analysis discovers new sets, variables or constraints. For the few",
-      "predicates that happen to be arithmetic you MAY attach a checkJson for",
-      "optional advisory evidence (non-blocking, never a verdict).",
+      "Author or refine the formal DEFINITION of the dataset: the dataset as a",
+      "set in LaTeX (set-builder, relational algebra, quantified or even",
+      "semantic predicates) plus the symbols it binds. This definition and the",
+      "materialization (rows + code) are TWO CO-EQUAL FACES of the dataset —",
+      "the definition is the dataset stated intensionally, not a comment on it.",
+      "It is your PLAN (state it before writing any code; the materialization",
+      "realizes it) and, once final, the RESULT (it describes what you",
+      "produced). The definition is a logical proposition, possibly derived —",
+      "it need not be mechanically provable; we trust the formality. State it",
+      "first, refine it on every discovery, and set final=true on the last",
+      "call. For the few predicates that are arithmetic you MAY attach a",
+      "checkJson for optional advisory evidence (non-blocking, never a verdict).",
     ].join(" "),
     inputSchema: z.object({
       latex: z
@@ -89,17 +99,17 @@ export function createProposeNotationTool({ datasetId, runtime }: ProposeNotatio
         .describe(
           "Main definition of the dataset as a set, in LaTeX. Example: 'D = \\\\{(w,r,t) \\\\mid t = \\\\sum_{o \\\\in Orders} o.amount,\\\\; o.status = paid\\\\}'",
         ),
-      symbols: z.array(symbolSchema).describe("Symbols bound by the notation"),
+      symbols: z.array(symbolSchema).describe("Symbols bound by the definition"),
       predicates: z
         .array(predicateSchema)
-        .describe("Claims about the dataset; include machine-checkable forms when possible"),
+        .describe("Claims the set satisfies; attach a checkJson only when arithmetic"),
       reason: z
         .string()
-        .describe("What discovery triggered this revision (or 'initial proposal')"),
+        .describe("What this revision states or what discovery triggered it (or 'initial definition')"),
       final: z
         .boolean()
         .optional()
-        .describe("true when this notation describes the dataset you are about to complete"),
+        .describe("true when this definition describes the dataset you are about to complete (the RESULT)"),
     }),
     execute: async ({ latex, symbols, predicates, reason, final }) => {
       try {
@@ -148,7 +158,7 @@ export function createProposeNotationTool({ datasetId, runtime }: ProposeNotatio
         }
 
         console.log(
-          `[Dataset ${datasetId}] notation v${notation.version} (${notation.status}): ${reason}`,
+          `[Dataset ${datasetId}] definition v${notation.version} (${notation.status}): ${reason}`,
         )
 
         return {
