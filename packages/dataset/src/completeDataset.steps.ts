@@ -1,5 +1,6 @@
 import Ajv, { type ErrorObject, type ValidateFunction } from "ajv"
 import { getDatasetOutputPath } from "./datasetFiles.js"
+import { verifyDatasetNotation, type DatasetNotation } from "./notation.js"
 import { DatasetService } from "./service.js"
 import { getDatasetRuntimeDb } from "./dataset/steps.js"
 import {
@@ -211,6 +212,23 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     console.log(`[Dataset ${datasetId}] Dataset marked as COMPLETED (${totalValidRows} valid rows)`)
     console.log(`[Dataset ${datasetId}] ========================================`)
 
+    // Formal-notation verification: arithmetic checks of the latest notation
+    // against the produced rows. Informative only — a failure here never
+    // affects the dataset completion result.
+    try {
+        await verifyNotationAgainstJsonl({
+            service,
+            datasetId,
+            jsonlBase64: fileRead.contentBase64,
+        })
+    }
+    catch (error) {
+        console.error(
+            `[Dataset ${datasetId}] notation verification skipped:`,
+            error instanceof Error ? error.message : String(error),
+        )
+    }
+
         return {
             success: true,
             status: "completed",
@@ -221,6 +239,48 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
             storagePath,
             dataFileId: uploadResult.data.fileId,
         }
+}
+
+const NOTATION_VERIFY_MAX_ROWS = 50_000
+
+async function verifyNotationAgainstJsonl(params: {
+    service: DatasetService
+    datasetId: string
+    jsonlBase64: string
+}): Promise<void> {
+    const existing = await params.service.getDatasetById(params.datasetId)
+    const notation = (existing.ok ? existing.data?.notation : null) as DatasetNotation | null
+    if (!notation || !Array.isArray(notation.predicates) || notation.predicates.length === 0) {
+        return
+    }
+
+    const rows: any[] = []
+    const content = Buffer.from(params.jsonlBase64, "base64").toString("utf-8")
+    for (const line of content.split("\n")) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+            const parsed = JSON.parse(trimmed)
+            if (parsed && parsed.type === "row") {
+                rows.push(parsed.data)
+            }
+        }
+        catch {
+            // malformed lines were already handled by schema validation
+        }
+        if (rows.length >= NOTATION_VERIFY_MAX_ROWS) break
+    }
+
+    const verified = verifyDatasetNotation(notation, rows)
+    await params.service.updateDatasetNotation({
+        datasetId: params.datasetId,
+        notation: verified,
+    })
+    const failed = (verified.checks ?? []).filter((check) => check.status === "failed")
+    console.log(
+        `[Dataset ${params.datasetId}] notation v${verified.version} ${verified.status}` +
+        (failed.length ? ` (${failed.length} predicados violados)` : ""),
+    )
 }
 
 function resolveExecutionStoragePath(outputPath: string, datasetId: string): string {

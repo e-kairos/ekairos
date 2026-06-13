@@ -1,5 +1,6 @@
 import { DatasetService } from "../service.js"
 import { datasetDomain } from "../schema.js"
+import { verifyDatasetNotation, type DatasetNotation } from "../notation.js"
 import {
   datasetGetByIdStep,
   datasetPreviewRowsStep,
@@ -116,6 +117,21 @@ export async function materializeRowsToDataset<Runtime extends AnyDatasetRuntime
   })
   if (!statusResult.ok) {
     throw new Error(statusResult.error)
+  }
+
+  // verify the latest formal notation (if any was proposed) against the
+  // materialized rows — informative only, never blocks the build
+  try {
+    const existing = await service.getDatasetById(params.datasetId)
+    const notation = (existing.ok ? existing.data?.notation : null) as DatasetNotation | null
+    if (notation && Array.isArray(notation.predicates) && notation.predicates.length > 0) {
+      await service.updateDatasetNotation({
+        datasetId: params.datasetId,
+        notation: verifyDatasetNotation(notation, params.rows),
+      })
+    }
+  } catch {
+    // notation verification must never affect the build result
   }
 
   return params.datasetId

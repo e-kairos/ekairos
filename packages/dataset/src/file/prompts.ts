@@ -313,9 +313,22 @@ function buildInstructions(context: FileParseContext): string {
         .ele("Action").txt("Review the FilePreview section in Context to understand the file structure").up()
         .ele("Note").txt("FilePreview contains: TotalRows (total data rows), Metadata (file properties with JSON output), Head (first N raw file lines), Tail (last N lines if present), Mid (middle sample for large files). Each section shows Description, Script (full Python code), Command, Stdout (raw content), Stderr. This allows you to understand the exact file format.").up()
         .up()
+    xml = xml
+        .ele("Step", { number: "2", name: "Propose Formal Notation (PLAN FIRST)" })
+        .ele("Action").txt("Call proposeNotation with the INITIAL formal definition of the dataset as a set, derived from the file preview: D = { r | r ∈ File ∧ <constraints> } in LaTeX, the symbols it binds (sets, variables, functions) and the predicates every row will satisfy").up()
+        .ele("Requirements")
+        .ele("Requirement").txt("The notation is your PLANNING artifact: it comes BEFORE the schema and BEFORE any parsing code. The LaTeX that explains the dataset matters more than the code that produces it").up()
+        .ele("Requirement").txt("Use set-builder notation, quantifiers and arithmetic in LaTeX (e.g. D = \\{(c, q, p) \\mid q \\in \\mathbb{Z}^{+},\\; p \\in \\mathbb{R}_{\\geq 0}\\})").up()
+        .ele("Requirement").txt("Declare every discovered set and variable as a symbol with a one-line meaning").up()
+        .ele("Requirement").txt("Give predicates a machine-checkable checkJson whenever the claim is arithmetic (row counts, field types, ranges, uniqueness, aggregates); leave semantic-only claims without checkJson").up()
+        .ele("Requirement").txt("ITERATE: every time the analysis discovers a new set, variable, constraint or correction (new columns, unexpected types, excluded sections), call proposeNotation again with the refined notation and the reason. The notation is not definitive — discovery is the point").up()
+        .ele("Requirement").txt("Before calling completeDataset, call proposeNotation one last time with final=true so the notation describes EXACTLY the dataset you produced; its checkable predicates will be verified arithmetically against the rows").up()
+        .up()
+        .up()
+
     if (hasProvidedSchema) {
         xml = xml
-            .ele("Step", { number: "2", name: "Use Provided Schema" })
+            .ele("Step", { number: "3", name: "Use Provided Schema" })
             .ele("Action").txt("Use the provided schema as the output contract for every row in output.jsonl").up()
             .ele("Requirements")
             .ele("Requirement").txt("Every output row must conform exactly to the provided schema").up()
@@ -329,7 +342,7 @@ function buildInstructions(context: FileParseContext): string {
             .up()
     } else {
         xml = xml
-            .ele("Step", { number: "2", name: "Generate JSON Schema" })
+            .ele("Step", { number: "3", name: "Generate JSON Schema" })
             .ele("Action").txt("Call generateSchema to create a JSON Schema for a SINGLE DATA RECORD (one row of data)").up()
             .ele("Requirements")
             .ele("Requirement").txt("Schema describes ONE DATA RECORD structure only (type: object, not array)").up()
@@ -342,7 +355,7 @@ function buildInstructions(context: FileParseContext): string {
     }
 
     xml = xml
-        .ele("Step", { number: "3", name: "Generate Dataset JSONL" })
+        .ele("Step", { number: "4", name: "Generate Dataset JSONL" })
         .ele("Action").txt(`Use executeCommand to parse the file and generate output.jsonl in the dataset workstation`).up()
         .ele("Requirements")
         .ele("Requirement").txt("Parse ALL data rows/records from the file (exclude header sections and metadata)").up()
@@ -354,12 +367,13 @@ function buildInstructions(context: FileParseContext): string {
         .ele("Requirement").txt("Use descriptive scriptName in snake_case (e.g., 'parse_csv_to_jsonl')").up()
         .up()
         .up()
-        .ele("Step", { number: "4", name: "Complete and Validate" })
-        .ele("Action").txt("Call completeDataset to validate the dataset").up()
+        .ele("Step", { number: "5", name: "Complete and Validate" })
+        .ele("Action").txt("Call proposeNotation with final=true (refined to match the produced rows), then call completeDataset to validate the dataset").up()
         .ele("Behavior").txt("Validates that output.jsonl exists and all records conform to the schema stored in database. Returns success:false with validation details if validation fails. If validation fails, inspect validation errors, rewrite output.jsonl, and call completeDataset again. Do not stop until completeDataset returns success:true.").up()
         .up()
         .up()
         .ele("Rules")
+        .ele("Rule").txt("The formal notation (proposeNotation) is the planning artifact: propose it first, iterate it on every discovery, finalize it before completion. The LaTeX explains the dataset; the code merely produces it").up()
         .ele("Rule").txt("Schema defines ONE DATA RECORD structure (not array, not header)").up()
         .ele("Rule").txt("Schema property names are authoritative. Never translate or rename keys such as itemName, quantity, or unit into the input language").up()
         .ele("Rule").txt("Original/input language applies to extracted values only, not to JSON object keys").up()

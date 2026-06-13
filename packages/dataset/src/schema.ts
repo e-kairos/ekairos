@@ -14,6 +14,8 @@ const entities = {
     instructions: i.string().optional(),
     analysis: i.json().optional(),
     schema: i.json().optional(),
+    /** formal notation (LaTeX + checkable predicates) describing the set */
+    notation: i.json().optional(),
     calculatedTotalRows: i.number().optional(),
     actualGeneratedRowCount: i.number().optional(),
   }),

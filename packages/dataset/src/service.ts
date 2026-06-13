@@ -280,6 +280,28 @@ export class DatasetService {
         }
     }
 
+    async updateDatasetNotation(params: {
+        datasetId: string
+        notation: Record<string, any>
+    }): Promise<ServiceResult<void>> {
+        try {
+            const resolved = await this.resolveDatasetEntityId(params.datasetId)
+            if (!resolved.ok) return resolved as ServiceResult<void>
+            await this.db.transact([
+                this.db.tx.dataset_datasets[resolved.data].update({
+                    notation: params.notation,
+                    updatedAt: Date.now(),
+                })
+            ])
+
+            return { ok: true, data: undefined }
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            return { ok: false, error: message }
+        }
+    }
+
     async updateDatasetStatus(params: {
         datasetId: string
         status: string

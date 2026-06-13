@@ -1,5 +1,6 @@
 import { DatasetService } from "../service.js"
 import { createDatasetId } from "../id.js"
+import { inferQueryNotation, verifyDatasetNotation } from "../notation.js"
 
 export type QueryDomainStepInput = {
   runtime: any
@@ -81,6 +82,19 @@ export async function queryDomainStep(
   const previewRows = rows.slice(0, 20)
   const schema = inferSchema(rows)
 
+  // query-backed datasets carry a fully deterministic formal notation:
+  // the set definition, its symbols and its checkable predicates derive
+  // mechanically from the query + rows; verification is immediate
+  const notation = verifyDatasetNotation(
+    inferQueryNotation({
+      entityNames: Object.keys(params.query ?? {}),
+      rowCount: rows.length,
+      schema,
+      explanation: params.explanation,
+    }),
+    rows,
+  )
+
   const createRes = await service.createDataset({
     id: datasetId,
     title: params.title ?? "domain.query",
@@ -88,6 +102,7 @@ export async function queryDomainStep(
     instructions: params.explanation,
     analysis: { explanation: params.explanation, query: params.query },
     schema,
+    notation,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   })
