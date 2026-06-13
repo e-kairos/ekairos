@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
+  annotateNotationEvidence,
   evaluateNotationCheck,
   inferQueryNotation,
   reviseDatasetNotation,
-  verifyDatasetNotation,
   type NotationCheck,
 } from "../notation.js"
 
@@ -119,7 +119,7 @@ describe("notation lifecycle (iteration)", () => {
     expect(final.status).toBe("final")
   })
 
-  it("verification marks verified/violated without mutating predicates", () => {
+  it("evidence annotation is advisory and never changes the formal status", () => {
     const notation = reviseDatasetNotation(null, {
       latex: "D",
       predicates: [
@@ -129,26 +129,36 @@ describe("notation lifecycle (iteration)", () => {
           latex: "|D| = 3",
           check: { kind: "row_count", op: "=", value: 3 },
         },
-        { id: "semantic", description: "rows are orders", latex: "D \\subseteq Orders" },
+        // a semantic predicate: trusted, no mechanical check
+        { id: "funny", description: "cada fila es una frase divertida", latex: "\\forall x \\in D:\\; \\text{divertida}(x)" },
       ],
       reason: "initial",
       final: true,
     })
 
-    const verified = verifyDatasetNotation(notation, ROWS)
-    expect(verified.status).toBe("verified")
-    expect(verified.checks).toEqual([
-      expect.objectContaining({ predicateId: "card", status: "passed" }),
-      expect.objectContaining({ predicateId: "semantic", status: "skipped" }),
+    const annotated = annotateNotationEvidence(notation, ROWS)
+    // formal lifecycle status is preserved — no verified/violated verdict
+    expect(annotated.status).toBe("final")
+    expect(annotated.checks).toEqual([
+      expect.objectContaining({ predicateId: "card", status: "supported" }),
+      expect.objectContaining({ predicateId: "funny", status: "asserted" }),
     ])
 
-    const violated = verifyDatasetNotation(notation, ROWS.slice(0, 2))
-    expect(violated.status).toBe("violated")
+    // arithmetic evidence can contradict, but the notation stays "final"
+    // (the dataset's validity is trusted, not voted down by a check)
+    const contradicted = annotateNotationEvidence(notation, ROWS.slice(0, 2))
+    expect(contradicted.status).toBe("final")
+    expect(
+      contradicted.checks?.find((c) => c.predicateId === "card")?.status,
+    ).toBe("contradicted")
+    expect(
+      contradicted.checks?.find((c) => c.predicateId === "funny")?.status,
+    ).toBe("asserted")
   })
 })
 
 describe("query-backed deterministic notation", () => {
-  it("derives a final, checkable notation from query + schema + rows", () => {
+  it("derives a final notation with arithmetic predicates from query + schema + rows", () => {
     const notation = inferQueryNotation({
       entityNames: ["order_orders"],
       rowCount: 3,
@@ -159,7 +169,10 @@ describe("query-backed deterministic notation", () => {
     expect(notation.latex).toContain("\\mathcal{D}")
     expect(notation.predicates.length).toBeGreaterThanOrEqual(2)
 
-    const verified = verifyDatasetNotation(notation, ROWS)
-    expect(verified.status).toBe("verified")
+    // query datasets are the special case where the formal claims are fully
+    // mechanical, so the evidence supports them — but status stays "final"
+    const annotated = annotateNotationEvidence(notation, ROWS)
+    expect(annotated.status).toBe("final")
+    expect(annotated.checks?.every((c) => c.status === "supported")).toBe(true)
   })
 })

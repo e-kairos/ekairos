@@ -1,6 +1,6 @@
 import Ajv, { type ErrorObject, type ValidateFunction } from "ajv"
 import { getDatasetOutputPath } from "./datasetFiles.js"
-import { verifyDatasetNotation, type DatasetNotation } from "./notation.js"
+import { annotateNotationEvidence, type DatasetNotation } from "./notation.js"
 import { DatasetService } from "./service.js"
 import { getDatasetRuntimeDb } from "./dataset/steps.js"
 import {
@@ -212,11 +212,11 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     console.log(`[Dataset ${datasetId}] Dataset marked as COMPLETED (${totalValidRows} valid rows)`)
     console.log(`[Dataset ${datasetId}] ========================================`)
 
-    // Formal-notation verification: arithmetic checks of the latest notation
-    // against the produced rows. Informative only — a failure here never
-    // affects the dataset completion result.
+    // Formal-notation evidence: advisory arithmetic annotation of the latest
+    // notation against the produced rows. Informative only — it never
+    // affects the dataset completion result or the dataset's validity.
     try {
-        await verifyNotationAgainstJsonl({
+        await annotateNotationFromJsonl({
             service,
             datasetId,
             jsonlBase64: fileRead.contentBase64,
@@ -224,7 +224,7 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     }
     catch (error) {
         console.error(
-            `[Dataset ${datasetId}] notation verification skipped:`,
+            `[Dataset ${datasetId}] notation annotation skipped:`,
             error instanceof Error ? error.message : String(error),
         )
     }
@@ -241,9 +241,9 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
         }
 }
 
-const NOTATION_VERIFY_MAX_ROWS = 50_000
+const NOTATION_EVIDENCE_MAX_ROWS = 50_000
 
-async function verifyNotationAgainstJsonl(params: {
+async function annotateNotationFromJsonl(params: {
     service: DatasetService
     datasetId: string
     jsonlBase64: string
@@ -268,18 +268,22 @@ async function verifyNotationAgainstJsonl(params: {
         catch {
             // malformed lines were already handled by schema validation
         }
-        if (rows.length >= NOTATION_VERIFY_MAX_ROWS) break
+        if (rows.length >= NOTATION_EVIDENCE_MAX_ROWS) break
     }
 
-    const verified = verifyDatasetNotation(notation, rows)
+    const annotated = annotateNotationEvidence(notation, rows)
     await params.service.updateDatasetNotation({
         datasetId: params.datasetId,
-        notation: verified,
+        notation: annotated,
     })
-    const failed = (verified.checks ?? []).filter((check) => check.status === "failed")
+    const contradicted = (annotated.checks ?? []).filter(
+        (check) => check.status === "contradicted",
+    )
     console.log(
-        `[Dataset ${params.datasetId}] notation v${verified.version} ${verified.status}` +
-        (failed.length ? ` (${failed.length} predicados violados)` : ""),
+        `[Dataset ${params.datasetId}] notation v${annotated.version} (${annotated.status})` +
+        (contradicted.length
+            ? ` — ${contradicted.length} predicado(s) con evidencia contraria (advisory)`
+            : ""),
     )
 }
 

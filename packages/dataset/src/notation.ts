@@ -1,19 +1,29 @@
 /**
  * Formal notation for datasets.
  *
- * A dataset is the materialization of a set defined by formal notation:
+ * A dataset is the materialization of a set defined by FORMAL NOTATION:
  * LaTeX (set-builder, relational algebra, quantified predicates) that
  * EXPLAINS the data — what sets it draws from, what variables it binds,
- * what constraints every row satisfies. The notation is the planning
- * artifact: it starts as a proposal from the first look at the resources
- * and is ITERATED as the analysis discovers new sets, variables and
- * invariants. The final notation describes the produced dataset and its
- * machine-checkable predicates are verified with plain arithmetic over
- * the actual rows (propositional combinations supported).
+ * what every member satisfies. The definition is a logical proposition,
+ * possibly DERIVED (a syllogism), so it is NOT, in general, mechanically
+ * verifiable: a predicate may be semantic ("x es una frase divertida"),
+ * and the set is still perfectly well-formed. We TRUST that the formality
+ * and the produced dataset are valid — formal notation is the planning
+ * and explanatory artifact, not a proof obligation.
  *
- * Verification is informative, never blocking: a dataset completes the
- * same way it always did; the notation carries its own verified/violated
- * state alongside.
+ * It is the planning artifact: it starts as a proposal from the first look
+ * at the resources and is ITERATED as the analysis discovers new sets,
+ * variables and constraints. The notation is not definitive — discovery is
+ * the point.
+ *
+ * SOME predicates happen to be arithmetic (a row count, a field type, a
+ * preserved total). For those, and only those, we can attach OPTIONAL
+ * arithmetic evidence computed over the produced rows. That evidence is
+ * advisory: a contradiction is a hint worth surfacing, never a verdict
+ * that the dataset is invalid. Predicates with no arithmetic form are
+ * "asserted" — formal claims we trust. Nothing here blocks or changes a
+ * dataset build; the notation simply rides alongside on
+ * dataset_datasets.notation.
  */
 
 /* ── types ──────────────────────────────────────────────────────── */
@@ -37,10 +47,12 @@ export type DatasetNotationSymbol = {
 export type NotationCmpOp = "=" | "!=" | "<" | "<=" | ">" | ">="
 
 /**
- * Machine-checkable claims about the dataset, evaluated with plain
- * arithmetic over the rows. Field access supports dot-paths into nested
- * records ("company.taxId"). Leaf checks are dataset-level propositions;
- * and/or/not/implies compose them propositionally.
+ * OPTIONAL arithmetic evidence for the subset of predicates that happen to
+ * be mechanical (counts, types, ranges, totals). Evaluated over the rows;
+ * field access supports dot-paths into nested records ("company.taxId").
+ * Leaf checks are dataset-level propositions; and/or/not/implies compose
+ * them propositionally. A predicate WITHOUT a check is a formal/semantic
+ * claim we trust — that is the normal case, not an exception.
  */
 export type NotationCheck =
   | { kind: "row_count"; op: NotationCmpOp; value: number }
@@ -76,13 +88,22 @@ export type DatasetNotationPredicate = {
   description: string
   /** the claim in LaTeX, e.g. "\\forall r \\in D:\\; r.amount > 0" */
   latex: string
-  /** machine-checkable form; absent = semantic-only claim (not verified) */
+  /**
+   * OPTIONAL arithmetic form. Absent (the common case) = a formal/semantic
+   * claim we trust without mechanical checking.
+   */
   check?: NotationCheck
 }
 
+/**
+ * Advisory evidence for one predicate. Never a verdict on the dataset:
+ * - "asserted"     formal/semantic claim, trusted, no mechanical check
+ * - "supported"    arithmetic evidence agrees with the stated claim
+ * - "contradicted" arithmetic evidence disagrees — a hint, not a failure
+ */
 export type DatasetNotationCheckResult = {
   predicateId: string
-  status: "passed" | "failed" | "skipped"
+  status: "asserted" | "supported" | "contradicted"
   detail?: string
 }
 
@@ -94,12 +115,13 @@ export type DatasetNotationRevision = {
   at: number
 }
 
-export type DatasetNotationStatus =
-  | "proposed"
-  | "refined"
-  | "final"
-  | "verified"
-  | "violated"
+/**
+ * Lifecycle of the formal notation. There is intentionally NO
+ * "verified"/"violated" verdict — the dataset's validity is trusted, not
+ * proven. Advisory arithmetic evidence (when any predicate has it) lives
+ * in `checks`, separate from this status.
+ */
+export type DatasetNotationStatus = "proposed" | "refined" | "final"
 
 export type DatasetNotation = {
   version: number
@@ -108,8 +130,10 @@ export type DatasetNotation = {
   latex: string
   symbols: DatasetNotationSymbol[]
   predicates: DatasetNotationPredicate[]
+  /** advisory per-predicate evidence (asserted/supported/contradicted) */
   checks?: DatasetNotationCheckResult[]
-  verifiedAt?: number
+  /** when the advisory evidence was last computed */
+  evidenceAt?: number
   history: DatasetNotationRevision[]
 }
 
@@ -201,8 +225,10 @@ function schemaProperties(schema: JsonSchemaLike | null | undefined) {
 /**
  * A query-backed dataset has a complete deterministic description: the
  * dataset is the image of a known query over a known domain. No model is
- * involved — the notation and its checkable predicates derive mechanically
- * from the query, the inferred schema and the produced row count.
+ * involved, so here the formal definition and its predicates derive
+ * mechanically from the query, the inferred schema and the row count — and
+ * those predicates DO carry arithmetic evidence (the special case where the
+ * formal claims happen to be fully mechanical).
  */
 export function inferQueryNotation(params: {
   entityNames: string[]
@@ -493,43 +519,46 @@ export function evaluateNotationCheck(rows: any[], check: NotationCheck): CheckO
 }
 
 /**
- * Verify a notation against produced rows. Pure arithmetic — never throws.
- * Predicates without a machine-checkable form are reported as "skipped"
- * (they remain semantic claims). Returns the notation with check results
- * and a verified/violated status.
+ * Annotate a notation with ADVISORY arithmetic evidence over the produced
+ * rows. Never throws, never blocks, and never changes the notation's
+ * lifecycle status — the dataset's validity is trusted, not proven here.
+ *
+ * Each predicate is reported as:
+ * - "asserted"     no arithmetic form (formal/semantic claim, trusted)
+ * - "supported"    arithmetic evidence agrees
+ * - "contradicted" arithmetic evidence disagrees (a hint to look, not a
+ *                  verdict that the dataset is wrong)
+ * A check that can't be evaluated stays "asserted" — we don't downgrade a
+ * trusted claim because of a malformed mechanical form.
  */
-export function verifyDatasetNotation(
+export function annotateNotationEvidence(
   notation: DatasetNotation,
   rows: any[],
 ): DatasetNotation {
   const checks: DatasetNotationCheckResult[] = []
-  let failed = 0
   for (const predicate of notation.predicates ?? []) {
     if (!predicate.check) {
-      checks.push({ predicateId: predicate.id, status: "skipped" })
+      checks.push({ predicateId: predicate.id, status: "asserted" })
       continue
     }
     try {
       const outcome = evaluateNotationCheck(rows, predicate.check)
       checks.push({
         predicateId: predicate.id,
-        status: outcome.ok ? "passed" : "failed",
+        status: outcome.ok ? "supported" : "contradicted",
         detail: outcome.detail,
       })
-      if (!outcome.ok) failed += 1
     } catch (error) {
       checks.push({
         predicateId: predicate.id,
-        status: "failed",
-        detail: `error de evaluación: ${String(error).slice(0, 120)}`,
+        status: "asserted",
+        detail: `no evaluable: ${String(error).slice(0, 120)}`,
       })
-      failed += 1
     }
   }
   return {
     ...notation,
     checks,
-    status: failed === 0 ? "verified" : "violated",
-    verifiedAt: Date.now(),
+    evidenceAt: Date.now(),
   }
 }

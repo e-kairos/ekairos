@@ -1,8 +1,8 @@
 import { DatasetService } from "../service.js"
 import { datasetDomain } from "../schema.js"
 import {
+  annotateNotationEvidence,
   inferQueryNotation,
-  verifyDatasetNotation,
   type DatasetNotation,
 } from "../notation.js"
 import {
@@ -124,9 +124,9 @@ export async function materializeRowsToDataset<Runtime extends AnyDatasetRuntime
   }
 
   // Formal notation, informative only (never blocks the build): a notation
-  // proposed during the build (agent iterations) is verified against the
-  // materialized rows; query-backed builds with no proposed notation get
-  // the deterministic one derived from query + schema + rows.
+  // proposed during the build (agent iterations) gets advisory evidence
+  // against the materialized rows; query-backed builds with no proposed
+  // notation get the deterministic one derived from query + schema + rows.
   try {
     const existing = await service.getDatasetById(params.datasetId)
     const previous = (existing.ok ? existing.data?.notation : null) as DatasetNotation | null
@@ -148,7 +148,7 @@ export async function materializeRowsToDataset<Runtime extends AnyDatasetRuntime
     if (candidate) {
       await service.updateDatasetNotation({
         datasetId: params.datasetId,
-        notation: verifyDatasetNotation(candidate, params.rows),
+        notation: annotateNotationEvidence(candidate, params.rows),
       })
     }
   } catch {

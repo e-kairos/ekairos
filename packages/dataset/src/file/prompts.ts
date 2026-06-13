@@ -320,9 +320,9 @@ function buildInstructions(context: FileParseContext): string {
         .ele("Requirement").txt("The notation is your PLANNING artifact: it comes BEFORE the schema and BEFORE any parsing code. The LaTeX that explains the dataset matters more than the code that produces it").up()
         .ele("Requirement").txt("Use set-builder notation, quantifiers and arithmetic in LaTeX (e.g. D = \\{(c, q, p) \\mid q \\in \\mathbb{Z}^{+},\\; p \\in \\mathbb{R}_{\\geq 0}\\})").up()
         .ele("Requirement").txt("Declare every discovered set and variable as a symbol with a one-line meaning").up()
-        .ele("Requirement").txt("Give predicates a machine-checkable checkJson whenever the claim is arithmetic (row counts, field types, ranges, uniqueness, aggregates); leave semantic-only claims without checkJson").up()
+        .ele("Requirement").txt("Predicates are formal claims we trust; they may be semantic (e.g. 'x es una frase relevante'). Only for the few that are purely arithmetic (row counts, field types, ranges, uniqueness, aggregates) you MAY add a checkJson for optional advisory evidence — leave every other claim without checkJson").up()
         .ele("Requirement").txt("ITERATE: every time the analysis discovers a new set, variable, constraint or correction (new columns, unexpected types, excluded sections), call proposeNotation again with the refined notation and the reason. The notation is not definitive — discovery is the point").up()
-        .ele("Requirement").txt("Before calling completeDataset, call proposeNotation one last time with final=true so the notation describes EXACTLY the dataset you produced; its checkable predicates will be verified arithmetically against the rows").up()
+        .ele("Requirement").txt("Before calling completeDataset, call proposeNotation one last time with final=true so the notation describes EXACTLY the dataset you produced; any arithmetic predicates get optional advisory evidence afterwards (never a pass/fail verdict — the dataset's validity is trusted)").up()
         .up()
         .up()
 

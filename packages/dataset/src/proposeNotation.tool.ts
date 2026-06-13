@@ -36,8 +36,8 @@ const predicateSchema = z.object({
     .optional()
     .describe(
       [
-        "OPTIONAL machine-checkable form of the claim as a JSON string, verified",
-        "with plain arithmetic over the produced rows. Shapes:",
+        "OPTIONAL arithmetic form of the claim as a JSON string, used only for",
+        "advisory evidence over the produced rows (not a verdict). Shapes:",
         '{"kind":"row_count","op":"=","value":124}',
         '{"kind":"field_type","field":"amount","type":"number","allowNull":true}',
         '{"kind":"field_range","field":"amount","min":0}',
@@ -49,7 +49,7 @@ const predicateSchema = z.object({
         'Propositional composition: {"kind":"and"|"or","checks":[...]},',
         '{"kind":"not","check":...}, {"kind":"implies","if":...,"then":...}.',
         "Fields support dot-paths into nested records (company.taxId).",
-        "Omit for claims that are semantic only.",
+        "Omit for formal/semantic claims (the normal case) — they are trusted.",
       ].join(" "),
     ),
 })
@@ -67,19 +67,21 @@ async function getDatasetService(runtime: any): Promise<DatasetService> {
  * the analysis discovers new sets, variables, constraints or corrections.
  * Every call appends a revision (the discovery trail is preserved). Mark
  * the last call with final=true so the notation describes the produced
- * dataset; its checkable predicates get verified arithmetically after
- * completion.
+ * dataset. Predicates may be formal/semantic (we trust them); the few that
+ * are arithmetic get optional advisory evidence after completion.
  */
 export function createProposeNotationTool({ datasetId, runtime }: ProposeNotationToolParams) {
   return tool({
     description: [
       "Declare or refine the FORMAL NOTATION of the dataset: the dataset as a",
-      "set defined in LaTeX (set-builder, relational algebra, quantified",
-      "predicates) plus the symbols it binds and the predicates every row",
-      "satisfies. This is your PLANNING artifact — propose it before writing",
-      "any code, and revise it whenever the analysis discovers new sets,",
-      "variables or invariants. The latest final notation is verified",
-      "arithmetically against the produced rows (non-blocking).",
+      "set defined in LaTeX (set-builder, relational algebra, quantified or",
+      "even semantic predicates) plus the symbols it binds. The definition is",
+      "a logical proposition, possibly derived — it does not need to be",
+      "mechanically provable; we trust the formality. This is your PLANNING",
+      "artifact — propose it before writing any code, and revise it whenever",
+      "the analysis discovers new sets, variables or constraints. For the few",
+      "predicates that happen to be arithmetic you MAY attach a checkJson for",
+      "optional advisory evidence (non-blocking, never a verdict).",
     ].join(" "),
     inputSchema: z.object({
       latex: z
