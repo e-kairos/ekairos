@@ -141,10 +141,15 @@ export async function materializeRowsToDataset<Runtime extends AnyDatasetRuntime
               typeof analysis.explanation === "string" ? analysis.explanation : undefined,
           })
         : null
+    // Query-backed builds are deterministic, so a freshly inferred notation
+    // always wins (a prior run's notation would be stale). Only agent-built
+    // datasets (no query) keep the notation the agent proposed during the
+    // build, which by now is the latest `previous`.
     const candidate =
-      previous && Array.isArray(previous.predicates) && previous.predicates.length > 0
+      queryNotation ??
+      (previous && Array.isArray(previous.predicates) && previous.predicates.length > 0
         ? previous
-        : queryNotation
+        : null)
     if (candidate) {
       await service.updateDatasetNotation({
         datasetId: params.datasetId,
