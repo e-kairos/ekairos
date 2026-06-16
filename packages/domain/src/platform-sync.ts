@@ -9,9 +9,9 @@
  *
  * Configuration (host app env vars):
  * - EKAIROS_PLATFORM_URL      target platform origin; sync is disabled when unset
- * - EKAIROS_DOMAIN_TOKEN      bearer credential (same token that protects the
- *                             domain route); the platform matches it against
- *                             the registered application credential
+ * - EKAIROS_API_KEY           project credential that protects the domain route;
+ *                             the platform matches it against the registered
+ *                             application credential
  * - EKAIROS_PLATFORM_ORG_ID   platform organization that owns the application
  * - EKAIROS_DOMAIN_BASE_URL   public origin of this deployment (falls back to
  *                             VERCEL_URL); informational
@@ -58,7 +58,7 @@ function sanitizeEnv(env: ReportableEnv): ReportableEnv {
 
 function readConfig() {
   const platformUrl = (process.env.EKAIROS_PLATFORM_URL ?? "").trim().replace(/\/+$/, "")
-  const token = (process.env.EKAIROS_DOMAIN_TOKEN ?? "").trim()
+  const token = (process.env.EKAIROS_API_KEY ?? "").trim()
   if (!platformUrl || !token) return null
   const vercelUrl = (process.env.VERCEL_URL ?? "").trim()
   const baseUrl =

@@ -151,7 +151,7 @@ function isAuthRequired() {
   const explicit = parseOptionalBoolean(process.env.EKAIROS_DOMAIN_AUTH_REQUIRED)
   if (explicit !== undefined) return explicit
   return Boolean(
-    process.env.EKAIROS_DOMAIN_TOKEN ||
+    process.env.EKAIROS_API_KEY ||
       process.env.EKAIROS_DOMAIN_JWKS_URL ||
       process.env.EKAIROS_DOMAIN_ISSUER ||
       process.env.EKAIROS_DOMAIN_AUDIENCE,
@@ -224,7 +224,7 @@ async function resolveAuth(req: Request, body: any, source: RuntimeDomainSource 
     return auth
   }
 
-  const staticToken = String(process.env.EKAIROS_DOMAIN_TOKEN ?? "").trim()
+  const staticToken = String(process.env.EKAIROS_API_KEY ?? "").trim()
   if (staticToken && bearerToken === staticToken) {
     auth.authorized = true
     auth.bearerType = "static"
