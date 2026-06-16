@@ -130,12 +130,6 @@ function buildDomainSummary(domain: RuntimeDomainSource | null) {
   }
 }
 
-function resolveBearerToken(req: Request) {
-  const header = req.headers.get("authorization") || ""
-  if (!header.startsWith("Bearer ")) return null
-  return header.slice("Bearer ".length).trim()
-}
-
 function resolveImpersonatedDb(db: any, body: any) {
   if (typeof db?.asUser !== "function") return db
 
@@ -255,31 +249,26 @@ function requireDomainRouteAuth(input: {
     )
   }
 
-  if (parseDomainApiKey(apiKey)) {
-    const verification = verifySignedDomainRequest({
-      apiKey,
-      body: input.bodyText ?? "",
-      headers: input.req.headers,
-      method: input.req.method,
-      url: input.req.url,
-    })
-    if (!verification.ok) {
-      return json(
-        { ok: false, error: "ekairos_domain_unauthorized", reason: verification.error },
-        { status: 401 },
-      )
-    }
-    return null
-  }
-
-  const token = resolveBearerToken(input.req)
-  if (token !== apiKey) {
+  if (!parseDomainApiKey(apiKey)) {
     return json(
-      { ok: false, error: "ekairos_domain_unauthorized" },
-      { status: 401 },
+      { ok: false, error: "ekairos_api_key_must_be_signed_domain_key" },
+      { status: 500 },
     )
   }
 
+  const verification = verifySignedDomainRequest({
+    apiKey,
+    body: input.bodyText ?? "",
+    headers: input.req.headers,
+    method: input.req.method,
+    url: input.req.url,
+  })
+  if (!verification.ok) {
+    return json(
+      { ok: false, error: "ekairos_domain_unauthorized", reason: verification.error },
+      { status: 401 },
+    )
+  }
   return null
 }
 
@@ -328,7 +317,6 @@ export function createRuntimeRouteHandler<
       const runtime = await createRuntimeFor(null)
       const meta = runtime.meta()
       const domain = (meta.domain ?? null) as RuntimeDomainSource | null
-      const apiKey = configuredDomainApiKey()
 
       return json({
         ok: true,
@@ -340,9 +328,9 @@ export function createRuntimeRouteHandler<
         },
         auth: {
           required: true,
-          scheme: parseDomainApiKey(apiKey ?? "") ? "ekairos-domain-signature" : "bearer",
+          scheme: "ekairos-domain-signature",
           supportsRefreshToken: false,
-          supportsBearerToken: !parseDomainApiKey(apiKey ?? ""),
+          supportsBearerToken: false,
         },
         domain: buildDomainSummary(domain),
         schema: meta.schema,

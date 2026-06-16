@@ -71,7 +71,9 @@ const nextConfig: NextConfig = {
 export default withWorkflow(nextConfig) as NextConfig;
 ```
 
-The CLI uses `/api/ekairos/domain`.
+Ekairos Platform calls `/api/ekairos/domain` with signed `ekdk_*` requests.
+CLI and desktop clients authenticate with Platform and do not call customer
+domain routes directly.
 
 ## Core Pattern
 
