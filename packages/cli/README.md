@@ -35,11 +35,18 @@ endpoint with the registered application credential.
 ```bash
 ekairos domain query "{ task_tasks: { $: { limit: 5 } } }" \
   --app=<platform-app-id> \
+  --env=development \
+  --pretty
+
+ekairos domain env register \
+  --app=<platform-app-id> \
+  --env=development \
+  --data='{"orgId":"org_..."}' \
   --pretty
 
 ekairos domain tasks.getTask "{ id: '<task-id>' }" \
   --app=<platform-app-id> \
-  --env='{"orgId":"org_..."}' \
+  --env=development \
   --pretty
 ```
 

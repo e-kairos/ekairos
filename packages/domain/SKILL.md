@@ -14,7 +14,7 @@ Use this skill when creating, editing, reviewing, or operating Ekairos domain co
   `const scoped = await runtime.use(appDomain); await scoped.actions.launchOrder(input);`
 - Use string action names only for dynamic runtime/HTTP/CLI execution.
 - Use explicit runtime classes that extend `EkairosRuntime`.
-- New Next.js apps expose `/api/ekairos/domain` through `createRuntimeRouteHandler({ createRuntime })`.
+- New Next.js apps expose `/api/domain` through `createRuntimeRouteHandler({ createRuntime })`.
 - Do not use or reintroduce `withRuntime(...)`.
 
 ## Domain Design Workflow
@@ -47,7 +47,7 @@ For a generated or edited app:
 
 1. Run `pnpm typecheck`.
 2. Start the app locally.
-3. Verify `GET /api/ekairos/domain`.
+3. Verify `GET /api/domain`.
 4. Execute at least one domain action.
 5. Query the linked graph produced by that action.
 

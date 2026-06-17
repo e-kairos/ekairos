@@ -41,7 +41,10 @@ const cli = meow(
 		--action   Convenience flag for async actions (update-all, install-essentials, init-shadcn, exit)
 		--platform Platform URL override. Defaults to production.
 		--app      Platform application id for ekairos domain ...
-		--env      Runtime env override as a JSON object for ekairos domain ...
+		--env      Runtime environment key for ekairos domain ...
+		--env-data Runtime env override as a JSON object for ekairos domain ...
+		--data     JSON data for commands such as domain env register
+		--title    Human title for commands such as domain env register
 		--no-open  Print OAuth URL instead of opening a browser
 		--dry-run  Validate OAuth discovery/registration without completing login
 
@@ -53,7 +56,8 @@ const cli = meow(
 	  $ ekairos create-app ./supply-chain --next --install --smoke --json
 	  $ ekairos domain query "{ procurement_order: { supplier: {} } }" --baseUrl=http://localhost:3000 --admin
 	  $ ekairos domain query "{ task_tasks: {} }" --app=<appId>
-	  $ ekairos domain query "{ task_tasks: {} }" --app=<appId> --env='{"orgId":"org_..."}'
+	  $ ekairos domain env register --app=<appId> --env=disal-demo --data='{"orgId":"org_..."}'
+	  $ ekairos domain query "{ task_tasks: {} }" --app=<appId> --env=disal-demo
 	  $ ekairos --session <uuid> --input '{"action": "update-all"}'
 	  $ ekairos dataset create --rows-file rows.jsonl --app-id <id> --admin-token <token>
 `,
@@ -83,6 +87,15 @@ const cli = meow(
 				type: 'string',
 			},
 			env: {
+				type: 'string',
+			},
+			envData: {
+				type: 'string',
+			},
+			data: {
+				type: 'string',
+			},
+			title: {
 				type: 'string',
 			},
 			pretty: {
@@ -203,8 +216,11 @@ async function run() {
 			const code = await runPlatformDomainCommand(commandArgs, {
 				app: cli.flags.app,
 				env: cli.flags.env,
+				envData: cli.flags.envData,
+				data: cli.flags.data,
 				platformUrl: cli.flags.platform,
 				pretty: cli.flags.pretty || cli.flags.json,
+				title: cli.flags.title,
 			});
 			process.exit(code);
 		}

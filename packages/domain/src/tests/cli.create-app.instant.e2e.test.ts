@@ -42,7 +42,7 @@ async function waitForDomainEndpoint(baseUrl: string, timeoutMs = 2 * 60 * 1000)
 
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const response = await fetch(`${baseUrl}/api/ekairos/domain`)
+      const response = await fetch(`${baseUrl}/api/domain`)
       if (response.ok) return
       lastError = `status:${response.status}`
     } catch (error) {

@@ -4,9 +4,12 @@ import { getPlatformAccessToken, resolvePlatformUrl } from './platform-auth.js';
 
 type PlatformDomainOptions = {
 	app?: string;
+	data?: string;
 	env?: string;
+	envData?: string;
 	platformUrl?: string;
 	pretty?: boolean;
+	title?: string;
 };
 
 function asText(value: unknown) {
@@ -46,21 +49,26 @@ async function readInput(input: string | undefined, field: string) {
 		.runInNewContext(Object.freeze({}));
 }
 
-async function readEnv(input: string | undefined) {
+async function readEnvData(input: string | undefined) {
 	if (!input) return undefined;
 	const env = await readInput(input, 'env');
 	if (!env || typeof env !== 'object' || Array.isArray(env)) {
-		throw new Error('--env must be a JSON object.');
+		throw new Error('Runtime env data must be a JSON object.');
 	}
 	return env as Record<string, unknown>;
 }
 
-async function buildPlatformBody(args: string[], appId: string, envInput?: string) {
+async function buildPlatformBody(args: string[], appId: string, options: PlatformDomainOptions) {
 	const normalized = normalizeDomainArgs(args);
 	const [operation, ...rest] = normalized;
-	const env = await readEnv(envInput);
+	const envKey = asText(options.env);
+	const envData = await readEnvData(options.envData);
 	const withEnv = <T extends Record<string, unknown>>(body: T) =>
-		env ? { ...body, env } : body;
+		({
+			...body,
+			...(envKey ? { env: envKey } : {}),
+			...(envData ? { envData } : {}),
+		});
 
 	if (operation === 'introspect') {
 		return withEnv({ appId, operation: 'introspect' });
@@ -96,6 +104,50 @@ async function buildPlatformBody(args: string[], appId: string, envInput?: strin
 	throw new Error(`Unsupported platform domain operation: ${operation}`);
 }
 
+async function registerPlatformEnvironment(
+	options: PlatformDomainOptions & { app: string },
+	platformUrl: string,
+	accessToken: string,
+) {
+	const key = asText(options.env);
+	if (!key) {
+		throw new Error('Missing --env for domain env register.');
+	}
+	const env = await readEnvData(options.data ?? options.envData);
+	if (!env) {
+		throw new Error('Missing --data for domain env register.');
+	}
+
+	const response = await fetch(`${platformUrl}/api/platform/environments/upsert`, {
+		body: JSON.stringify({
+			appId: options.app,
+			key,
+			title: asText(options.title) || key,
+			env,
+		}),
+		headers: {
+			authorization: `Bearer ${accessToken}`,
+			'content-type': 'application/json',
+		},
+		method: 'POST',
+	});
+	const text = await response.text();
+	let payload: unknown = text;
+	try {
+		payload = JSON.parse(text);
+	} catch {
+		// Keep raw response text.
+	}
+	console.log(typeof payload === 'string'
+		? payload
+		: JSON.stringify(payload, null, options.pretty ? 2 : 0));
+	if (!response.ok) return 1;
+	if (payload && typeof payload === 'object' && (payload as { ok?: unknown }).ok === false) {
+		return 1;
+	}
+	return 0;
+}
+
 export async function runPlatformDomainCommand(
 	args: string[],
 	options: PlatformDomainOptions,
@@ -115,7 +167,15 @@ export async function runPlatformDomainCommand(
 		);
 	}
 
-	const body = await buildPlatformBody(args, appId, options.env);
+	if (args[0] === 'env' && args[1] === 'register') {
+		return await registerPlatformEnvironment(
+			{ ...options, app: appId },
+			platformUrl,
+			credentials.accessToken,
+		);
+	}
+
+	const body = await buildPlatformBody(args, appId, options);
 	const headers: Record<string, string> = {
 		authorization: `Bearer ${credentials.accessToken}`,
 		'content-type': 'application/json',

@@ -1507,11 +1507,11 @@ async function executeCodexSandboxTurn(
       [
         "set -euo pipefail",
         `cd ${shellSingleQuote(repoPath)}`,
-        `if ! curl -fsS http://127.0.0.1:${appPort}/api/ekairos/domain >/dev/null 2>&1; then`,
+        `if ! curl -fsS http://127.0.0.1:${appPort}/api/domain >/dev/null 2>&1; then`,
         `  nohup npx -y pnpm@10.15.1 dev --hostname 0.0.0.0 --port ${appPort} > /tmp/ekairos-app-${appPort}.log 2>&1 &`,
         `  echo $! > /tmp/ekairos-app-${appPort}.pid`,
         "fi",
-        `for i in $(seq 1 180); do curl -fsS http://127.0.0.1:${appPort}/api/ekairos/domain >/dev/null 2>&1 && echo codex_sandbox_start_app_ok && exit 0; sleep 1; done`,
+        `for i in $(seq 1 180); do curl -fsS http://127.0.0.1:${appPort}/api/domain >/dev/null 2>&1 && echo codex_sandbox_start_app_ok && exit 0; sleep 1; done`,
         `cat /tmp/ekairos-app-${appPort}.log || true`,
         "exit 1",
       ].join("\n"),
@@ -1521,7 +1521,7 @@ async function executeCodexSandboxTurn(
     const portUrl = ensureOk(await actions.getPortUrl({ sandboxId, port: appPort }), "codex_sandbox_port_url")
     appBaseUrl = String(portUrl.url ?? "").replace(/\/+$/, "")
     if (appBaseUrl) {
-      const response = await fetch(`${appBaseUrl}/api/ekairos/domain`)
+      const response = await fetch(`${appBaseUrl}/api/domain`)
       if (!response.ok) throw new Error(`codex_sandbox_app_url_unavailable_${response.status}`)
     }
   }

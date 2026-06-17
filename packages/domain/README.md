@@ -46,7 +46,7 @@ ekairos domain query "{ procurement_order: { supplier: {}, stockItems: {}, shipm
 New Next.js apps expose the domain adapter explicitly:
 
 ```ts
-// src/app/api/ekairos/domain/route.ts
+// src/app/api/domain/route.ts
 import { createRuntimeRouteHandler } from "@ekairos/domain/next";
 import { createRuntime } from "@/runtime";
 
@@ -71,7 +71,7 @@ const nextConfig: NextConfig = {
 export default withWorkflow(nextConfig) as NextConfig;
 ```
 
-The CLI uses `/api/ekairos/domain`.
+The CLI uses `/api/domain`.
 
 ## Core Pattern
 

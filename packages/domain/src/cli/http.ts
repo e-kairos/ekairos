@@ -31,7 +31,7 @@ function authHeaders(refreshToken?: string) {
     : {}
 }
 
-const DEFAULT_DOMAIN_ENDPOINT = "/api/ekairos/domain"
+const DEFAULT_DOMAIN_ENDPOINT = "/api/domain"
 
 function domainEndpointCandidates(baseUrl: string) {
   return [`${baseUrl}${DEFAULT_DOMAIN_ENDPOINT}`]

@@ -721,7 +721,7 @@ async function waitForDomainEndpoint(params: {
   processExited: () => boolean
   readLogs: () => string
 }) {
-  const endpoint = `${params.baseUrl}/api/ekairos/domain`
+  const endpoint = `${params.baseUrl}/api/domain`
   const deadline = Date.now() + 3 * 60 * 1000
   let lastError = ""
 
@@ -756,7 +756,7 @@ function asArray(value: unknown): unknown[] {
 
 async function postSmokeJson(baseUrl: string, body: Record<string, unknown>) {
   const { response, data } = await fetchJsonWithTimeout(
-    `${baseUrl}/api/ekairos/domain`,
+    `${baseUrl}/api/domain`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1162,7 +1162,7 @@ function buildNextTemplateFiles(params: {
         "",
         "This app starts empty on purpose.",
         "",
-        "Add your first domain in `src/domain.ts`, then expose it through `src/runtime.ts` and `/api/ekairos/domain`.",
+        "Add your first domain in `src/domain.ts`, then expose it through `src/runtime.ts` and `/api/domain`.",
         "",
         "Suggested first step:",
         "- create one domain with camelCase name",
@@ -1192,7 +1192,7 @@ function buildNextTemplateFiles(params: {
         "",
         "export default withWorkflow(nextConfig) as NextConfig;",
       ].join("\n"),
-      "src/app/api/ekairos/domain/route.ts": [
+      "src/app/api/domain/route.ts": [
         'import { createRuntimeRouteHandler } from "@ekairos/domain/next";',
         'import { createRuntime } from "@/runtime";',
         "",
@@ -1826,7 +1826,7 @@ function buildNextTemplateFiles(params: {
       "",
       "export default withWorkflow(nextConfig) as NextConfig;",
     ].join("\n"),
-    "src/app/api/ekairos/domain/route.ts": [
+    "src/app/api/domain/route.ts": [
       'import { createRuntimeRouteHandler } from "@ekairos/domain/next";',
       'import { createRuntime } from "@/runtime";',
       "",
@@ -2467,7 +2467,7 @@ function buildNextTemplateFiles(params: {
       "}",
       "",
       "async function runAction(action: string, input: Record<string, unknown>) {",
-      "  const response = await fetch(\"/api/ekairos/domain\", {",
+      "  const response = await fetch(\"/api/domain\", {",
       "    method: \"POST\",",
       "    headers: { \"content-type\": \"application/json\" },",
       "    body: JSON.stringify({ op: \"action\", action, input }),",
