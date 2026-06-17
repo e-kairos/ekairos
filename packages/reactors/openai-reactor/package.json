@@ -13,6 +13,21 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./responses": {
+      "types": "./dist/responses.reactor.d.ts",
+      "import": "./dist/responses.reactor.js",
+      "default": "./dist/responses.reactor.js"
+    },
+    "./codex": {
+      "types": "./dist/codex.reactor.d.ts",
+      "import": "./dist/codex.reactor.js",
+      "default": "./dist/codex.reactor.js"
+    },
+    "./codex/local": {
+      "types": "./dist/codex.local.d.ts",
+      "import": "./dist/codex.local.js",
+      "default": "./dist/codex.local.js"
     }
   },
   "scripts": {
