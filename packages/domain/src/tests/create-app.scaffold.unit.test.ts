@@ -43,7 +43,7 @@ describe("create-app scaffold generation", () => {
     const workbenchFile = await readFile(join(targetDir, "src", "app", "domain-workbench.tsx"), "utf8");
     const runtimeFile = await readFile(join(targetDir, "src", "runtime.ts"), "utf8");
     const routeFile = await readFile(
-      join(targetDir, "src", "app", "api", "ekairos", "domain", "route.ts"),
+      join(targetDir, "src", "app", "api", "domain", "route.ts"),
       "utf8",
     );
 
