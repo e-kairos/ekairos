@@ -33,6 +33,32 @@ Domain operations stay under the domain namespace:
 ekairos domain query "{ procurement_order: { supplier: {} } }" --baseUrl=http://localhost:3000 --admin
 ```
 
+Platform-authenticated operations start with OAuth login:
+
+```powershell
+ekairos login
+ekairos whoami
+```
+
+After login, prefer Platform-mediated domain operations when the target is a
+registered remote application. The CLI obtains the Platform access token from
+local storage and sends the query/action to `/api/platform/domain/run`; Platform
+uses the registered domain credential for the host application.
+
+```powershell
+ekairos domain query "{ task_tasks: { $: { limit: 5 } } }" `
+  --app=<platform-app-id> `
+  --pretty
+
+ekairos domain tasks.getTask "{ id: '<task-id>' }" `
+  --app=<platform-app-id> `
+  --env='{"orgId":"org_..."}' `
+  --pretty
+```
+
+Use `EKAIROS_AUTH_NO_OPEN=1` when an agent or browser automation should open the
+printed OAuth URL manually.
+
 Non-interactive app creation must be explicit:
 
 - `--json`

@@ -4,6 +4,13 @@ import meow from 'meow';
 import { fileURLToPath } from 'node:url';
 import { runCli as runDomainCli } from '@ekairos/domain/cli';
 import App from './app.js';
+import {
+	getPlatformAccessToken,
+	resolvePlatformUrl,
+	signInToPlatform,
+	signOutFromPlatform,
+} from './lib/platform-auth.js';
+import { runPlatformDomainCommand } from './lib/platform-domain-run.js';
 import { createSession, loadSession, processAsyncStep } from './lib/session.js';
 import { checkShadcnConfig, ensureEkairosRegistry, installComponent } from './lib/shadcn.js';
 
@@ -16,6 +23,8 @@ const cli = meow(
 	`
 	Usage
 	  $ ekairos
+	  $ ekairos login
+	  $ ekairos whoami
 	  $ ekairos create-app --demo
 	  $ ekairos create-app <dir> --next --install --smoke --json
 	  $ ekairos domain query "<json5>" --baseUrl=<url> --admin
@@ -30,12 +39,21 @@ const cli = meow(
 		--session  Session ID for continuing an async session
 		--input    JSON input for the session step
 		--action   Convenience flag for async actions (update-all, install-essentials, init-shadcn, exit)
+		--platform Platform URL override. Defaults to production.
+		--app      Platform application id for ekairos domain ...
+		--env      Runtime env override as a JSON object for ekairos domain ...
+		--no-open  Print OAuth URL instead of opening a browser
+		--dry-run  Validate OAuth discovery/registration without completing login
 
 	Examples
 	  $ ekairos --async
+	  $ ekairos login
+	  $ ekairos whoami --json
 	  $ ekairos create-app --demo
 	  $ ekairos create-app ./supply-chain --next --install --smoke --json
 	  $ ekairos domain query "{ procurement_order: { supplier: {} } }" --baseUrl=http://localhost:3000 --admin
+	  $ ekairos domain query "{ task_tasks: {} }" --app=<appId>
+	  $ ekairos domain query "{ task_tasks: {} }" --app=<appId> --env='{"orgId":"org_..."}'
 	  $ ekairos --session <uuid> --input '{"action": "update-all"}'
 	  $ ekairos dataset create --rows-file rows.jsonl --app-id <id> --admin-token <token>
 `,
@@ -55,6 +73,31 @@ const cli = meow(
 				type: 'string',
 			},
 			dev: {
+				type: 'boolean',
+				default: false,
+			},
+			platform: {
+				type: 'string',
+			},
+			app: {
+				type: 'string',
+			},
+			env: {
+				type: 'string',
+			},
+			pretty: {
+				type: 'boolean',
+				default: false,
+			},
+			noOpen: {
+				type: 'boolean',
+				default: false,
+			},
+			dryRun: {
+				type: 'boolean',
+				default: false,
+			},
+			json: {
 				type: 'boolean',
 				default: false,
 			},
@@ -93,6 +136,54 @@ async function run() {
 		console.log('Using local registry: http://localhost:3030/');
 	}
 
+	if (command === 'login') {
+		const result = await signInToPlatform({
+			dryRun: cli.flags.dryRun,
+			noOpen: cli.flags.noOpen,
+			platformUrl: cli.flags.platform,
+		});
+		if (cli.flags.dryRun || cli.flags.json) {
+			console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+			return;
+		}
+		const user = 'user' in result ? result.user : undefined;
+		console.log(`Signed in to ${resolvePlatformUrl(cli.flags.platform)} as ${user?.email ?? user?.id ?? 'unknown user'}.`);
+		return;
+	}
+
+	if (command === 'whoami') {
+		const platformUrl = resolvePlatformUrl(cli.flags.platform);
+		const credentials = await getPlatformAccessToken(platformUrl);
+		if (!credentials) {
+			console.error(`Not signed in to ${platformUrl}. Run: ekairos login${cli.flags.platform ? ` --platform=${platformUrl}` : ''}`);
+			process.exit(1);
+		}
+		if (cli.flags.json) {
+			console.log(JSON.stringify({ ok: true, platformUrl, user: credentials.user }, null, 2));
+			return;
+		}
+		console.log(`${credentials.user?.email ?? credentials.user?.id ?? 'unknown user'} @ ${platformUrl}`);
+		return;
+	}
+
+	if (command === 'logout') {
+		const platformUrl = resolvePlatformUrl(cli.flags.platform);
+		await signOutFromPlatform(platformUrl);
+		console.log(`Signed out from ${platformUrl}.`);
+		return;
+	}
+
+	if (command === 'token') {
+		const platformUrl = resolvePlatformUrl(cli.flags.platform);
+		const credentials = await getPlatformAccessToken(platformUrl);
+		if (!credentials) {
+			console.error(`Not signed in to ${platformUrl}. Run: ekairos login${cli.flags.platform ? ` --platform=${platformUrl}` : ''}`);
+			process.exit(1);
+		}
+		console.log(credentials.accessToken);
+		return;
+	}
+
 	if (command === 'add') {
 		await runAddCommand(commandArgs[0]);
 		return;
@@ -107,6 +198,15 @@ async function run() {
 		if (commandArgs[0] === 'create-app') {
 			console.error('Use `ekairos create-app ...` for app creation.');
 			process.exit(1);
+		}
+		if (cli.flags.platform || cli.flags.app) {
+			const code = await runPlatformDomainCommand(commandArgs, {
+				app: cli.flags.app,
+				env: cli.flags.env,
+				platformUrl: cli.flags.platform,
+				pretty: cli.flags.pretty || cli.flags.json,
+			});
+			process.exit(code);
 		}
 		const code = await runDomainCli(rawArgv.slice(1));
 		process.exit(code);

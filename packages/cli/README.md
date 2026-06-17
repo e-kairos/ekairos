@@ -21,6 +21,35 @@ Run the full local demo cycle:
 ekairos create-app --demo
 ```
 
+Authenticate against Ekairos Platform:
+
+```bash
+ekairos login
+ekairos whoami
+```
+
+Run a registered domain application through Ekairos Platform. The CLI uses the
+locally stored Platform OAuth token; Platform calls the application domain
+endpoint with the registered application credential.
+
+```bash
+ekairos domain query "{ task_tasks: { $: { limit: 5 } } }" \
+  --app=<platform-app-id> \
+  --pretty
+
+ekairos domain tasks.getTask "{ id: '<task-id>' }" \
+  --app=<platform-app-id> \
+  --env='{"orgId":"org_..."}' \
+  --pretty
+```
+
+For local development or browser automation, print the OAuth URL instead of
+opening it:
+
+```bash
+EKAIROS_AUTH_NO_OPEN=1 ekairos login --platform=http://ekairos-platform.localhost
+```
+
 ## Async mode
 
 Use async mode when the caller is another tool or agent.
@@ -39,5 +68,5 @@ ekairos --session <session-id> --input '{"action":"update-all"}'
 
 ```bash
 pnpm --filter @ekairos/cli build
-EKAIROS_REGISTRY_URL=http://localhost:3001 node packages/cli/dist/index.mjs
+EKAIROS_REGISTRY_URL=http://localhost:3001 node packages/cli/dist/index.js
 ```
