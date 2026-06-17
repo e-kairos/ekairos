@@ -4,6 +4,7 @@ import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
 import type { ContextIdentifier, ContextReactor, StoredContextResource } from "@ekairos/events"
 
 import { datasetDomain } from "../schema.js"
+import type { DatasetNotation } from "../notation.js"
 
 export type DatasetQueryResourceInput<D extends DomainSchemaResult = DomainSchemaResult> = {
   query: InstaQLParams<DomainInstantSchema<D>>
@@ -88,6 +89,9 @@ export type DatasetReader = {
 export type DatasetBuildResult = {
   datasetId: string
   dataset: any
+  /** the formal definition (intensional face), co-equal with the rows */
+  notation: DatasetNotation | null
+  /** preview of the materialization (extensional face) */
   previewRows: any[]
   reader: DatasetReader
   object?: any | null

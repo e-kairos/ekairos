@@ -1,4 +1,4 @@
-export {
+﻿export {
   createCodexReactor,
   executeCodexAppServerTurnStep,
   defaultMapCodexChunk,
@@ -14,6 +14,8 @@ export {
   type CodexStreamTrace,
   type CreateCodexReactorOptions,
 } from "./codex.reactor.js"
+
+export { ensureLocalCodexAppServerUrl } from "./codex.local.js"
 
 export {
   createOpenAIResponsesReactor,

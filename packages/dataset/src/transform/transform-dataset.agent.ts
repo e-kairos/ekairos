@@ -14,6 +14,7 @@ import {
 import { datasetUpdateSchemaStep } from "../dataset/steps.js"
 import { getDatasetOutputPath } from "../datasetFiles.js"
 import { createExecuteCommandTool } from "../executeCommand.tool.js"
+import { createDefineNotationTool } from "../defineNotation.tool.js"
 import {
   createCompleteObjectTool,
   createReplaceRowsTool,
@@ -180,6 +181,10 @@ function createTransformDatasetContextDefinition<Env extends { orgId: string }>(
         clearDataset: createClearDatasetTool({
           datasetId,
           sandboxId,
+          runtime,
+        }),
+        defineNotation: createDefineNotationTool({
+          datasetId,
           runtime,
         }),
       } as any

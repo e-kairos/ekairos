@@ -5,6 +5,16 @@
  * with is reported so the platform can materialize a workspace environment
  * under the registered application URL. Reporting is best effort and must
  * never block or break the host application.
+ *
+ * Configuration (host app env vars):
+ * - EKAIROS_PLATFORM_URL      target platform origin; sync is disabled when unset
+ * - EKAIROS_API_KEY           project credential that protects the domain route;
+ *                             the platform matches it against the registered
+ *                             application credential
+ * - EKAIROS_PLATFORM_ORG_ID   platform organization that owns the application
+ * - EKAIROS_DOMAIN_BASE_URL   public origin of this deployment (falls back to
+ *                             VERCEL_URL); informational
+ * - EKAIROS_DOMAIN_PATH       domain route path (default /api/domain)
  */
 
 type ReportableEnv = Record<string, unknown>;
@@ -27,7 +37,7 @@ function stableStringify(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
-function sanitizeEnv(env: ReportableEnv) {
+function sanitizeEnv(env: ReportableEnv): ReportableEnv {
   const output: ReportableEnv = {};
   for (const [key, value] of Object.entries(env ?? {})) {
     if (value === undefined || typeof value === "function") continue;
@@ -65,10 +75,15 @@ function readConfig() {
   };
 }
 
+/**
+ * Report a runtime env to the platform. Synchronous from the caller's point
+ * of view: schedules a deduplicated fire-and-forget request and returns
+ * immediately. Never throws.
+ */
 export function reportRuntimeEnvToPlatform(
   env: ReportableEnv,
   options?: { source?: string; title?: string },
-) {
+): void {
   try {
     const config = readConfig();
     if (!config) return;
@@ -105,6 +120,7 @@ export function reportRuntimeEnvToPlatform(
         if (!response.ok) reportedAt.delete(fingerprint);
       })
       .catch(() => {
+        // allow a retry on the next runtime construction
         reportedAt.delete(fingerprint);
       });
   } catch {

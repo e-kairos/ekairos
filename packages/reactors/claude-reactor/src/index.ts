@@ -25,28 +25,35 @@ export type ClaudeTurnResult = {
   metadata?: Record<string, unknown>
 }
 
+export type ClaudeExecuteTurnParams = {
+  /** stored context content */
+  context: AnyRecord
+  /** engine-expanded conversation items */
+  events: ContextItem[]
+  triggerEvent: ContextItem
+  /** narrative/system prompt resolved by the context */
+  systemPrompt: string
+  contextId: string
+  executionId: string
+  stepId: string
+  iteration: number
+  writable?: WritableStream<unknown>
+  contextStepStream?: WritableStream<string>
+}
+
 export type CreateClaudeReactorOptions<
   Context,
   Env extends ContextEnvironment = ContextEnvironment,
 > = {
-  executeTurn: (params: {
-    env: Env
-    context: AnyRecord
-    triggerEvent: ContextItem
-    contextId: string
-    executionId: string
-    stepId: string
-    iteration: number
-    writable?: WritableStream<unknown>
-    silent: boolean
-  }) => Promise<ClaudeTurnResult>
+  executeTurn: (params: ClaudeExecuteTurnParams) => Promise<ClaudeTurnResult>
 }
 
 /**
- * Claude reactor scaffold.
+ * Claude reactor for the @ekairos/events context engine.
  *
- * Integrators provide `executeTurn` (prefer a `"use step"` function) and Context
- * keeps durability, persistence and step lifecycle.
+ * Integrators provide `executeTurn` (Claude API, Claude Agent SDK, or the
+ * local Claude Code CLI in headless print mode) and Context keeps
+ * durability, persistence and step lifecycle.
  */
 export function createClaudeReactor<
   Context,
@@ -59,15 +66,16 @@ export function createClaudeReactor<
   ): Promise<ContextReactionResult> => {
     const context = asRecord(params.context.content)
     const turn = await options.executeTurn({
-      env: params.env,
       context,
+      events: params.events,
       triggerEvent: params.triggerEvent,
+      systemPrompt: asString(params.systemPrompt),
       contextId: params.contextId,
       executionId: params.executionId,
       stepId: params.stepId,
       iteration: params.iteration,
       writable: params.writable,
-      silent: params.silent,
+      contextStepStream: params.contextStepStream,
     })
 
     const assistantEvent: ContextItem = {

@@ -1,6 +1,11 @@
 import { DatasetService } from "../service.js"
 import { datasetDomain } from "../schema.js"
 import {
+  annotateNotationEvidence,
+  inferQueryNotation,
+  type DatasetNotation,
+} from "../notation.js"
+import {
   datasetGetByIdStep,
   datasetPreviewRowsStep,
   datasetReadOneStep,
@@ -118,6 +123,43 @@ export async function materializeRowsToDataset<Runtime extends AnyDatasetRuntime
     throw new Error(statusResult.error)
   }
 
+  // Formal notation, informative only (never blocks the build): a notation
+  // proposed during the build (agent iterations) gets advisory evidence
+  // against the materialized rows; query-backed builds with no proposed
+  // notation get the deterministic one derived from query + schema + rows.
+  try {
+    const existing = await service.getDatasetById(params.datasetId)
+    const previous = (existing.ok ? existing.data?.notation : null) as DatasetNotation | null
+    const analysis = (params.analysis ?? {}) as Record<string, any>
+    const queryNotation =
+      analysis.query && typeof analysis.query === "object"
+        ? inferQueryNotation({
+            entityNames: Object.keys(analysis.query),
+            rowCount: params.rows.length,
+            schema: resolvedSchema,
+            explanation:
+              typeof analysis.explanation === "string" ? analysis.explanation : undefined,
+          })
+        : null
+    // Query-backed builds are deterministic, so a freshly inferred notation
+    // always wins (a prior run's notation would be stale). Only agent-built
+    // datasets (no query) keep the notation the agent proposed during the
+    // build, which by now is the latest `previous`.
+    const candidate =
+      queryNotation ??
+      (previous && Array.isArray(previous.predicates) && previous.predicates.length > 0
+        ? previous
+        : null)
+    if (candidate) {
+      await service.updateDatasetNotation({
+        datasetId: params.datasetId,
+        notation: annotateNotationEvidence(candidate, params.rows),
+      })
+    }
+  } catch {
+    // notation must never affect the build result
+  }
+
   return params.datasetId
 }
 
@@ -166,10 +208,13 @@ export async function finalizeBuildResult<Runtime extends AnyDatasetRuntime>(
     },
   }
 
+  const notation = (datasetResult.data?.notation ?? null) as DatasetNotation | null
+
   if (!withFirst) {
     return {
       datasetId,
       dataset: datasetResult.data,
+      notation,
       previewRows: previewResult.rows,
       reader,
     }
@@ -180,6 +225,7 @@ export async function finalizeBuildResult<Runtime extends AnyDatasetRuntime>(
   return {
     datasetId,
     dataset: datasetResult.data,
+    notation,
     previewRows: previewResult.rows,
     reader,
     firstRow: firstResult.row,
@@ -213,6 +259,7 @@ export function createDatasetBuildResult<Runtime extends AnyDatasetRuntime>(
   return {
     datasetId: params.datasetId,
     dataset: params.dataset,
+    notation: (params.dataset?.notation ?? null) as DatasetNotation | null,
     previewRows: params.previewRows,
     reader,
     ...(params.firstRow !== undefined ? { firstRow: params.firstRow } : {}),

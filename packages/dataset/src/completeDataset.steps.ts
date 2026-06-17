@@ -1,5 +1,6 @@
 import Ajv, { type ErrorObject, type ValidateFunction } from "ajv"
 import { getDatasetOutputPath } from "./datasetFiles.js"
+import { annotateNotationEvidence, type DatasetNotation } from "./notation.js"
 import { DatasetService } from "./service.js"
 import { getDatasetRuntimeDb } from "./dataset/steps.js"
 import {
@@ -211,6 +212,23 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     console.log(`[Dataset ${datasetId}] Dataset marked as COMPLETED (${totalValidRows} valid rows)`)
     console.log(`[Dataset ${datasetId}] ========================================`)
 
+    // Formal-notation evidence: advisory arithmetic annotation of the latest
+    // notation against the produced rows. Informative only — it never
+    // affects the dataset completion result or the dataset's validity.
+    try {
+        await annotateNotationFromJsonl({
+            service,
+            datasetId,
+            jsonlBase64: fileRead.contentBase64,
+        })
+    }
+    catch (error) {
+        console.error(
+            `[Dataset ${datasetId}] notation annotation skipped:`,
+            error instanceof Error ? error.message : String(error),
+        )
+    }
+
         return {
             success: true,
             status: "completed",
@@ -221,6 +239,52 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
             storagePath,
             dataFileId: uploadResult.data.fileId,
         }
+}
+
+const NOTATION_EVIDENCE_MAX_ROWS = 50_000
+
+async function annotateNotationFromJsonl(params: {
+    service: DatasetService
+    datasetId: string
+    jsonlBase64: string
+}): Promise<void> {
+    const existing = await params.service.getDatasetById(params.datasetId)
+    const notation = (existing.ok ? existing.data?.notation : null) as DatasetNotation | null
+    if (!notation || !Array.isArray(notation.predicates) || notation.predicates.length === 0) {
+        return
+    }
+
+    const rows: any[] = []
+    const content = Buffer.from(params.jsonlBase64, "base64").toString("utf-8")
+    for (const line of content.split("\n")) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+            const parsed = JSON.parse(trimmed)
+            if (parsed && parsed.type === "row") {
+                rows.push(parsed.data)
+            }
+        }
+        catch {
+            // malformed lines were already handled by schema validation
+        }
+        if (rows.length >= NOTATION_EVIDENCE_MAX_ROWS) break
+    }
+
+    const annotated = annotateNotationEvidence(notation, rows)
+    await params.service.updateDatasetNotation({
+        datasetId: params.datasetId,
+        notation: annotated,
+    })
+    const contradicted = (annotated.checks ?? []).filter(
+        (check) => check.status === "contradicted",
+    )
+    console.log(
+        `[Dataset ${params.datasetId}] notation v${annotated.version} (${annotated.status})` +
+        (contradicted.length
+            ? ` — ${contradicted.length} predicado(s) con evidencia contraria (advisory)`
+            : ""),
+    )
 }
 
 function resolveExecutionStoragePath(outputPath: string, datasetId: string): string {

@@ -13,6 +13,7 @@ import {
 } from "../completeDataset.tool.js"
 import { datasetGetByIdStep } from "../dataset/steps.js"
 import { createExecuteCommandTool } from "../executeCommand.tool.js"
+import { createDefineNotationTool } from "../defineNotation.tool.js"
 import { createGenerateSchemaTool } from "./generateSchema.tool.js"
 import {
   buildFileDatasetPromptStep,
@@ -193,6 +194,10 @@ function createFileParseContextDefinition<Env extends { orgId: string }>(
         clearDataset: createClearDatasetTool({
           datasetId,
           sandboxId,
+          runtime,
+        }),
+        defineNotation: createDefineNotationTool({
+          datasetId,
           runtime,
         }),
       }
