@@ -1,0 +1,30 @@
+{
+  "extends": "../tsconfig/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2020",
+    "skipLibCheck": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo",
+    "baseUrl": ".",
+    "lib": ["ES2020", "DOM"],
+    "sourceMap": false,
+    "declarationMap": false,
+    "inlineSourceMap": false,
+    "inlineSources": false,
+    "paths": {
+      "@ekairos/domain": ["../domain/dist/index.d.ts"],
+      "@ekairos/domain/runtime": ["../domain/dist/runtime.d.ts"],
+      "@ekairos/domain/*": ["../domain/dist/*"],
+      "@ekairos/events": ["../events/dist/index.d.ts"],
+      "@ekairos/events/schema": ["../events/dist/schema.d.ts"],
+      "@ekairos/events/instant": ["../events/dist/stores/instant.store.d.ts"],
+      "@ekairos/events/*": ["../events/dist/*"]
+    }
+  },
+  "include": ["src/index.ts", "src/context.ts", "src/runtime.ts"],
+  "exclude": ["node_modules", "**/*.test.ts", "**/tests/**", "src/__type_tests__"]
+}

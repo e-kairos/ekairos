@@ -1,0 +1,78 @@
+{
+  "name": "@ekairos/reactor",
+  "version": "1.22.0",
+  "description": "Ekairos Reactor - workflow-safe reaction engine for @ekairos/events",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-kairos/ekairos.git",
+    "directory": "packages/reactor"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./context": {
+      "types": "./dist/context.d.ts",
+      "import": "./dist/context.js",
+      "default": "./dist/context.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js",
+      "default": "./dist/runtime.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "context": [
+        "dist/context.d.ts"
+      ],
+      "runtime": [
+        "dist/runtime.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('.tsbuildinfo',{force:true})\"",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.typecheck.json",
+    "test": "vitest run -c vitest.config.mts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.52",
+    "@ekairos/domain": "workspace:*",
+    "@ekairos/events": "workspace:*",
+    "@instantdb/admin": "0.22.158",
+    "@instantdb/core": "0.22.142",
+    "ai": "^5.0.95",
+    "partial-json": "^0.1.7",
+    "workflow": "5.0.0-beta.5",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@ekairos/testing": "workspace:*",
+    "@ekairos/tsconfig": "workspace:*",
+    "@types/node": "^24.5.0",
+    "@types/react": "^19.2.2",
+    "@workflow/serde": "5.0.0-beta.1",
+    "@workflow/vitest": "5.0.0-beta.5",
+    "dotenv": "^17.2.3",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.8"
+  }
+}
