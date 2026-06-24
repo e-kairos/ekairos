@@ -2,10 +2,9 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
 import {
-  createAiSdkReactor,
   eventsDomain,
-  type ContextReactor,
 } from "@ekairos/events"
+import { createAiSdkReactor, type ContextReactor } from "@ekairos/reactor/context"
 import { SandboxService } from "@ekairos/sandbox"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { sandboxDomain } from "../../../sandbox/src/schema.ts"

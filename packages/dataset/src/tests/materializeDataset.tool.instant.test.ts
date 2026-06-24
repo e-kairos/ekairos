@@ -6,7 +6,8 @@ import { init, id as newId } from "@instantdb/admin"
 import { i } from "@instantdb/core"
 import { domain } from "@ekairos/domain"
 import { configureRuntime, EkairosRuntime } from "@ekairos/domain/runtime"
-import { createScriptedReactor, eventsDomain } from "@ekairos/events"
+import { eventsDomain } from "@ekairos/events"
+import { createScriptedReactor } from "@ekairos/reactor/context"
 import { sandboxDomain, SandboxService } from "@ekairos/sandbox"
 import { createMaterializeDatasetTool } from "../materializeDataset.tool"
 import { datasetDomain } from "../schema"
@@ -268,6 +269,7 @@ describeInstant("createMaterializeDatasetTool()", () => {
         scriptedToolStep(
           "executeCommand",
           {
+            commandDescription: "Parse the uploaded CSV file and write row records to the expected output.jsonl file.",
             scriptName: "parse_csv_to_jsonl",
             pythonCode: [
               "import csv, json",
@@ -286,6 +288,15 @@ describeInstant("createMaterializeDatasetTool()", () => {
           },
         ),
         scriptedToolStep("completeDataset", { summary: "file ready" }),
+        {
+          assistantEvent: {
+            content: {
+              parts: [{ type: "text", text: "dataset completed" }],
+            },
+          },
+          actionRequests: [],
+          messagesForModel: [],
+        },
       ],
     })
 

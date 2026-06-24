@@ -6,7 +6,8 @@ import { i } from "@instantdb/core"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "../../../domain/src/runtime-handle.ts"
 import { configureRuntime } from "@ekairos/domain/runtime"
-import { createContext, didToolExecute, eventsDomain } from "@ekairos/events"
+import { eventsDomain } from "@ekairos/events"
+import { createContext, didActionExecute } from "@ekairos/reactor/context"
 import { sandboxDomain, SandboxService } from "@ekairos/sandbox"
 import { createCodexReactor, type CodexConfig } from "@ekairos/openai-reactor"
 import { createTestApp } from "../../../ekairos-test/src/provision.ts"
@@ -433,7 +434,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
           maxPersistedStreamChunks: 1000,
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "complete_build"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "complete_build"))
       .build()
 
     const runShell = await pipelineContext.react(
@@ -546,7 +547,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
           includeStreamTraceInOutput: true,
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "complete_research"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "complete_research"))
       .build()
 
     const researchShell = await researchContext.react(
@@ -640,7 +641,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
           includeStreamTraceInOutput: true,
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "complete_resolution"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "complete_resolution"))
       .build()
 
     const resolveShell = await resolveContext.react(
@@ -697,7 +698,7 @@ describeReal("dataset semantic pipeline with Codex contexts", () => {
           includeStreamTraceInOutput: true,
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "complete_build"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "complete_build"))
       .build()
 
     const buildShell = await buildContext.react(

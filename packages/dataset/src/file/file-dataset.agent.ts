@@ -1,9 +1,8 @@
 import {
-  createContext,
   INPUT_TEXT_ITEM_TYPE,
   WEB_CHANNEL,
-  type ContextReactor,
 } from "@ekairos/events"
+import { createContext, type ContextReactor } from "@ekairos/reactor/context"
 
 import { createClearDatasetTool } from "../clearDataset.tool.js"
 import {

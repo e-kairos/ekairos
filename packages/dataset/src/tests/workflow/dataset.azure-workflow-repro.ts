@@ -1,6 +1,7 @@
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
-import { eventsDomain, type ContextReactor } from "@ekairos/events"
+import { eventsDomain } from "@ekairos/events"
+import type { ContextReactor } from "@ekairos/reactor/context"
 import {
   createOpenAIResponsesReactor,
   type OpenAIResponsesConfig,

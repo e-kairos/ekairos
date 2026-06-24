@@ -1,7 +1,8 @@
 import type { InstaQLParams, ValidQuery } from "@instantdb/core"
 import type { DomainInstantSchema, DomainSchemaResult } from "@ekairos/domain"
 import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
-import type { ContextIdentifier, ContextReactor, StoredContextResource } from "@ekairos/events"
+import type { ContextIdentifier, StoredContextResource } from "@ekairos/events"
+import type { ContextReactor } from "@ekairos/reactor/context"
 
 import { datasetDomain } from "../schema.js"
 import type { DatasetNotation } from "../notation.js"

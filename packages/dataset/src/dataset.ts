@@ -1,5 +1,5 @@
 import type { DomainInstantSchema, DomainSchemaResult } from "@ekairos/domain"
-import type { ContextReactor } from "@ekairos/events"
+import type { ContextReactor } from "@ekairos/reactor/context"
 import type { ValidQuery } from "@instantdb/core"
 
 import { buildObjectOutputInstructions } from "./builder/instructions.js"

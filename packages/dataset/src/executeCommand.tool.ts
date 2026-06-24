@@ -1,4 +1,4 @@
-import { defineAction } from "@ekairos/events"
+import { defineAction } from "@ekairos/reactor/context"
 import { z } from "zod"
 
 import { materializeContextResourcesStep } from "./contextResources.js"

@@ -1,4 +1,4 @@
-import type { ContextReactor } from "@ekairos/events"
+import type { ContextReactor } from "@ekairos/reactor/context"
 import type { FilePreviewContext } from "./filepreview.types.js"
 
 export type SandboxState = {

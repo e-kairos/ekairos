@@ -2,7 +2,7 @@ import { tool } from "ai"
 import { z } from "zod"
 import type { DomainSchemaResult } from "@ekairos/domain"
 import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
-import type { ContextReactor } from "@ekairos/events"
+import type { ContextReactor } from "@ekairos/reactor/context"
 import { dataset, type DatasetSchemaInput } from "./dataset.js"
 import { datasetDomain } from "./schema.js"
 

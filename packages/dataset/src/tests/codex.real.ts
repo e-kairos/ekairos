@@ -6,13 +6,15 @@ import { dirname, join, parse } from "node:path"
 import { createInterface, type Interface } from "node:readline"
 import {
   OUTPUT_ITEM_TYPE,
-  type ContextSkillPackage,
   type ContextItem,
+} from "@ekairos/events"
+import {
+  type ContextSkillPackage,
   type ContextReactionResult,
   type ContextReactor,
   type ContextReactorParams,
   actionsToActionSpecs,
-} from "@ekairos/events"
+} from "@ekairos/reactor/context"
 import { createCodexReactor, type CodexConfig } from "@ekairos/openai-reactor"
 
 type JsonRecord = Record<string, unknown>

@@ -67,6 +67,7 @@
   "dependencies": {
     "@ekairos/domain": "workspace:*",
     "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
     "@ekairos/sandbox": "^1.22.0",
     "@instantdb/admin": "0.22.158",
     "@instantdb/core": "0.22.142",

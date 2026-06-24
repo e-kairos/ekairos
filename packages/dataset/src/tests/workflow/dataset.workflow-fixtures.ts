@@ -1,7 +1,7 @@
 import { i } from "@instantdb/core"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
-import type { ContextReactor } from "@ekairos/events"
+import type { ContextReactor } from "@ekairos/reactor/context"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { getStepMetadata, getWorkflowMetadata } from "workflow"
 

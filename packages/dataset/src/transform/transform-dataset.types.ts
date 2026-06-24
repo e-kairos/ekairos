@@ -1,4 +1,5 @@
-import type { ContextReactor, StoredContextResource } from "@ekairos/events"
+import type { StoredContextResource } from "@ekairos/events"
+import type { ContextReactor } from "@ekairos/reactor/context"
 import type { TransformInputPreviewContext } from "./filepreview.js"
 
 export type { TransformInputPreviewContext } from "./filepreview.js"

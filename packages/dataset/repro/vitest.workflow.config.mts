@@ -28,20 +28,40 @@ export default defineConfig({
         replacement: resolve(__dirname, "..", "..", "domain", "src", "index.ts"),
       },
       {
-        find: "@ekairos/events/runtime",
-        replacement: resolve(__dirname, "..", "..", "events", "src", "runtime.ts"),
+        find: "@ekairos/events/schema",
+        replacement: resolve(__dirname, "..", "..", "events", "src", "schema.ts"),
+      },
+      {
+        find: "@ekairos/events/instant",
+        replacement: resolve(__dirname, "..", "..", "events", "src", "stores", "instant.store.ts"),
       },
       {
         find: "@ekairos/events",
         replacement: resolve(__dirname, "..", "..", "events", "src", "index.ts"),
       },
       {
-        find: "@ekairos/sandbox",
-        replacement: resolve(__dirname, "..", "..", "sandbox", "src", "index.ts"),
+        find: "@ekairos/reactor/runtime",
+        replacement: resolve(__dirname, "..", "..", "reactor", "src", "runtime.ts"),
+      },
+      {
+        find: "@ekairos/reactor/context",
+        replacement: resolve(__dirname, "..", "..", "reactor", "src", "context.ts"),
+      },
+      {
+        find: "@ekairos/reactor",
+        replacement: resolve(__dirname, "..", "..", "reactor", "src", "index.ts"),
+      },
+      {
+        find: "@ekairos/sandbox/contract",
+        replacement: resolve(__dirname, "..", "..", "sandbox", "src", "contract.ts"),
       },
       {
         find: "@ekairos/sandbox/schema",
         replacement: resolve(__dirname, "..", "..", "sandbox", "src", "schema.ts"),
+      },
+      {
+        find: "@ekairos/sandbox",
+        replacement: resolve(__dirname, "..", "..", "sandbox", "src", "index.ts"),
       },
     ],
   },
