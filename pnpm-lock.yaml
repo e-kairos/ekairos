@@ -364,6 +364,9 @@ importers:
       '@ekairos/events':
         specifier: workspace:*
         version: link:../events
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../reactor
       '@ekairos/sandbox':
         specifier: workspace:*
         version: link:../sandbox
@@ -489,6 +492,9 @@ importers:
       '@ekairos/events':
         specifier: workspace:*
         version: link:../events
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../reactor
       '@instantdb/admin':
         specifier: 0.22.126
         version: 0.22.126
@@ -536,9 +542,6 @@ importers:
 
   packages/events:
     dependencies:
-      '@ai-sdk/openai':
-        specifier: ^2.0.52
-        version: 2.0.68(zod@4.3.6)
       '@ekairos/domain':
         specifier: workspace:*
         version: link:../domain
@@ -550,34 +553,22 @@ importers:
         version: 0.22.142
       '@vercel/mcp-adapter':
         specifier: ^1.0.0
-        version: 1.0.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))
-      '@vercel/sandbox':
-        specifier: ^0.0.23
-        version: 0.0.23
+        version: 1.0.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))
       ai:
         specifier: ^5.0.95
         version: 5.0.98(zod@4.3.6)
-      ajv:
-        specifier: ^8.17.1
-        version: 8.17.1
       jose:
         specifier: ^6.1.3
         version: 6.1.3
       llamaindex:
         specifier: ^0.12.0
-        version: 0.12.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(p-retry@6.2.1)(rxjs@7.8.2)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)(zod@4.3.6)
+        version: 0.12.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(p-retry@6.2.1)(rxjs@7.8.2)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)(zod@4.3.6)
       partial-json:
         specifier: ^0.1.7
         version: 0.1.7
       react:
         specifier: 19.2.1
         version: 19.2.1
-      workflow:
-        specifier: 5.0.0-beta.5
-        version: 5.0.0-beta.5(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.13(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.0(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(typescript@5.9.3)
-      xmlbuilder2:
-        specifier: ^3.1.1
-        version: 3.1.1
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -594,12 +585,6 @@ importers:
       '@types/react':
         specifier: ^19.2.2
         version: 19.2.2
-      '@workflow/serde':
-        specifier: 5.0.0-beta.1
-        version: 5.0.0-beta.1
-      '@workflow/vitest':
-        specifier: 5.0.0-beta.5
-        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
@@ -608,7 +593,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.8
-        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
 
   packages/events/tests/playwright/server:
     dependencies:
@@ -618,9 +603,15 @@ importers:
       '@ekairos/events':
         specifier: workspace:*
         version: link:../../..
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../../../../reactor
       '@instantdb/admin':
         specifier: 0.22.158
         version: 0.22.158
+      '@workflow/serde':
+        specifier: 5.0.0-beta.1
+        version: 5.0.0-beta.1
       ai:
         specifier: ^5.0.98
         version: 5.0.98(zod@4.3.6)
@@ -709,13 +700,16 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.8
-        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
 
   packages/reactors/claude-reactor:
     devDependencies:
       '@ekairos/events':
         specifier: workspace:*
         version: link:../../events
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../../reactor
       '@ekairos/tsconfig':
         specifier: workspace:*
         version: link:../../tsconfig
@@ -731,6 +725,9 @@ importers:
       '@ekairos/events':
         specifier: workspace:*
         version: link:../../events
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../../reactor
       '@ekairos/tsconfig':
         specifier: workspace:*
         version: link:../../tsconfig
@@ -753,6 +750,9 @@ importers:
       '@ekairos/events':
         specifier: workspace:*
         version: link:../../events
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../../reactor
       '@ekairos/tsconfig':
         specifier: workspace:*
         version: link:../../tsconfig
@@ -776,7 +776,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.8
-        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
       workflow:
         specifier: 5.0.0-beta.5
         version: 5.0.0-beta.5(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.13(@nestjs/common@11.1.13(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.0(@swc/core@1.15.3)(chokidar@5.0.0))(@swc/core@1.15.3)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(typescript@5.9.3)
@@ -807,6 +807,9 @@ importers:
       '@ekairos/openai-reactor':
         specifier: workspace:*
         version: link:../reactors/openai-reactor
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../reactor
       '@excalidraw/excalidraw':
         specifier: ^0.17.0
         version: 0.17.6(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -1039,6 +1042,9 @@ importers:
       '@ekairos/events':
         specifier: workspace:*
         version: link:../events
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../reactor
       '@instantdb/admin':
         specifier: 0.22.158
         version: 0.22.158
@@ -1099,8 +1105,8 @@ importers:
   packages/structure:
     dependencies:
       '@ekairos/domain':
-        specifier: ^1.22.0
-        version: 1.22.1(@instantdb/admin@0.22.126)
+        specifier: workspace:*
+        version: link:../domain
       '@ekairos/sandbox':
         specifier: workspace:*
         version: link:../sandbox
@@ -1126,6 +1132,9 @@ importers:
       '@ekairos/events':
         specifier: workspace:*
         version: link:../events
+      '@ekairos/reactor':
+        specifier: workspace:*
+        version: link:../reactor
       '@ekairos/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
@@ -1220,7 +1229,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.0.8
-        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
 
   packages/toolbar:
     dependencies:
@@ -5397,10 +5406,6 @@ packages:
       next:
         optional: true
 
-  '@vercel/oidc@2.0.2':
-    resolution: {integrity: sha512-59PBFx3T+k5hLTEWa3ggiMpGRz1OVvl9eN8SUai+A43IsqiOuAe7qPBf+cray/Fj6mkgnxm/D7IAtjc8zSHi7g==}
-    engines: {node: '>= 18'}
-
   '@vercel/oidc@3.0.5':
     resolution: {integrity: sha512-fnYhv671l+eTTp48gB4zEsTW/YtRgRPnkI2nT7x6qw5rkI1Lq2hTmQIpHPgyThI0znLK+vX2n9XxKdXZ7BUbbw==}
     engines: {node: '>= 20'}
@@ -5416,9 +5421,6 @@ packages:
   '@vercel/queue@0.1.4':
     resolution: {integrity: sha512-wo+jCycmCX078vQSbkX+RcLvySONDCK0f9aQp5UMKQD1+B+xKt3YVbIYbZukvoHQpbm5nnk6If+ADSeK/PmCgQ==}
     engines: {node: '>=20.0.0'}
-
-  '@vercel/sandbox@0.0.23':
-    resolution: {integrity: sha512-tnoIFLwYnKYdwm93xEIU8KfnijOjTv+TQAusU5eIvqS1G4szhA1v8s1Z7+cmmY1ExJjW3Oop+rNGeDKquVyUnQ==}
 
   '@vercel/sandbox@2.0.0-beta.13':
     resolution: {integrity: sha512-p05ShlOrrL4C2OnR68AEksP3HUaXsvgIlwAOu8NQjsk2qNoXaq4gCKQscHOb44/TdLQGT0EkdADxQIzPY8Eoug==}
@@ -10843,10 +10845,6 @@ packages:
     resolution: {integrity: sha512-sC+b0tB1whOCzbtlx20fx3WgCXwkW627p4EA9uM+/tNNPkSS+eSEld6pAs9nDv7WbY1UUljBMYPtu9BCOrCWKA==}
     engines: {node: '>=18.17'}
 
-  undici@7.16.0:
-    resolution: {integrity: sha512-QEg3HPMll0o3t2ourKwOeUAZ159Kn9mx5pnzHRQO8+Wixmh88YdZRiIwat0iNzNNXn0yoEtXJqFpyW7eM8BV7g==}
-    engines: {node: '>=20.18.1'}
-
   undici@7.22.0:
     resolution: {integrity: sha512-RqslV2Us5BrllB+JeiZnK4peryVTndy9Dnqq62S3yYRRTj0tFQCwEniUy2167skdGOy3vqRzEvl1Dm4sV2ReDg==}
     engines: {node: '>=20.18.1'}
@@ -13493,7 +13491,7 @@ snapshots:
       tree-sitter: 0.22.4
       web-tree-sitter: 0.24.7
 
-  '@llamaindex/workflow-core@1.3.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(p-retry@6.2.1)(rxjs@7.8.2)(zod@4.3.6)':
+  '@llamaindex/workflow-core@1.3.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(p-retry@6.2.1)(rxjs@7.8.2)(zod@4.3.6)':
     optionalDependencies:
       '@modelcontextprotocol/sdk': 1.29.0(zod@4.3.6)
       hono: 4.12.22
@@ -13502,11 +13500,11 @@ snapshots:
       rxjs: 7.8.2
       zod: 4.3.6
 
-  '@llamaindex/workflow@1.1.24(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(p-retry@6.2.1)(rxjs@7.8.2)(zod@4.3.6)':
+  '@llamaindex/workflow@1.1.24(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(p-retry@6.2.1)(rxjs@7.8.2)(zod@4.3.6)':
     dependencies:
       '@llamaindex/core': 0.6.22
       '@llamaindex/env': 0.1.30
-      '@llamaindex/workflow-core': 1.3.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(p-retry@6.2.1)(rxjs@7.8.2)(zod@4.3.6)
+      '@llamaindex/workflow-core': 1.3.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(p-retry@6.2.1)(rxjs@7.8.2)(zod@4.3.6)
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
       - hono
@@ -16175,17 +16173,12 @@ snapshots:
     optionalDependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.13
 
-  '@vercel/mcp-adapter@1.0.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))':
+  '@vercel/mcp-adapter@1.0.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))':
     dependencies:
       '@modelcontextprotocol/sdk': 1.29.0(zod@4.3.6)
-      mcp-handler: 1.0.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))
+      mcp-handler: 1.0.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))
     optionalDependencies:
       next: 15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0)
-
-  '@vercel/oidc@2.0.2':
-    dependencies:
-      '@types/ms': 2.1.0
-      ms: 2.1.3
 
   '@vercel/oidc@3.0.5': {}
 
@@ -16199,19 +16192,6 @@ snapshots:
       minimatch: 10.2.5
       mixpart: 0.0.5
       picocolors: 1.1.1
-
-  '@vercel/sandbox@0.0.23':
-    dependencies:
-      '@vercel/oidc': 2.0.2
-      async-retry: 1.3.3
-      jsonlines: 0.1.1
-      ms: 2.1.3
-      tar-stream: 3.1.7
-      undici: 7.16.0
-      zod: 3.24.4
-    transitivePeerDependencies:
-      - bare-abort-controller
-      - react-native-b4a
 
   '@vercel/sandbox@2.0.0-beta.13':
     dependencies:
@@ -16637,7 +16617,7 @@ snapshots:
       '@workflow/rollup': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
       '@workflow/world': 5.0.0-beta.2(zod@4.3.6)
       '@workflow/world-local': 5.0.0-beta.4(@opentelemetry/api@1.9.0)
-      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
     optionalDependencies:
       vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
     transitivePeerDependencies:
@@ -16654,7 +16634,7 @@ snapshots:
       '@workflow/rollup': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
       '@workflow/world': 5.0.0-beta.2(zod@4.3.6)
       '@workflow/world-local': 5.0.0-beta.4(@opentelemetry/api@1.9.0)
-      vitest: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+      vitest: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
     optionalDependencies:
       vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
     transitivePeerDependencies:
@@ -19691,12 +19671,12 @@ snapshots:
     dependencies:
       uc.micro: 1.0.6
 
-  llamaindex@0.12.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(p-retry@6.2.1)(rxjs@7.8.2)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)(zod@4.3.6):
+  llamaindex@0.12.0(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(p-retry@6.2.1)(rxjs@7.8.2)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)(zod@4.3.6):
     dependencies:
       '@llamaindex/core': 0.6.22
       '@llamaindex/env': 0.1.30
       '@llamaindex/node-parser': 2.0.22(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(tree-sitter@0.22.4)(web-tree-sitter@0.24.7)
-      '@llamaindex/workflow': 1.1.24(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1))(p-retry@6.2.1)(rxjs@7.8.2)(zod@4.3.6)
+      '@llamaindex/workflow': 1.1.24(@llamaindex/core@0.6.22)(@llamaindex/env@0.1.30)(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(hono@4.12.22)(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0))(p-retry@6.2.1)(rxjs@7.8.2)(zod@4.3.6)
       '@types/lodash': 4.17.20
       '@types/node': 24.5.0
       lodash: 4.17.21
@@ -19864,7 +19844,7 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  mcp-handler@1.0.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)):
+  mcp-handler@1.0.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0)):
     dependencies:
       '@modelcontextprotocol/sdk': 1.29.0(zod@4.3.6)
       chalk: 5.6.2
@@ -22706,8 +22686,6 @@ snapshots:
 
   undici@6.24.1: {}
 
-  undici@7.16.0: {}
-
   undici@7.22.0: {}
 
   unicode-emoji-modifier-base@1.0.0: {}
@@ -22994,49 +22972,7 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2):
-    dependencies:
-      '@types/chai': 5.2.2
-      '@vitest/expect': 3.2.4
-      '@vitest/mocker': 3.2.4(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))
-      '@vitest/pretty-format': 3.2.4
-      '@vitest/runner': 3.2.4
-      '@vitest/snapshot': 3.2.4
-      '@vitest/spy': 3.2.4
-      '@vitest/utils': 3.2.4
-      chai: 5.3.3
-      debug: 4.4.3(supports-color@8.1.1)
-      expect-type: 1.2.2
-      magic-string: 0.30.21
-      pathe: 2.0.3
-      picomatch: 4.0.3
-      std-env: 3.9.0
-      tinybench: 2.9.0
-      tinyexec: 0.3.2
-      tinyglobby: 0.2.15
-      tinypool: 1.1.1
-      tinyrainbow: 2.0.0
-      vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
-      vite-node: 3.2.4(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
-      why-is-node-running: 2.3.0
-    optionalDependencies:
-      '@types/debug': 4.1.12
-      '@types/node': 24.5.0
-    transitivePeerDependencies:
-      - jiti
-      - less
-      - lightningcss
-      - msw
-      - sass
-      - sass-embedded
-      - stylus
-      - sugarss
-      - supports-color
-      - terser
-      - tsx
-      - yaml
-
-  vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2):
+  vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2):
     dependencies:
       '@vitest/expect': 4.0.18
       '@vitest/mocker': 4.0.18(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))
