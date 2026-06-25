@@ -179,7 +179,7 @@ export const contextRegistryItem: RegistryItem = {
     },
   ],
   code: `import { Context, ContextContent, ContextScrollButton } from "@/components/ekairos/context"
-import { createContext, createScriptedReactor } from "@ekairos/events"
+import { createContext, createScriptedReactor } from "@ekairos/reactor/context"
 
 const reactor = createScriptedReactor({
   steps: [

@@ -5,9 +5,10 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 
-import { createContext, eventsDomain, type ContextItem } from "@ekairos/events"
+import { eventsDomain, type ContextItem } from "@ekairos/events"
+import { createContext } from "@ekairos/reactor/context"
 import { init } from "@instantdb/admin"
-import { readPersistedContextStepStream } from "@ekairos/events/runtime"
+import { readPersistedContextStepStream } from "@ekairos/reactor/runtime"
 
 import { createCodexReactor, type CodexConfig, type CodexExecuteTurnArgs, type CodexTurnResult } from "../index.js"
 import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"

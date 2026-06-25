@@ -1,5 +1,5 @@
-import { createContext, didToolExecute, INPUT_TEXT_ITEM_TYPE, OUTPUT_ITEM_TYPE, WEB_CHANNEL } from "@ekairos/events"
-import type { ContextModelInit } from "@ekairos/events"
+import { INPUT_TEXT_ITEM_TYPE, OUTPUT_ITEM_TYPE, WEB_CHANNEL } from "@ekairos/events"
+import { createContext, didActionExecute, type ContextModelInit } from "@ekairos/reactor/context"
 import {
   getDatasetOutputPath,
   getDatasetOutputSchemaPath,
@@ -555,7 +555,7 @@ function createStructureStoryDefinition<Env extends { orgId: string }>(config: S
       return actions
     })
     .shouldContinue(({ reactionEvent }: { reactionEvent: any }) => {
-      return !didToolExecute(reactionEvent as any, "complete")
+      return !didActionExecute(reactionEvent as any, "complete")
     })
     .model(model)
 
@@ -571,7 +571,7 @@ export async function structureRunStoryStep<Env extends { orgId: string }>(param
   "use step"
 
   const { story, datasetId } = createStructureStoryDefinition<Env>(params.config)
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   const runtime = await getContextRuntime(params.env)
   const shell = await story.react(params.event, {
     env: params.env,

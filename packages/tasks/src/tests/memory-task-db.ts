@@ -7,7 +7,7 @@ type Tx =
   {
     entity: "task_tasks"
     id: string
-    op: "update"
+    op: "update" | "link"
     payload: Record<string, unknown>
   }
 
@@ -15,6 +15,9 @@ function taskTx(id: string) {
   return {
     update(payload: Record<string, unknown>): Tx {
       return { entity: "task_tasks", id, op: "update", payload }
+    },
+    link(payload: Record<string, unknown>): Tx {
+      return { entity: "task_tasks", id, op: "link", payload }
     },
   }
 }
@@ -45,22 +48,50 @@ export function createMemoryTaskDb() {
       if (where.key) {
         rows = rows.filter((row) => row.key === where.key)
       }
+      if (where["parent.id"]) {
+        rows = rows.filter((row) => row.parentId === where["parent.id"])
+      }
+      if (where["dependsOn.id"]) {
+        rows = rows.filter((row) =>
+          Array.isArray(row.dependsOnTaskIds) &&
+          row.dependsOnTaskIds.includes(where["dependsOn.id"])
+        )
+      }
 
       const limit = typeof taskQuery?.$?.limit === "number"
         ? taskQuery.$.limit
         : rows.length
 
       return {
-        task_tasks: rows.slice(0, limit),
+        task_tasks: rows.slice(0, limit).map((row) => ({
+          ...row,
+          parent: row.parentId ? [{ id: row.parentId }] : [],
+          dependsOn: Array.isArray(row.dependsOnTaskIds)
+            ? row.dependsOnTaskIds.map((id: string) => ({ id }))
+            : [],
+        })),
       }
     },
     async transact(txs: Tx[]) {
       for (const tx of txs.flat()) {
         const existing = tasks.get(tx.id) ?? { id: tx.id }
-        tasks.set(tx.id, {
-          ...existing,
-          ...tx.payload,
-        })
+        if (tx.op === "update") {
+          tasks.set(tx.id, {
+            ...existing,
+            ...tx.payload,
+          })
+          continue
+        }
+
+        const linked = { ...existing }
+        if (typeof tx.payload.parent === "string") {
+          linked.parentId = tx.payload.parent
+        }
+        if (Array.isArray(tx.payload.dependsOn)) {
+          linked.dependsOnTaskIds = tx.payload.dependsOn
+            .filter((id): id is string => typeof id === "string")
+        }
+        tasks.set(tx.id, linked)
       }
     },
   }
@@ -71,11 +102,14 @@ export class MemoryTaskRuntime extends EkairosRuntime<
   any,
   ReturnType<typeof createMemoryTaskDb>
 > {
-  constructor(public readonly memoryDb = createMemoryTaskDb()) {
-    super({})
+  constructor(
+    public readonly memoryDb = createMemoryTaskDb(),
+    env: Record<string, unknown> = {},
+  ) {
+    super(env)
   }
 
-  protected getDomain() {
+  protected getDomain(): unknown {
     return tasksDomain
   }
 
@@ -102,10 +136,13 @@ export class MemoryTaskRuntime extends EkairosRuntime<
     for (const [id, task] of data.tasks ?? []) {
       db.tasks.set(id, task)
     }
-    return new MemoryTaskRuntime(db)
+    return new MemoryTaskRuntime(db, data.env ?? {})
   }
 }
 
-export function createMemoryTaskRuntime(db = createMemoryTaskDb()) {
-  return new MemoryTaskRuntime(db)
+export function createMemoryTaskRuntime(
+  db = createMemoryTaskDb(),
+  env: Record<string, unknown> = {},
+) {
+  return new MemoryTaskRuntime(db, env)
 }

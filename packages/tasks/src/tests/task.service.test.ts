@@ -50,6 +50,48 @@ describe("Task", () => {
     })
   })
 
+  it("opens a task with parent and dependency links", async () => {
+    const runtime = createMemoryTaskRuntime()
+
+    await Task.create(runtime, {
+      id: "task_dependency",
+      kind: "review",
+      key: "review:dependency",
+      outcome: reviewOutcomeSchema,
+      instructions: "Dependency.",
+      context: {},
+    })
+    await Task.create(runtime, {
+      id: "task_parent",
+      kind: "review",
+      key: "review:parent",
+      outcome: reviewOutcomeSchema,
+      instructions: "Parent.",
+      context: {},
+    })
+
+    const child = await Task.create(runtime, {
+      id: "task_child",
+      kind: "review",
+      key: "review:child",
+      parentTaskId: "task_parent",
+      dependsOnTaskIds: ["task_dependency"],
+      outcome: reviewOutcomeSchema,
+      instructions: "Child.",
+      context: {},
+    })
+
+    expect(child).toMatchObject({
+      id: "task_child",
+      parentId: "task_parent",
+      dependsOnTaskIds: ["task_dependency"],
+    })
+    expect(runtime.memoryDb.tasks.get("task_child")).toMatchObject({
+      parentId: "task_parent",
+      dependsOnTaskIds: ["task_dependency"],
+    })
+  })
+
   it("is idempotent by key and returns the existing task", async () => {
     const runtime = createMemoryTaskRuntime()
 
@@ -152,6 +194,59 @@ describe("Task", () => {
     expect(stored).not.toHaveProperty("outcome")
   })
 
+  it("does not complete a parent task while child tasks remain open", async () => {
+    const runtime = createMemoryTaskRuntime()
+
+    await Task.create(runtime, {
+      id: "task_parent",
+      kind: "review",
+      key: "review:parent-open-child",
+      outcome: reviewOutcomeSchema,
+      instructions: "Resolve children first.",
+      context: {},
+    })
+    await Task.create(runtime, {
+      id: "task_child",
+      kind: "review",
+      key: "review:child-open",
+      parentTaskId: "task_parent",
+      outcome: reviewOutcomeSchema,
+      instructions: "Child.",
+      context: {},
+    })
+
+    await expect(
+      executeAction(runtime, "completeTask", {
+        id: "task_parent",
+        outcome: { accepted: true },
+        resumeWorkflow: false,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: "task_children_open",
+    })
+
+    await executeAction(runtime, "completeTask", {
+      id: "task_child",
+      outcome: { accepted: true },
+      resumeWorkflow: false,
+    })
+
+    await expect(
+      executeAction(runtime, "completeTask", {
+        id: "task_parent",
+        outcome: { accepted: true },
+        resumeWorkflow: false,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        id: "task_parent",
+        state: "completed",
+      },
+    })
+  })
+
   it("rejects getting a task with a schema that does not match storage", async () => {
     const runtime = createMemoryTaskRuntime()
     await Task.create(runtime, {
@@ -236,34 +331,109 @@ describe("Task", () => {
     })
   })
 
-  it("releases a task back to open when an automatic runner cannot decide", async () => {
-    const runtime = createMemoryTaskRuntime()
+  it("stores deployment metadata while a task is in progress", async () => {
+    const runtime = createMemoryTaskRuntime(undefined, {
+      deploymentId: "deployment_123",
+    })
     const task = await Task.create(runtime, {
-      id: "task_start_release",
+      id: "task_start_deployment",
       kind: "review",
-      key: "review:start-release",
+      key: "review:start-deployment",
       outcome: reviewOutcomeSchema,
-      instructions: "Review this manually if automation cannot decide.",
+      instructions: "Review this through a deployment runner.",
       context: {},
     })
 
-    await task.start(async (run) =>
-      run.release({
-        comment: "Automatic CAE lookup is not implemented.",
-        actor: { type: "workflow", id: "arca.cae.lookup" },
-      }),
-    )
+    await task.start(async (run) => {
+      expect(runtime.memoryDb.tasks.get(task.id)).toMatchObject({
+        state: "in_progress",
+        activeRunId: run.id,
+        activeDeploymentId: "deployment_123",
+        lastProgress: {
+          type: "started",
+          deploymentId: "deployment_123",
+        },
+      })
 
-    expect(runtime.memoryDb.tasks.get(task.id)).toMatchObject({
-      state: "open",
-      activeRunId: "",
-      lastProgress: {
-        type: "released",
-        comment: "Automatic CAE lookup is not implemented.",
-        actor: { type: "workflow", id: "arca.cae.lookup" },
+      return await run.cancelled("metadata verified")
+    })
+  })
+
+  it("models intervention as a child task outcome awaited by the parent run", async () => {
+    const runtime = createMemoryTaskRuntime()
+    const parent = await Task.create(runtime, {
+      id: "task_parent_intervention",
+      kind: "review",
+      key: "review:parent-intervention",
+      outcome: reviewOutcomeSchema,
+      instructions: "Complete after a child decision task finishes.",
+      context: {},
+    })
+
+    await parent.start(async (run) => {
+      const child = await Task.create(runtime, {
+        id: "task_child_intervention",
+        kind: "review.decision",
+        key: "review:parent-intervention:decision",
+        parentTaskId: parent.id,
+        outcome: reviewOutcomeSchema,
+        instructions: "Decide the final parent outcome.",
+        context: {
+          proposedOutcome: {
+            accepted: true,
+            comment: "Suggested by automation.",
+          },
+        },
+      })
+
+      await executeAction(runtime, "completeTask", {
+        id: child.id,
+        outcome: {
+          accepted: true,
+          comment: "Reviewed externally.",
+        },
+        resumeWorkflow: false,
+      })
+
+      return await run.completed(await child.outcome())
+    })
+
+    expect(runtime.memoryDb.tasks.get("task_parent_intervention")).toMatchObject({
+      state: "completed",
+      outcome: {
+        accepted: true,
+        comment: "Reviewed externally.",
       },
     })
-    expect(runtime.memoryDb.tasks.get(task.id)).not.toHaveProperty("outcome")
+    expect(runtime.memoryDb.tasks.get("task_child_intervention")).toMatchObject({
+      parentId: "task_parent_intervention",
+      state: "completed",
+    })
+  })
+
+  it("cancels a task through the run handle", async () => {
+    const runtime = createMemoryTaskRuntime()
+    const task = await Task.create(runtime, {
+      id: "task_start_cancel",
+      kind: "review",
+      key: "review:start-cancel",
+      outcome: reviewOutcomeSchema,
+      instructions: "Cancel this through a runner.",
+      context: {},
+    })
+
+    await task.start(async (run) => run.cancelled("No longer needed."))
+
+    expect(runtime.memoryDb.tasks.get(task.id)).toMatchObject({
+      state: "cancelled",
+      activeRunId: "",
+      errorText: "No longer needed.",
+      lastProgress: {
+        type: "cancelled",
+        comment: "No longer needed.",
+      },
+    })
+    await expect(task.outcome()).rejects.toThrow("No longer needed.")
   })
 
   it("marks the task failed and makes outcome reject when start throws", async () => {
@@ -293,5 +463,36 @@ describe("Task", () => {
       },
     })
     await expect(task.outcome()).rejects.toThrow("runner failed")
+  })
+
+  it("defines a typed task factory for repeated task kinds", async () => {
+    const runtime = createMemoryTaskRuntime()
+    const ReviewTask = Task.define("review", {
+      outcome: reviewOutcomeSchema,
+      outcomeKind: "review",
+    })
+
+    const task = await ReviewTask.create(runtime, {
+      id: "task_defined",
+      key: "review:defined",
+      instructions: "Defined task.",
+      context: { source: "test" },
+    })
+
+    expect(task).toMatchObject({
+      id: "task_defined",
+      kind: "review",
+      outcomeKind: "review",
+      context: { source: "test" },
+    })
+
+    await executeAction(runtime, "completeTask", {
+      id: "task_defined",
+      outcome: { accepted: true },
+      resumeWorkflow: false,
+    })
+
+    const persisted = await ReviewTask.get(runtime, "task_defined")
+    await expect(persisted.outcome()).resolves.toEqual({ accepted: true })
   })
 })

@@ -1,18 +1,20 @@
 import {
   OUTPUT_ITEM_TYPE,
+  type ChunkEmittedEvent,
+  type ContextItem,
+  type ContextStreamChunkType,
+} from "@ekairos/events"
+import {
   actionsToActionSpecs,
   createContextStepStreamChunk,
   encodeContextStepStreamChunk,
   resolveContextPartChunkIdentity,
-  type ChunkEmittedEvent,
   type ContextActionRequest,
-  type ContextItem,
   type ContextReactionResult,
   type ContextReactor,
   type ContextReactorParams,
-  type ContextStreamChunkType,
-} from "@ekairos/events"
-import type { ContextEnvironment } from "@ekairos/events/runtime"
+} from "@ekairos/reactor/context"
+import type { ContextEnvironment } from "@ekairos/reactor/runtime"
 
 export type OpenAIResponsesConfig = {
   model: string

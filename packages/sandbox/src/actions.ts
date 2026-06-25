@@ -60,8 +60,8 @@ const processStreamChunk =
   sandboxProcessStreamChunkSchema as z.ZodType<SandboxProcessStreamChunk>
 const processRunResult = sandboxProcessRunResultSchema as z.ZodType<SandboxProcessRunResult>
 
-export const sandboxDomain = sandboxSchemaDomain
-  .withActions({
+function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withActions> {
+  return sandboxSchemaDomain.withActions({
     createSandbox: defineAction({
       name: "sandbox.createSandbox",
       input: z.object({
@@ -241,3 +241,7 @@ export const sandboxDomain = sandboxSchemaDomain
       execute: createEkairosAppStep,
     }),
   })
+}
+
+export type SandboxDomain = ReturnType<typeof createSandboxDomain>
+export const sandboxDomain: SandboxDomain = createSandboxDomain()

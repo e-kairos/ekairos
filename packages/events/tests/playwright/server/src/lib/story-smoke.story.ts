@@ -2,7 +2,7 @@ import {
   createContext,
   createScriptedReactor,
   didActionExecute,
-} from "@ekairos/events";
+} from "@ekairos/reactor/context";
 import { tool } from "ai";
 import { z } from "zod";
 import {

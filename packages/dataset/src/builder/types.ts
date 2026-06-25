@@ -3,6 +3,7 @@ import type { DomainInstantSchema, DomainSchemaResult } from "@ekairos/domain"
 import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
 import type { ContextIdentifier, StoredContextResource } from "@ekairos/events"
 import type { ContextReactor } from "@ekairos/reactor/context"
+import type { SandboxSession } from "@ekairos/sandbox"
 
 import { datasetDomain } from "../schema.js"
 import type { DatasetNotation } from "../notation.js"
@@ -126,6 +127,7 @@ export type DatasetBuilderState<Runtime extends AnyDatasetRuntime> = {
   contextResources?: StoredContextResource[]
   title?: string
   sandboxId?: string
+  sandbox?: SandboxSession
   contextId?: string
   outputSchema?: DatasetSchemaInput
   output: DatasetOutput
@@ -166,7 +168,7 @@ export type DatasetBuilder<Runtime extends AnyDatasetRuntime> = {
   ): DatasetBuilder<Runtime>
 
   title(title: string): DatasetBuilder<Runtime>
-  sandbox(input: { sandboxId: string }): DatasetBuilder<Runtime>
+  sandbox(input: { sandboxId: string } | SandboxSession): DatasetBuilder<Runtime>
   schema(schema: DatasetSchemaInput): DatasetBuilder<Runtime>
   inferSchema(): DatasetBuilder<Runtime>
   auto(): DatasetBuilder<Runtime>

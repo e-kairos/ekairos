@@ -1,11 +1,13 @@
 import {
   OUTPUT_ITEM_TYPE,
   type ContextItem,
-  type ContextReactionResult,
-  type ContextReactor,
-  type ContextReactorParams,
 } from "@ekairos/events"
-import type { ContextEnvironment } from "@ekairos/events/runtime"
+import type {
+  ContextReactionResult,
+  ContextReactor,
+  ContextReactorParams,
+} from "@ekairos/reactor/context"
+import type { ContextEnvironment } from "@ekairos/reactor/runtime"
 
 type AnyRecord = Record<string, unknown>
 
@@ -67,7 +69,7 @@ export function createCursorReactor<
       stepId: params.stepId,
       iteration: params.iteration,
       writable: params.writable,
-      silent: params.silent,
+      silent: false,
     })
 
     const assistantEvent: ContextItem = {

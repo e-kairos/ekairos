@@ -21,6 +21,7 @@
         "@ekairos/domain": "workspace:*",
         "@ekairos/events": "workspace:*",
         "@ekairos/openai-reactor": "workspace:*",
+        "@ekairos/reactor": "workspace:*",
         "@excalidraw/excalidraw": "^0.17.0",
         "@instantdb/admin": "0.22.158",
         "@instantdb/components": "0.22.158",

@@ -735,6 +735,9 @@ export class SandboxService {
     const sandboxId = id()
     const now = Date.now()
     const provider = resolveProvider(config)
+    if (provider === "local" || provider === "justbash" || provider === "agentos") {
+      return { ok: false, error: `${provider}_requires_sandbox_session` }
+    }
     const resolvedVercel =
       provider === "vercel" ? resolveVercelSandboxConfig(config, { sandboxId }) : undefined
     let daytonaEphemeral: boolean | undefined = undefined

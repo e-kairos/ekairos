@@ -36,8 +36,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ekairos/domain": "^1.22.0",
-    "@ekairos/sandbox": "^1.22.0",
+    "@ekairos/domain": "workspace:*",
+    "@ekairos/sandbox": "workspace:*",
     "@instantdb/admin": "0.22.126",
     "@instantdb/core": "0.22.126",
     "ai": "^5.0.95",
@@ -46,10 +46,12 @@
     "zod": "^4.3.6"
   },
   "peerDependencies": {
-    "@ekairos/events": "workspace:*"
+    "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*"
   },
   "devDependencies": {
     "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
     "@ekairos/sandbox": "workspace:*",
     "@ekairos/tsconfig": "workspace:*",
     "@types/node": "^24.5.0",

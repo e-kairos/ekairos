@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
 
-import { action } from "../context.action"
 import {
   contextEnginePartSchema,
   createContextPartSchema,
@@ -11,18 +10,15 @@ import {
 
 describe("context parts", () => {
   const actions = {
-    createMessage: action({
+    createMessage: {
       input: z.object({
         text: z.string(),
       }),
       output: z.object({
         messageId: z.string(),
       }),
-      execute: async (input) => ({
-        messageId: input.text,
-      }),
-    }),
-    "command.execute": action({
+    },
+    "command.execute": {
       input: z.object({
         command: z.string(),
         cwd: z.string().optional(),
@@ -31,11 +27,7 @@ describe("context parts", () => {
         exitCode: z.number(),
         output: z.string(),
       }),
-      execute: async () => ({
-        exitCode: 0,
-        output: "ok",
-      }),
-    }),
+    },
   } as const
 
   it("validates engine-owned message, reasoning, and source parts", () => {

@@ -134,6 +134,7 @@ export interface ContextStore {
   ): Promise<StoredContext<C>>
   updateContextStatus(contextIdentifier: ContextIdentifier, status: ContextStatus): Promise<void>
 
+  saveEvent(item: ContextItem): Promise<ContextItem>
   saveItem(contextIdentifier: ContextIdentifier, item: ContextItem): Promise<ContextItem>
   updateItem(itemId: string, item: ContextItem): Promise<ContextItem>
   getItem(itemId: string): Promise<ContextItem | null>
@@ -169,8 +170,6 @@ export interface ContextStore {
   ): Promise<void>
 
   saveStepParts(params: { stepId: string; parts: any[] }): Promise<void>
-
-  linkItemToExecution(params: { itemId: string; executionId: string }): Promise<void>
 
   itemsToModelMessages(items: ContextItem[]): Promise<ModelMessage[]>
 }

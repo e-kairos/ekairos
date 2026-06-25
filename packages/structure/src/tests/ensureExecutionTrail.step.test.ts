@@ -6,7 +6,7 @@ const linkItemToExecution = vi.fn()
 const completeExecution = vi.fn()
 const getItems = vi.fn()
 
-vi.mock("@ekairos/events/runtime", () => ({
+vi.mock("@ekairos/reactor/runtime", () => ({
   getContextRuntime: vi.fn(async () => ({
     store: {
       saveItem,

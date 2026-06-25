@@ -43,6 +43,7 @@ import type {
   TransformSandboxState,
   TransformInputPreviewContext,
 } from "../transform/transform-dataset.types.js"
+import type { SandboxSession } from "@ekairos/sandbox"
 
 function makeIntermediateDatasetId(targetDatasetId: string, resourceKind: string, index: number) {
   return `${targetDatasetId}__${resourceKind}_${index}`
@@ -166,6 +167,7 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   await runDatasetSandboxCommandStep({
     runtime: state.runtime,
     sandboxId,
+    sandbox: state.sandbox,
     cmd: "mkdir",
     args: ["-p", ...getDatasetStandardDirs(targetDatasetId)],
   })
@@ -173,12 +175,14 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   await writeDatasetSandboxFilesStep({
     runtime: state.runtime,
     sandboxId,
+    sandbox: state.sandbox,
     files: [{ path: resourcePath, contentBase64: file.contentBase64 }],
   })
 
   const install = await runDatasetSandboxCommandStep({
     runtime: state.runtime,
     sandboxId,
+    sandbox: state.sandbox,
     cmd: "python",
     args: ["-m", "pip", "install", "pypdf", "--quiet"],
   })
@@ -189,6 +193,7 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   await writeDatasetSandboxTextFilesStep({
     runtime: state.runtime,
     sandboxId,
+    sandbox: state.sandbox,
     files: [
       {
         path: scriptPath,
@@ -232,6 +237,7 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   const extraction = await runDatasetSandboxCommandStep({
     runtime: state.runtime,
     sandboxId,
+    sandbox: state.sandbox,
     cmd: "python",
     args: [scriptPath, resourcePath, outputPath, resource.fileId, fileName],
   })
@@ -242,6 +248,7 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   const output = await readDatasetSandboxTextFileStep({
     runtime: state.runtime,
     sandboxId,
+    sandbox: state.sandbox,
     path: outputPath,
   })
   const rows = parseJsonlDataRows(output.content)
@@ -285,6 +292,7 @@ async function materializeRawTextResource<Runtime extends AnyDatasetRuntime>(
 async function writePreparedFileResourceToSandbox<Runtime extends AnyDatasetRuntime>(params: {
   runtime: Runtime
   sandboxId: string
+  sandbox?: SandboxSession
   datasetId: string
   fileId: string
   filename?: string
@@ -300,6 +308,7 @@ async function writePreparedFileResourceToSandbox<Runtime extends AnyDatasetRunt
   await runDatasetSandboxCommandStep({
     runtime: params.runtime,
     sandboxId: params.sandboxId,
+    sandbox: params.sandbox,
     cmd: "mkdir",
     args: ["-p", ...getDatasetStandardDirs(params.datasetId)],
   })
@@ -307,6 +316,7 @@ async function writePreparedFileResourceToSandbox<Runtime extends AnyDatasetRunt
   await writeDatasetSandboxFilesStep({
     runtime: params.runtime,
     sandboxId: params.sandboxId,
+    sandbox: params.sandbox,
     files: [{ path: resourcePath, contentBase64: file.contentBase64 }],
   })
 
@@ -319,6 +329,7 @@ function resolveDatasetSandboxId<Runtime extends AnyDatasetRuntime>(
 ) {
   const sandboxId = String(state.sandboxId ?? "").trim()
   if (sandboxId) return sandboxId
+  if (state.sandbox?.id) return state.sandbox.id
 
   throw new Error("dataset_sandbox_required")
 }
@@ -568,6 +579,7 @@ export async function materializeSingleFileLikeResource<Runtime extends AnyDatas
   const preparedFile = await writePreparedFileResourceToSandbox({
     runtime: state.runtime,
     sandboxId,
+    sandbox: state.sandbox,
     datasetId: targetDatasetId,
     fileId: prepared.fileId,
     filename: prepared.filename,

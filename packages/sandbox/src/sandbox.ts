@@ -1,6 +1,6 @@
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import type { EkairosRuntime } from "@ekairos/domain/runtime"
-import { defineAction, type ContextAction } from "@ekairos/events"
+import { defineAction, type ContextAction } from "@ekairos/reactor/context"
 
 import {
   SANDBOX_EXECUTE_COMMAND_ACTION_NAME,

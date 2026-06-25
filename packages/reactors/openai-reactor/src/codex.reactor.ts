@@ -1,18 +1,20 @@
 import {
   OUTPUT_ITEM_TYPE,
+  type ContextItem,
+  type ContextStreamChunkType,
+} from "@ekairos/events"
+import {
+  actionsToActionSpecs,
   createContextStepStreamChunk,
   encodeContextStepStreamChunk,
   resolveContextPartChunkDescriptor,
   resolveContextPartChunkIdentity,
   type ContextSkillPackage,
-  type ContextItem,
   type ContextReactionResult,
   type ContextReactor,
   type ContextReactorParams,
-  type ContextStreamChunkType,
-  actionsToActionSpecs,
-} from "@ekairos/events"
-import type { ContextEnvironment } from "@ekairos/events/runtime"
+} from "@ekairos/reactor/context"
+import type { ContextEnvironment } from "@ekairos/reactor/runtime"
 import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
 import { randomUUID } from "node:crypto"
 
@@ -939,7 +941,7 @@ async function codexAppServerRespond(baseUrl: string, payload: AnyRecord): Promi
   }
 }
 
-function codexSandboxBridgeScript(): string {
+export function codexSandboxBridgeScript(): string {
   return String.raw`
 import http from "node:http";
 import { spawn } from "node:child_process";
@@ -1058,7 +1060,7 @@ server.listen(PORT, "0.0.0.0", async () => {
 `
 }
 
-function codexSandboxTurnRunnerScript(): string {
+export function codexSandboxTurnRunnerScript(): string {
   return String.raw`
 import { readFileSync } from "node:fs";
 const baseUrl = (process.env.CODEX_BRIDGE_URL || "http://127.0.0.1:4500").replace(/\/+$/, "");
@@ -1475,7 +1477,7 @@ async function executeCodexSandboxTurn(
     "codex_sandbox_prepare_codex",
     [
       "set -euo pipefail",
-      `mkdir -p ${shellSingleQuote(codexHome)} ${shellSingleQuote(workRoot)}`,
+      `mkdir -p ${shellSingleQuote(codexHome)} ${shellSingleQuote(workRoot)} ${shellSingleQuote(repoPath)}`,
       `chmod 700 ${shellSingleQuote(codexHome)} || true`,
       `chmod 600 ${shellSingleQuote(`${codexHome}/auth.json`)} 2>/dev/null || true`,
       "if ! command -v codex >/dev/null 2>&1; then npm i -g @openai/codex@latest; fi",

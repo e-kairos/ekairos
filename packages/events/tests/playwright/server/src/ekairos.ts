@@ -1,7 +1,7 @@
 import { configureRuntime } from "@ekairos/domain/runtime";
 import { EkairosRuntime } from "@ekairos/domain";
 import { eventsDomain } from "@ekairos/events";
-import { configureContextDurableWorkflow } from "@ekairos/events/runtime";
+import { configureContextDurableWorkflow } from "@ekairos/reactor/runtime";
 import { init } from "@instantdb/admin";
 import { domain } from "@ekairos/domain";
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";

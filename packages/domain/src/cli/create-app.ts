@@ -421,11 +421,15 @@ function createAgentScaffoldSchema() {
         }),
       },
       links: {
-        contextItemsContext: {
-          forward: { on: "event_items", has: "one", label: "context" },
-          reverse: { on: "event_contexts", has: "many", label: "items" },
+        eventTriggerReaction: {
+          forward: { on: "event_items", has: "many", label: "reactions" },
+          reverse: { on: "event_items", has: "one", label: "trigger" },
         },
-        contextExecutionsContext: {
+        contextEvents: {
+          forward: { on: "event_items", has: "one", label: "context" },
+          reverse: { on: "event_contexts", has: "many", label: "events" },
+        },
+        contextExecutions: {
           forward: { on: "event_executions", has: "one", label: "context" },
           reverse: { on: "event_contexts", has: "many", label: "executions" },
         },
@@ -433,35 +437,31 @@ function createAgentScaffoldSchema() {
           forward: { on: "event_contexts", has: "one", label: "currentExecution" },
           reverse: { on: "event_executions", has: "one", label: "currentOf" },
         },
-        contextExecutionsTrigger: {
-          forward: { on: "event_executions", has: "one", label: "trigger" },
-          reverse: { on: "event_items", has: "many", label: "executionsAsTrigger" },
+        contextExecutionInput: {
+          forward: { on: "event_executions", has: "one", label: "input" },
+          reverse: { on: "event_items", has: "many", label: "executionsAsInput" },
         },
-        contextExecutionsReaction: {
-          forward: { on: "event_executions", has: "one", label: "reaction" },
-          reverse: { on: "event_items", has: "many", label: "executionsAsReaction" },
+        contextExecutionOutput: {
+          forward: { on: "event_executions", has: "one", label: "output" },
+          reverse: { on: "event_items", has: "many", label: "executionsAsOutput" },
         },
-        contextStepsExecution: {
+        reactionExecutionSteps: {
           forward: { on: "event_steps", has: "one", label: "execution" },
           reverse: { on: "event_executions", has: "many", label: "steps" },
         },
-        contextExecutionItems: {
-          forward: { on: "event_items", has: "one", label: "execution" },
-          reverse: { on: "event_executions", has: "many", label: "items" },
-        },
-        contextPartsStep: {
+        reactionPartsStep: {
           forward: { on: "event_parts", has: "one", label: "step" },
           reverse: { on: "event_steps", has: "many", label: "parts" },
         },
-        contextStepStream: {
+        reactionStepStream: {
           forward: { on: "event_steps", has: "one", label: "stream" },
           reverse: { on: "$streams", has: "many", label: "step" },
         },
-        contextExecutionActiveStream: {
+        reactionExecutionActiveStream: {
           forward: { on: "event_executions", has: "one", label: "activeStream" },
           reverse: { on: "$streams", has: "many", label: "activeOf" },
         },
-        contextExecutionLastStream: {
+        reactionExecutionLastStream: {
           forward: { on: "event_executions", has: "one", label: "lastStream" },
           reverse: { on: "$streams", has: "many", label: "lastOf" },
         },

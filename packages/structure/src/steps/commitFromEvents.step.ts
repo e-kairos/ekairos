@@ -10,7 +10,7 @@ export async function structureCommitFromEventsStep(params: {
   const contextKey = `structure:${params.structureId}`
 
   try {
-    const { getContextRuntime } = await import("@ekairos/events/runtime")
+    const { getContextRuntime } = await import("@ekairos/reactor/runtime")
     const runtime = (await getContextRuntime(params.env)) as {
       store: { getItems(p: { key: string }): Promise<unknown[]>; getContext(p: { key: string }): Promise<{ id: string; content?: unknown } | null>; updateContextContent(p: { key: string }, c: unknown): Promise<unknown> }
       db: { transact(tx: unknown): Promise<unknown>; tx: Record<string, Record<string, { link(d: { structure_output_file: string }): unknown }>> }

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { i } from "@instantdb/core";
 import { z } from "zod";
 
-import { defineDomainAction, domain } from "../index.ts";
+import { defineDomainAction, domain, getDomainActionBinding } from "../index.ts";
 
 describe("domain action reflection", () => {
   it("exposes declared actions as a typed raw definition object", () => {
@@ -37,5 +37,10 @@ describe("domain action reflection", () => {
     expect(Object.keys(reflectedActions)).toEqual(["getTask"]);
     expect(reflectedActions.getTask.name).toBe("management.task.get");
     expect(Object.isFrozen(reflectedActions)).toBe(true);
+
+    const binding = getDomainActionBinding(reflectedActions.getTask);
+    expect(binding?.name).toBe("management.task.get");
+    expect(binding?.key).toBe("getTask");
+    expect(binding?.domain).toBe(managementDomain);
   });
 });

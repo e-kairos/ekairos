@@ -16,6 +16,11 @@
 } from "./codex.reactor.js"
 
 export { ensureLocalCodexAppServerUrl } from "./codex.local.js"
+export {
+  codexEngine,
+  type CodexEngineAuthConfig,
+  type CodexEngineConfig,
+} from "./codex.engine.js"
 
 export {
   createOpenAIResponsesReactor,

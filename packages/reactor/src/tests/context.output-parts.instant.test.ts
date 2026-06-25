@@ -162,7 +162,7 @@ describeInstant("context output parts + Instant runtime", () => {
     }
   }, 5 * 60 * 1000)
 
-  itInstant("persists multipart tool outputs on reaction_parts and replays from reaction_parts as the source of truth", async () => {
+  itInstant("persists multipart tool outputs on event_parts and replays from event_parts as the source of truth", async () => {
     const contextKey = `context-output-parts:${Date.now()}`
     const runtime = new EventsTestRuntime({
       appId: String(appId),
@@ -252,16 +252,16 @@ describeInstant("context output parts + Instant runtime", () => {
     const result = await shell.run!
 
     const snapshot = await currentDb().query({
-      reaction_steps: {
+      event_steps: {
         $: { where: { "execution.id": result.execution.id }, limit: 10 },
       },
     })
 
-    const stepRows = readRows(snapshot, "reaction_steps")
+    const stepRows = readRows(snapshot, "event_steps")
     const stepId = readString(stepRows[0], "id")
     expect(stepId).toBeTruthy()
     const partsSnapshot = await currentDb().query({
-      reaction_parts: {
+      event_parts: {
         $: {
           where: { stepId: stepId as any },
           limit: 50,
@@ -269,7 +269,7 @@ describeInstant("context output parts + Instant runtime", () => {
         },
       },
     })
-    const partRows = readRows(partsSnapshot, "reaction_parts")
+    const partRows = readRows(partsSnapshot, "event_parts")
 
     const persistedToolCallPart = findPersistedActionPart(partRows, "inspect_region", "started")
     const persistedToolResultPart = findPersistedActionPart(partRows, "inspect_region", "completed")
@@ -386,16 +386,16 @@ describeInstant("context output parts + Instant runtime", () => {
     const result = await shell.run!
 
     const snapshot = await currentDb().query({
-      reaction_steps: {
+      event_steps: {
         $: { where: { "execution.id": result.execution.id }, limit: 10 },
       },
     })
 
-    const stepRows = readRows(snapshot, "reaction_steps")
+    const stepRows = readRows(snapshot, "event_steps")
     const stepId = readString(stepRows[0], "id")
     expect(stepId).toBeTruthy()
     const partsSnapshot = await currentDb().query({
-      reaction_parts: {
+      event_parts: {
         $: {
           where: { stepId: stepId as any },
           limit: 50,
@@ -404,7 +404,7 @@ describeInstant("context output parts + Instant runtime", () => {
       },
     })
 
-    const partRows = readRows(partsSnapshot, "reaction_parts")
+    const partRows = readRows(partsSnapshot, "event_parts")
     const persistedToolResultPart = findPersistedActionPart(partRows, "inspect_runtime", "completed")
     expect(
       readString(asRecord(persistedToolResultPart?.content) ?? undefined, "status"),

@@ -46,7 +46,7 @@ export async function ensureExecutionTrailStep(
 ): Promise<void> {
   "use step"
 
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   const runtime = (await getContextRuntime(params.env)) as any
   const store = runtime.store as any
   if (

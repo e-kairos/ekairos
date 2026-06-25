@@ -9,6 +9,7 @@ import {
   type ContextItem,
   type ContextPartEnvelope,
   type ContextRuntimeServiceHandle,
+  type ContextSandboxSession,
 } from "@ekairos/events"
 import { z } from "zod"
 
@@ -72,11 +73,37 @@ type ReactorReactOptions<TEnv, TContext> =
     ? {
         env: TEnv
         context?: TContext
-      }
+      } & ReactorReactRuntimeOptions<TEnv, TContext>
     : {
         env: TEnv
         context: TContext
-      }
+      } & ReactorReactRuntimeOptions<TEnv, TContext>
+
+export type ReactorSandboxProvider = {
+  kind: string
+  createSession(options?: {
+    sandboxId?: string
+    workspaceRoot?: string
+  }): Promise<ContextSandboxSession>
+}
+
+export type ReactorSandboxFactoryInput<TEnv, TContext> = {
+  env: TEnv
+  context: TContext
+  triggerEvent: ContextItem
+  reactorKey: string
+}
+
+export type ReactorSandboxInput<TEnv = unknown, TContext = unknown> =
+  | ContextSandboxSession
+  | ReactorSandboxProvider
+  | ((
+      input: ReactorSandboxFactoryInput<TEnv, TContext>,
+    ) => ContextSandboxSession | ReactorSandboxProvider | Promise<ContextSandboxSession | ReactorSandboxProvider>)
+
+export type ReactorReactRuntimeOptions<TEnv, TContext> = {
+  sandbox?: ReactorSandboxInput<TEnv, TContext>
+}
 
 export type ReactorEngineStepInput<
   TContext,
@@ -90,10 +117,12 @@ export type ReactorEngineStepInput<
   env: TEnv
   triggerEvent: ContextItem
   executionId: string
+  sandbox?: ContextSandboxSession
+  workspaceRoot?: string
   step: {
     key: string
     instructions: string
-    input?: unknown
+    payload?: unknown
     output?: z.ZodType<TOutput>
   }
   actions: TActions
@@ -110,7 +139,7 @@ export type ReactorStepConfig<
   TActions extends ReactorActionMap,
 > = {
   instructions: string
-  input?: unknown
+  payload?: unknown
   output?: z.ZodType<TOutput>
   actions?: TActions
   parts?: ContextPartEnvelope[]
@@ -151,6 +180,7 @@ export class ReactorExecution<TContext, TEnv, TFinalOutput = unknown> {
       env: TEnv
       engine?: ReactorEngine<TContext, TEnv>
       output?: z.ZodType<TFinalOutput>
+      sandbox?: ContextSandboxSession
     },
   ) {}
 
@@ -172,6 +202,14 @@ export class ReactorExecution<TContext, TEnv, TFinalOutput = unknown> {
 
   get completed() {
     return this.completedResult !== null
+  }
+
+  get sandbox() {
+    return this.params.sandbox
+  }
+
+  get workspaceRoot() {
+    return this.params.sandbox?.workspaceRoot
   }
 
   get result() {
@@ -199,7 +237,7 @@ export class ReactorExecution<TContext, TEnv, TFinalOutput = unknown> {
     try {
       const output = await this.runStepEngine(stepKey, {
         instructions,
-        input: config.input,
+        payload: config.payload,
         output: config.output,
         actions,
       })
@@ -212,7 +250,7 @@ export class ReactorExecution<TContext, TEnv, TFinalOutput = unknown> {
         parts: buildStepParts({
           key: stepKey,
           instructions,
-          input: config.input,
+          payload: config.payload,
           actions: actionNames,
           output: parsedOutput,
           extraParts: config.parts,
@@ -233,7 +271,7 @@ export class ReactorExecution<TContext, TEnv, TFinalOutput = unknown> {
         parts: buildStepParts({
           key: stepKey,
           instructions,
-          input: config.input,
+          payload: config.payload,
           actions: actionNames,
           error,
           extraParts: config.parts,
@@ -271,7 +309,7 @@ export class ReactorExecution<TContext, TEnv, TFinalOutput = unknown> {
         parts: buildStepParts({
           key: "complete",
           instructions: normalized.message ?? "Complete the reactor execution.",
-          input: normalized.step
+          payload: normalized.step
             ? {
                 stepId: normalized.step.id,
                 stepKey: normalized.step.key,
@@ -319,7 +357,7 @@ export class ReactorExecution<TContext, TEnv, TFinalOutput = unknown> {
     key: string,
     config: {
       instructions: string
-      input?: unknown
+      payload?: unknown
       output?: z.ZodType<TOutput>
       actions: TActions
     },
@@ -340,10 +378,12 @@ export class ReactorExecution<TContext, TEnv, TFinalOutput = unknown> {
       env: this.params.env,
       triggerEvent: this.params.triggerEvent,
       executionId: this.params.executionId,
+      sandbox: this.params.sandbox,
+      workspaceRoot: this.params.sandbox?.workspaceRoot,
       step: {
         key,
         instructions: config.instructions,
-        input: config.input,
+        payload: config.payload,
         output: config.output,
       },
       actions: config.actions,
@@ -364,6 +404,8 @@ export type ReactorRunInput<
   context: ReactorInitialContext<TContext>
   triggerEvent: ContextItem
   execution: ReactorExecution<TContext, TEnv, TFinalOutput>
+  sandbox?: ContextSandboxSession
+  workspaceRoot?: string
 }
 
 type BaseReactorConfig<
@@ -378,6 +420,7 @@ type BaseReactorConfig<
   scope?: TScopeDomain
   output?: TOutputSchema
   engine?: ReactorEngine<TContext, TEnv>
+  sandbox?: ReactorSandboxInput<TEnv, TContext>
   run(
     input: ReactorRunInput<
       TContext,
@@ -476,6 +519,13 @@ export class DefinedReactor<
     )
     const readOnlyScope = createReadOnlyScope(scope)
     const content = parseInitialContext(this.config.context, options.context)
+    const sandboxResolution = await resolveReactorSandbox({
+      configured: options.sandbox ?? this.config.sandbox,
+      env: options.env,
+      context: content,
+      triggerEvent,
+      reactorKey: this.config.key,
+    })
     const contextHandle = await resolveContextHandle<TContext>({
       runtime: this.runtime,
       contextRef,
@@ -508,7 +558,17 @@ export class DefinedReactor<
       env: options.env,
       engine: this.config.engine,
       output: this.config.output,
+      sandbox: sandboxResolution.session,
     })
+
+    if (sandboxResolution.session) {
+      await contextHandle.prepareExecutionSandbox({
+        sandbox: sandboxResolution.session,
+        executionId: opened.execution.id,
+        triggerEventId: opened.trigger.id,
+        reactionEventId: opened.reaction.id,
+      })
+    }
 
     try {
       await this.config.run({
@@ -518,6 +578,8 @@ export class DefinedReactor<
         context: initialContext,
         triggerEvent: opened.trigger,
         execution,
+        sandbox: sandboxResolution.session,
+        workspaceRoot: sandboxResolution.session?.workspaceRoot,
       })
       if (!execution.completed) {
         throw new Error(
@@ -539,6 +601,10 @@ export class DefinedReactor<
         "failed",
       )
       throw error
+    } finally {
+      if (sandboxResolution.owned && sandboxResolution.session) {
+        await sandboxResolution.session.stop?.()
+      }
     }
 
     return {
@@ -548,6 +614,58 @@ export class DefinedReactor<
       result: execution.result,
     }
   }
+}
+
+async function resolveReactorSandbox<TEnv, TContext>(params: {
+  configured?: ReactorSandboxInput<TEnv, TContext>
+  env: TEnv
+  context: TContext
+  triggerEvent: ContextItem
+  reactorKey: string
+}): Promise<{ session?: ContextSandboxSession; owned: boolean }> {
+  if (!params.configured) return { owned: false }
+
+  const resolved =
+    typeof params.configured === "function"
+      ? await params.configured({
+          env: params.env,
+          context: params.context,
+          triggerEvent: params.triggerEvent,
+          reactorKey: params.reactorKey,
+        })
+      : params.configured
+
+  if (isSandboxSession(resolved)) {
+    return { session: resolved, owned: false }
+  }
+
+  if (isSandboxProvider(resolved)) {
+    return {
+      session: await resolved.createSession(),
+      owned: true,
+    }
+  }
+
+  throw new Error("Reactor sandbox must be a SandboxSession or SandboxSessionProvider.")
+}
+
+function isSandboxSession(value: unknown): value is ContextSandboxSession {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as ContextSandboxSession).id === "string" &&
+      typeof (value as ContextSandboxSession).workspaceRoot === "string" &&
+      typeof (value as ContextSandboxSession).writeFile === "function",
+  )
+}
+
+function isSandboxProvider(value: unknown): value is ReactorSandboxProvider {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as ReactorSandboxProvider).kind === "string" &&
+      typeof (value as ReactorSandboxProvider).createSession === "function",
+  )
 }
 
 export type ReactorFactory<
@@ -606,22 +724,7 @@ export function defineReactor<
   OutputFromSchema<TOutputSchema>
 >
 
-export function defineReactor(
-  config: InternalReactorConfig<
-    string,
-    unknown,
-    unknown,
-    ContextRuntimeServiceHandle,
-    ReactorScopeDomain | undefined,
-    z.ZodType | undefined
-  >,
-): ReactorFactory<
-  unknown,
-  unknown,
-  ContextRuntimeServiceHandle,
-  ReactorScopeDomain | undefined,
-  unknown
-> {
+export function defineReactor(config: any): any {
   return (runtime: ContextRuntimeServiceHandle) =>
     new DefinedReactor(config, runtime)
 }
@@ -702,7 +805,7 @@ function normalizeInstructions(instructions: string, stepKey: string) {
 function buildStepParts(input: {
   key: string
   instructions: string
-  input?: unknown
+  payload?: unknown
   actions: string[]
   output?: unknown
   error?: unknown
@@ -713,7 +816,7 @@ function buildStepParts(input: {
       kind: "reactor.step",
       key: input.key,
       instructions: input.instructions,
-      input: input.input,
+      payload: input.payload,
       actions: input.actions,
     }),
   ]

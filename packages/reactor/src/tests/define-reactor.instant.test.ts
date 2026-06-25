@@ -1,5 +1,9 @@
 /* @vitest-environment node */
 
+import { randomUUID } from "node:crypto"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
 import { afterAll, beforeAll, expect } from "vitest"
 import { init } from "@instantdb/admin"
 import { z } from "zod"
@@ -8,6 +12,7 @@ import {
   Events,
   Part,
   contextDomain,
+  type ContextSandboxSession,
 } from "../../../events/src/index.ts"
 import {
   describeInstant,
@@ -46,6 +51,38 @@ async function readContextSnapshot(
   } as any)
 
   return asRows((snapshot as any).event_contexts)[0] ?? {}
+}
+
+function createTestSandbox(params: {
+  id?: string
+  workspaceRoot?: string
+  onStop?: () => void
+} = {}): ContextSandboxSession {
+  const workspaceRoot = params.workspaceRoot ?? join(
+    tmpdir(),
+    `ekairos-reactor-sandbox-${randomUUID()}`,
+  )
+  return {
+    id: params.id ?? `sandbox:${randomUUID()}`,
+    provider: "local",
+    workspaceRoot,
+    async writeFile(file) {
+      await mkdir(dirname(file.path), { recursive: true })
+      const content =
+        typeof file.content === "string" && file.encoding === "base64"
+          ? Buffer.from(file.content, "base64")
+          : typeof file.content === "string"
+            ? file.content
+            : Buffer.from(file.content)
+      await writeFile(file.path, content)
+    },
+    async exec() {
+      return { success: true, exitCode: 0, output: "", error: "" }
+    },
+    async stop() {
+      params.onStop?.()
+    },
+  }
 }
 
 describeInstant("defineReactor", () => {
@@ -115,7 +152,7 @@ describeInstant("defineReactor", () => {
           }
 
           if (step.key === "save-order-match-proposal") {
-            return await actions.saveOrderMatchProposal(step.input)
+            return await actions.saveOrderMatchProposal(step.payload)
           }
 
           throw new Error(`unexpected step:${step.key}`)
@@ -129,7 +166,7 @@ describeInstant("defineReactor", () => {
 
         const saved = await execution.step("save-order-match-proposal", {
           instructions: "Persist the generated order match proposal.",
-          input: {
+          payload: {
             proposal: proposal.output,
           },
           output: savedProposalSchema,
@@ -239,6 +276,96 @@ describeInstant("defineReactor", () => {
     const reactionEvent = asRecord(execution?.output)
     expect(reactionEvent.status).toBe("completed")
     expect(asRecord(reactionEvent.content).finalStepId).toBeTruthy()
+  }, 60_000)
+
+  itInstant("prepares a caller-owned sandbox session before running", async () => {
+    const runtime = new EventsTestRuntime({ appId, adminToken })
+    const triggerEvent = await Events(runtime)
+      .builder({ type: "input", channel: "web" })
+      .simple(Part.message("Run with prepared sandbox."))
+      .create()
+
+    let stopped = false
+    const sandbox = createTestSandbox({
+      onStop: () => {
+        stopped = true
+      },
+    })
+
+    const reactor = defineReactor({
+      key: "reactor.sandbox-session",
+      context: z.object({ value: z.string() }),
+      run: async ({ execution, sandbox: runtimeSandbox, workspaceRoot }) => {
+        expect(runtimeSandbox).toBe(sandbox)
+        expect(execution.sandbox).toBe(sandbox)
+        expect(execution.workspaceRoot).toBe(sandbox.workspaceRoot)
+        expect(workspaceRoot).toBe(sandbox.workspaceRoot)
+        await execution.complete({
+          message: "Sandbox prepared.",
+        })
+      },
+    })(runtime)
+
+    const reaction = await reactor.react(
+      { key: "sandbox-context:caller-owned" },
+      triggerEvent,
+      {
+        env: {},
+        context: { value: "ready" },
+        sandbox,
+      },
+    )
+
+    expect(stopped).toBe(false)
+    const manifestPath = join(
+      sandbox.workspaceRoot,
+      "contexts",
+      reaction.context.ref.id,
+      "executions",
+      reaction.executionId,
+      "manifest.json",
+    )
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8"))
+    expect(manifest.executionId).toBe(reaction.executionId)
+    expect(manifest.triggerEventId).toBe(triggerEvent.id)
+    expect(manifest.reactionEventId).toBe(reaction.reactionEventId)
+  }, 60_000)
+
+  itInstant("closes provider-owned sandbox sessions after completion", async () => {
+    const runtime = new EventsTestRuntime({ appId, adminToken })
+    const triggerEvent = await Events(runtime)
+      .builder({ type: "input", channel: "web" })
+      .simple(Part.message("Run with provider sandbox."))
+      .create()
+
+    let stopped = false
+    const sandbox = createTestSandbox({
+      onStop: () => {
+        stopped = true
+      },
+    })
+
+    const reactor = defineReactor({
+      key: "reactor.sandbox-provider",
+      sandbox: {
+        kind: "test",
+        async createSession() {
+          return sandbox
+        },
+      },
+      run: async ({ execution }) => {
+        expect(execution.sandbox).toBe(sandbox)
+        await execution.complete({ message: "Provider sandbox prepared." })
+      },
+    })(runtime)
+
+    await reactor.react(
+      { key: "sandbox-context:provider-owned" },
+      triggerEvent,
+      { env: {} },
+    )
+
+    expect(stopped).toBe(true)
   }, 60_000)
 
   itInstant("fails explicitly when a reactor returns without completing", async () => {

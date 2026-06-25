@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 
-import type { ContextEnvironment } from "@ekairos/events/runtime"
-import type { ContextItem, ContextReactorParams, ContextSkillPackage } from "@ekairos/events"
+import type { ContextEnvironment } from "@ekairos/reactor/runtime"
+import type { ContextItem } from "@ekairos/events"
+import type { ContextReactorParams, ContextSkillPackage } from "@ekairos/reactor/context"
 
 import {
   createCodexReactor,

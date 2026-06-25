@@ -1,7 +1,7 @@
 import "../polyfills/dom-events.js"
 import { id, lookup } from "@instantdb/admin"
 
-import { eventsDomain } from "../schema.js"
+import { contextDomain } from "../schema.js"
 import type { DomainLike } from "@ekairos/domain"
 import { convertItemToModelMessages } from "../context.events.js"
 import {
@@ -478,13 +478,9 @@ export class InstantStore implements ContextStore {
     return await this.getContextResources({ id: context.id })
   }
 
-  async saveItem(
-    contextIdentifier: ContextIdentifier,
-    event: ContextItem,
-  ): Promise<ContextItem> {
+  async saveEvent(event: ContextItem): Promise<ContextItem> {
     const eventId = ensureValidEntityId((event as any)?.id, "event.id")
     const sanitizedEvent = sanitizeInstantValue(event)
-    const context = await this.resolveContext(contextIdentifier)
     const existing = await this.getItem(eventId)
     if (existing?.status && existing.status !== "stored") {
       assertItemTransition(existing.status, "stored")
@@ -495,6 +491,40 @@ export class InstantStore implements ContextStore {
         id: eventId,
         status: "stored",
       }),
+    ]
+
+    try {
+      await this.db.transact(txs as any)
+    } catch (error) {
+      logInstantTransactFailure({
+        action: "saveEvent",
+        meta: {
+          eventId,
+          eventType: (event as any)?.type,
+          eventChannel: (event as any)?.channel,
+          eventCreatedAt: (event as any)?.createdAt,
+        },
+        txs,
+        error,
+      })
+      throw error
+    }
+
+    return {
+      ...(sanitizedEvent as any),
+      id: eventId,
+      status: "stored",
+    } as ContextItem
+  }
+
+  async saveItem(
+    contextIdentifier: ContextIdentifier,
+    event: ContextItem,
+  ): Promise<ContextItem> {
+    const savedEvent = await this.saveEvent(event)
+    const context = await this.resolveContext(contextIdentifier)
+    const eventId = ensureValidEntityId(savedEvent.id, "event.id")
+    const txs = [
       this.db.tx.event_items[eventId].link({ context: context.id }),
     ]
 
@@ -517,11 +547,7 @@ export class InstantStore implements ContextStore {
       throw error
     }
 
-    return {
-      ...(sanitizedEvent as any),
-      id: eventId,
-      status: "stored",
-    } as ContextItem
+    return savedEvent
   }
 
   async updateItem(eventId: string, event: ContextItem): Promise<ContextItem> {
@@ -573,41 +599,18 @@ export class InstantStore implements ContextStore {
     return sortItems(((res.event_items as any) ?? []) as ContextItem[])
   }
 
-  private async getExecutionIdForItem(itemId: string): Promise<string | null> {
-    const directResult = await this.db.query({
+  private async getProjectedPartsForEvent(itemId: string): Promise<unknown[] | null> {
+    const eventResult = await this.db.query({
       event_items: {
-        $: { where: { id: itemId as any }, limit: 1 },
-        execution: {},
+        $: {
+          where: { id: itemId as any },
+          limit: 1,
+        },
+        executionsAsOutput: {},
       },
     })
-
-    const directRow = (directResult?.event_items as any[])?.[0]
-    const directExecutionId = directRow?.execution?.id
-    if (
-      typeof directExecutionId === "string" &&
-      directExecutionId.trim().length > 0
-    ) {
-      return directExecutionId
-    }
-
-    const reverseResult = await this.db.query({
-      event_executions: {
-        $: { where: { "reaction.id": itemId as any }, limit: 1 },
-      },
-    })
-
-    const reverseRow = (reverseResult?.event_executions as any[])?.[0]
-    const reverseExecutionId = reverseRow?.id
-    return typeof reverseExecutionId === "string" && reverseExecutionId.trim().length > 0
-      ? reverseExecutionId
-      : null
-  }
-
-  private async getProjectedPartsForOutputItem(itemId: string): Promise<unknown[] | null> {
-    const executionId = await this.getExecutionIdForItem(itemId)
-    if (!executionId) {
-      return null
-    }
+    const executionId = eventResult?.event_items?.[0]?.executionsAsOutput?.[0]?.id
+    if (!executionId) return null
 
     const stepResult = await this.db.query({
       event_steps: {
@@ -703,8 +706,9 @@ export class InstantStore implements ContextStore {
       }),
       this.db.tx.event_executions[executionId].link({ context: context.id }),
       this.db.tx.event_contexts[context.id].link({ currentExecution: executionId }),
-      this.db.tx.event_executions[executionId].link({ trigger: normalizedTriggerEventId }),
-      this.db.tx.event_executions[executionId].link({ reaction: normalizedReactionEventId }),
+      this.db.tx.event_executions[executionId].link({ input: normalizedTriggerEventId }),
+      this.db.tx.event_executions[executionId].link({ output: normalizedReactionEventId }),
+      this.db.tx.event_items[normalizedTriggerEventId].link({ reactions: normalizedReactionEventId }),
     ]
 
     try {
@@ -763,6 +767,7 @@ export class InstantStore implements ContextStore {
     executionId: string
     iteration: number
   }): Promise<{ id: string }> {
+    const executionId = ensureValidEntityId(params.executionId, "executionId")
     const stepId = id()
 
     const txs: any[] = [
@@ -771,7 +776,7 @@ export class InstantStore implements ContextStore {
         status: "running",
         iteration: params.iteration,
       }),
-      this.db.tx.event_steps[stepId].link({ execution: params.executionId }),
+      this.db.tx.event_steps[stepId].link({ execution: executionId }),
     ]
 
     try {
@@ -780,7 +785,7 @@ export class InstantStore implements ContextStore {
       logInstantTransactFailure({
         action: "createStep",
         meta: {
-          executionId: params.executionId,
+          executionId,
           iteration: params.iteration,
           stepId,
         },
@@ -824,12 +829,6 @@ export class InstantStore implements ContextStore {
     await this.db.transact([this.db.tx.event_steps[stepId].update(update)])
   }
 
-  async linkItemToExecution(params: { itemId: string; executionId: string }): Promise<void> {
-    await this.db.transact([
-      this.db.tx.event_items[params.itemId].link({ execution: params.executionId }),
-    ])
-  }
-
   async saveStepParts(params: { stepId: string; parts: any[] }): Promise<void> {
     const parts = sanitizeInstantValue(
       normalizePartsForPersistence(Array.isArray(params.parts) ? params.parts : []),
@@ -863,10 +862,7 @@ export class InstantStore implements ContextStore {
 
     const messages: ModelMessage[][] = []
     for (const event of expanded) {
-      const isOutputItem = event?.type === "output"
-      const projectedParts = isOutputItem
-        ? await this.getProjectedPartsForOutputItem(String(event?.id ?? ""))
-        : null
+      const projectedParts = await this.getProjectedPartsForEvent(String(event?.id ?? ""))
       const projectedEvent =
         projectedParts && projectedParts.length > 0
           ? {
@@ -905,7 +901,8 @@ export function createInstantStoreRuntime(params: {
 
     const db = await params.getDb(orgId)
     const store = new InstantStore(db)
-    const concreteDomain = params.domain?.fromDB ? params.domain.fromDB(db) : undefined
+    const domain = params.domain ?? contextDomain
+    const concreteDomain = domain.fromDB ? domain.fromDB(db) : undefined
     const runtime = { store, db, domain: concreteDomain }
     storesByOrg.set(orgId, runtime)
     return runtime

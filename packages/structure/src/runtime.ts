@@ -7,7 +7,7 @@
  * - Using a dynamic import keeps the symbol resolution local to the step runtime.
  */
 export async function getContextRuntime(env: any) {
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   return await getContextRuntime(env)
 }
 

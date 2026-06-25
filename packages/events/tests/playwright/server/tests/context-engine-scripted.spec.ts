@@ -133,11 +133,11 @@ test("story smoke runs context engine with scripted reactor in durable workflow 
   await timer.measure("waitForWorkflowCompletionMs", async () => {
     while (Date.now() < deadline) {
       const queryResult = await adminDb.query({
-        event_executions: {
+        reaction_executions: {
           $: { where: { id: executionId as any }, limit: 1 },
         },
       });
-      const rows = readRows(queryResult, "event_executions");
+      const rows = readRows(queryResult, "reaction_executions");
       persistedExecution = rows[0] ?? null;
       if (
         persistedExecution &&
@@ -157,7 +157,7 @@ test("story smoke runs context engine with scripted reactor in durable workflow 
 
   const verificationQuery = await timer.measure("verificationQueryMs", async () =>
     await adminDb.query({
-      event_steps: {
+      reaction_steps: {
         $: { where: { "execution.id": executionId as any }, limit: 50 },
       },
       event_items: {
@@ -165,7 +165,7 @@ test("story smoke runs context engine with scripted reactor in durable workflow 
       },
     }),
   );
-  const stepRows = readRows(verificationQuery, "event_steps");
+  const stepRows = readRows(verificationQuery, "reaction_steps");
   const itemRows = readRows(verificationQuery, "event_items");
 
   expect(stepRows.length).toBeGreaterThan(0);
@@ -182,7 +182,7 @@ test("story smoke runs context engine with scripted reactor in durable workflow 
   const stepId = readString(stepRows[0], "id");
   expect(stepId).toBeTruthy();
   const partsQuery = await adminDb.query({
-    event_parts: {
+    reaction_parts: {
       $: {
         where: { stepId: stepId as any },
         limit: 50,
@@ -190,7 +190,7 @@ test("story smoke runs context engine with scripted reactor in durable workflow 
       },
     },
   });
-  const partRows = readRows(partsQuery, "event_parts");
+  const partRows = readRows(partsQuery, "reaction_parts");
   const hasToolOutput = partRows.some((row) => {
     const part = asRecord(row.part);
     if (!part) return false;

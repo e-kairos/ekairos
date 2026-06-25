@@ -81,7 +81,7 @@ describe("context output parts", () => {
             event_items: [
               {
                 id: outputItem.id,
-                execution: { id: "execution-1" },
+                executionsAsOutput: [{ id: "execution-1" }],
               },
             ],
           }

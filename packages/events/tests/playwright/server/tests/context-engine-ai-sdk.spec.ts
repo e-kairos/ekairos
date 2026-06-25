@@ -132,11 +132,11 @@ async function waitForCompletedExecution(executionId: string) {
 
   while (Date.now() < deadline) {
     const queryResult = await adminDb.query({
-      event_executions: {
+      reaction_executions: {
         $: { where: { id: executionId as any }, limit: 1 },
       },
     });
-    const rows = readRows(queryResult, "event_executions");
+    const rows = readRows(queryResult, "reaction_executions");
     persistedExecution = rows[0] ?? null;
     if (
       persistedExecution &&
@@ -175,7 +175,7 @@ test("story smoke runs context engine with AI SDK mocked model in durable workfl
 
   const verificationQuery = await timer.measure("verificationQueryMs", async () =>
     await completed.adminDb.query({
-      event_steps: {
+      reaction_steps: {
         $: { where: { "execution.id": started.executionId as any }, limit: 50 },
       },
       event_items: {
@@ -183,7 +183,7 @@ test("story smoke runs context engine with AI SDK mocked model in durable workfl
       },
     }),
   );
-  const stepRows = readRows(verificationQuery, "event_steps");
+  const stepRows = readRows(verificationQuery, "reaction_steps");
   const itemRows = readRows(verificationQuery, "event_items");
 
   expect(stepRows.length).toBeGreaterThan(0);
@@ -200,7 +200,7 @@ test("story smoke runs context engine with AI SDK mocked model in durable workfl
   const stepId = readString(stepRows[0], "id");
   expect(stepId).toBeTruthy();
   const partsQuery = await completed.adminDb.query({
-    event_parts: {
+    reaction_parts: {
       $: {
         where: { stepId: stepId as any },
         limit: 50,
@@ -208,7 +208,7 @@ test("story smoke runs context engine with AI SDK mocked model in durable workfl
       },
     },
   });
-  const partRows = readRows(partsQuery, "event_parts");
+  const partRows = readRows(partsQuery, "reaction_parts");
   const hasToolOutput = partRows.some((row) => {
     const part = asRecord(row.part);
     if (!part) return false;
@@ -260,7 +260,7 @@ test("story smoke persists tool errors through durable workflow mode", async ({ 
 
   const verificationQuery = await timer.measure("verificationQueryMs", async () =>
     await completed.adminDb.query({
-      event_steps: {
+      reaction_steps: {
         $: { where: { "execution.id": started.executionId as any }, limit: 50 },
       },
       event_items: {
@@ -268,7 +268,7 @@ test("story smoke persists tool errors through durable workflow mode", async ({ 
       },
     }),
   );
-  const stepRows = readRows(verificationQuery, "event_steps");
+  const stepRows = readRows(verificationQuery, "reaction_steps");
   const itemRows = readRows(verificationQuery, "event_items");
 
   expect(stepRows.length).toBeGreaterThan(0);
@@ -295,7 +295,7 @@ test("story smoke persists tool errors through durable workflow mode", async ({ 
   const stepId = readString(stepRows[0], "id");
   expect(stepId).toBeTruthy();
   const partsQuery = await completed.adminDb.query({
-    event_parts: {
+    reaction_parts: {
       $: {
         where: { stepId: stepId as any },
         limit: 50,
@@ -303,7 +303,7 @@ test("story smoke persists tool errors through durable workflow mode", async ({ 
       },
     },
   });
-  const partRows = readRows(partsQuery, "event_parts");
+  const partRows = readRows(partsQuery, "reaction_parts");
   const hasToolErrorOutput = partRows.some((row) => {
     const part = asRecord(row.part);
     if (!part) return false;

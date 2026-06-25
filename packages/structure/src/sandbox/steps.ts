@@ -129,7 +129,7 @@ export async function createDatasetSandboxStep(
   "use step"
   const startedAt = Date.now()
   const { env, ...configInput } = params
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   const db = (await getContextRuntime(env) as any).db
   const { SandboxService } = (await import("@ekairos/sandbox")) as any
   const service = new SandboxService(db)
@@ -217,7 +217,7 @@ export async function runDatasetSandboxCommandStep(params: {
 }): Promise<DatasetSandboxRunCommandResult> {
   "use step"
   const startedAt = Date.now()
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   const db = (await getContextRuntime(params.env) as any).db
   const { SandboxService } = (await import("@ekairos/sandbox")) as any
   const service = new SandboxService(db)
@@ -246,7 +246,7 @@ export async function writeDatasetSandboxFilesStep(params: {
 }): Promise<void> {
   "use step"
   const startedAt = Date.now()
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   const db = (await getContextRuntime(params.env) as any).db
   const { SandboxService } = (await import("@ekairos/sandbox")) as any
   const service = new SandboxService(db)
@@ -289,7 +289,7 @@ export async function readDatasetSandboxFileStep(params: {
 }): Promise<{ contentBase64: string }> {
   "use step"
   const startedAt = Date.now()
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   const db = (await getContextRuntime(params.env) as any).db
   const { SandboxService } = (await import("@ekairos/sandbox")) as any
   const service = new SandboxService(db)
@@ -325,7 +325,7 @@ export async function readDatasetSandboxTextFileStep(params: {
 export async function stopDatasetSandboxStep(params: { env: any; sandboxId: DatasetSandboxId }): Promise<void> {
   "use step"
   const startedAt = Date.now()
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   const db = (await getContextRuntime(params.env) as any).db
   const { SandboxService } = (await import("@ekairos/sandbox")) as any
   const service = new SandboxService(db)

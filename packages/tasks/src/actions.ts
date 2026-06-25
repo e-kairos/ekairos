@@ -7,7 +7,6 @@ import {
   type TaskFailActionInput,
   type TaskGetActionInput,
   type TaskOpenActionInput,
-  type TaskReleaseActionInput,
   type TaskRecord,
   type TaskStartActionInput,
   type TasksRuntime,
@@ -61,16 +60,6 @@ export async function startTaskExecute({
   input: TaskStartActionInput
 }): Promise<ServiceResult<TaskRecord>> {
   return await new TaskService(runtime).start(input)
-}
-
-export async function releaseTaskExecute({
-  runtime,
-  input,
-}: {
-  runtime: TasksRuntime
-  input: TaskReleaseActionInput
-}): Promise<ServiceResult<TaskRecord>> {
-  return await new TaskService(runtime).release(input)
 }
 
 export async function getTaskExecute({

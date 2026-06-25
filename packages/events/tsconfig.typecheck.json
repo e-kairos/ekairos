@@ -5,8 +5,21 @@
     "skipLibCheck": true
   },
   "include": [
-    "src",
-    "src/__type_tests__/context-action.typecheck.ts",
-    "src/__type_tests__/context-parts.typecheck.ts"
+    "src/index.ts",
+    "src/domain.ts",
+    "src/mcp.ts",
+    "src/oidc.ts",
+    "src/react.ts",
+    "src/stores/instant.store.ts",
+    "src/__type_tests__/context-parts.typecheck.ts",
+    "src/tests/context.local-materialization.test.ts",
+    "src/tests/context.local-paths.test.ts",
+    "src/tests/context.local-resources.test.ts",
+    "src/tests/context.output-parts.test.ts",
+    "src/tests/context.part-identity.test.ts",
+    "src/tests/context.parts.test.ts",
+    "src/tests/context.step-stream-validation.test.ts",
+    "src/tests/event.builder.instant.test.ts",
+    "src/tests/react.step-stream.test.ts"
   ]
 }

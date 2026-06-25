@@ -17,6 +17,8 @@
     "dependencies": {
         "@ekairos/domain": "workspace:*",
         "@ekairos/events": "workspace:*",
+        "@ekairos/reactor": "workspace:*",
+        "@workflow/serde": "5.0.0-beta.1",
         "@instantdb/admin": "0.22.158",
         "ai": "^5.0.98",
         "cbor-extract": "2.2.0",

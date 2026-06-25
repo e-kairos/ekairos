@@ -99,7 +99,7 @@ export async function verifyEventDomainRun(
       $: { where: { id: params.contextId as any }, limit: 1 },
       currentExecution: {},
     },
-    reaction_executions: {
+    event_executions: {
       $: { where: { id: params.executionId as any }, limit: 1 },
       context: {},
       input: {},
@@ -117,7 +117,7 @@ export async function verifyEventDomainRun(
       trigger: {},
       reactions: {},
     },
-    reaction_steps: {
+    event_steps: {
       $: {
         where: { "execution.id": params.executionId as any },
         order: { createdAt: "asc" },
@@ -128,12 +128,12 @@ export async function verifyEventDomainRun(
   })
 
   const context = asRows(snapshot, "context_contexts")[0]
-  const execution = asRows(snapshot, "reaction_executions")[0]
+  const execution = asRows(snapshot, "event_executions")[0]
   const items = asRows(snapshot, "event_items")
-  const steps = asRows(snapshot, "reaction_steps")
+  const steps = asRows(snapshot, "event_steps")
 
   expect(context, "context_contexts row").toBeTruthy()
-  expect(execution, "reaction_executions row").toBeTruthy()
+  expect(execution, "event_executions row").toBeTruthy()
   expect(asString(context.id)).toBe(params.contextId)
   expect(asString(execution.id)).toBe(params.executionId)
   expect(asString(context.status)).toBe(expectedContextStatus)
@@ -182,7 +182,7 @@ export async function verifyEventDomainRun(
   }
 
   expect(steps.length).toBeGreaterThan(0)
-  assertChronological(steps, "reaction_steps")
+  assertChronological(steps, "event_steps")
   for (const step of steps) {
     expect(asString(step.id), "step.id").not.toBe("")
     expect(expectedStepStatuses).toContain(asString(step.status))
@@ -196,7 +196,7 @@ export async function verifyEventDomainRun(
   for (const step of steps) {
     const stepId = asString(step.id)
     const partsSnapshot = await params.db.query({
-      reaction_parts: {
+      event_parts: {
         $: {
           where: { stepId: stepId as any },
           order: { idx: "asc" },
@@ -205,7 +205,7 @@ export async function verifyEventDomainRun(
         step: {},
       },
     })
-    const rows = asRows(partsSnapshot, "reaction_parts")
+    const rows = asRows(partsSnapshot, "event_parts")
     for (const row of rows) {
       partRows.push(row)
       expect(asString(row.stepId) || asString(asRecord(row.step).id)).toBe(stepId)

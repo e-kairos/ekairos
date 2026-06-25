@@ -3,7 +3,7 @@ import type { EkairosRuntime, RuntimeForDomain, RuntimeResolveOptions } from "@e
 
 import type { ContextEnvironment } from "./context.config.js"
 import type { ContextStore } from "./context.store.js"
-import { eventsDomain } from "./schema.js"
+import { contextDomain } from "./schema.js"
 
 export type ContextRuntime<
   Env extends ContextEnvironment = ContextEnvironment,
@@ -17,9 +17,9 @@ export type ContextRuntimeServiceHandle = {
 
 export type ContextRuntimeHandleForDomain<
   Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainLike = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof contextDomain,
 > = ContextRuntimeServiceHandle & {
-  use<Subdomain extends typeof eventsDomain | RequiredDomain>(
+  use<Subdomain extends typeof contextDomain | RequiredDomain>(
     subdomain: Subdomain,
     options?: RuntimeResolveOptions,
   ): Promise<unknown>
@@ -27,9 +27,9 @@ export type ContextRuntimeHandleForDomain<
 
 export type ContextRuntimeForDomain<
   Runtime extends ContextRuntime<any>,
-  RequiredDomain extends DomainLike = typeof eventsDomain,
+  RequiredDomain extends DomainLike = typeof contextDomain,
 > =
-  & RuntimeForDomain<Runtime, typeof eventsDomain>
+  & RuntimeForDomain<Runtime, typeof contextDomain>
   & RuntimeForDomain<Runtime, RequiredDomain>
 
 export type ContextRuntimeServices = {

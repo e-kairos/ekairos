@@ -1,4 +1,5 @@
-import { context, type StoredContext } from "@ekairos/events"
+import type { StoredContext } from "@ekairos/events"
+import { context } from "@ekairos/reactor/context"
 
 interface TestContext {
   userId: string

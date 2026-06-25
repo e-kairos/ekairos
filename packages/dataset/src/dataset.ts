@@ -1,5 +1,6 @@
 import type { DomainInstantSchema, DomainSchemaResult } from "@ekairos/domain"
 import type { ContextReactor } from "@ekairos/reactor/context"
+import type { SandboxSession } from "@ekairos/sandbox"
 import type { ValidQuery } from "@instantdb/core"
 
 import { buildObjectOutputInstructions } from "./builder/instructions.js"
@@ -137,7 +138,12 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
       return api
     },
 
-    sandbox(input: { sandboxId: string }) {
+    sandbox(input: { sandboxId: string } | SandboxSession) {
+      if (isSandboxSession(input)) {
+        state.sandbox = input
+        state.sandboxId = input.id
+        return api
+      }
       state.sandboxId = String(input?.sandboxId ?? "").trim()
       return api
     },
@@ -214,6 +220,9 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
               instructions: buildObjectOutputInstructions(stateWithBuildOptions.instructions),
             }
           : stateWithBuildOptions
+      if (effectiveState.sandbox && effectiveState.durable) {
+        throw new Error("dataset_sandbox_session_not_durable")
+      }
       const onlyResource = effectiveState.resources[0]
       const isSingleResource = effectiveState.resources.length === 1
       const hasInstructions = Boolean(String(effectiveState.instructions ?? "").trim())
@@ -273,6 +282,17 @@ export function dataset<Runtime extends AnyDatasetRuntime>(
   }
 
   return api
+}
+
+function isSandboxSession(value: unknown): value is SandboxSession {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as SandboxSession).id === "string" &&
+      typeof (value as SandboxSession).workspaceRoot === "string" &&
+      typeof (value as SandboxSession).writeFile === "function" &&
+      typeof (value as SandboxSession).exec === "function",
+  )
 }
 
 function normalizeDatasetId(datasetId?: string): string {

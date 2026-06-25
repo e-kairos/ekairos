@@ -1,5 +1,5 @@
 import { testStory } from "./stories/test.story"
-import type { ContextInstance } from "@ekairos/events"
+import type { ContextInstance } from "@ekairos/reactor/context"
 
 const registry = new Map<string, ContextInstance<any, any>>()
 

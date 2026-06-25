@@ -12,16 +12,20 @@ export type TaskData<TContext = unknown, TOutcome = unknown> = {
   kind: string
   key: string
   state: TaskState
+  parentId?: string
+  dependsOnTaskIds?: string[]
   instructions: string
   context: TContext
   outcomeKind?: string
   outcomeSchema?: TaskStoredOutcomeSchema
   resolvedOutcome?: TOutcome
   activeRunId?: string
+  activeDeploymentId?: string
   lastProgress?: unknown
   errorText?: string
   createdAt?: Date | string
   updatedAt?: Date | string
+  startedAt?: Date | string
   resolvedAt?: Date | string
 }
 
@@ -29,10 +33,8 @@ export type TaskRunHandle<TOutcome> = {
   id: string
   taskId: string
   completed(outcome: TOutcome): Promise<TaskData<unknown, TOutcome>>
-  release(input?: {
-    actor?: unknown
-    comment?: string
-  }): Promise<TaskData<unknown, TOutcome>>
+  cancelled(reason?: string): Promise<TaskData<unknown, TOutcome>>
+  failed(error: unknown): Promise<TaskData<unknown, TOutcome>>
 }
 
 export type TaskHandle<TOutcome, TContext = unknown> =

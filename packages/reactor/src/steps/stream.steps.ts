@@ -89,7 +89,7 @@ function createUnsetStreamLinkTx(
   streamId: string,
 ) {
   try {
-    return db.tx.reaction_executions[executionId].unlink({ [label]: streamId })
+    return db.tx.event_executions[executionId].unlink({ [label]: streamId })
   } catch {
     return null
   }
@@ -135,7 +135,7 @@ export async function createPersistedContextStepStreamForRuntime(
 
   await db.transact(
     [
-      db.tx.reaction_steps[params.stepId]
+      db.tx.event_steps[params.stepId]
         .update({
           streamId,
           streamClientId: clientId,
@@ -145,7 +145,7 @@ export async function createPersistedContextStepStreamForRuntime(
           updatedAt: new Date(),
         })
         .link({ stream: streamId }),
-      db.tx.reaction_executions[params.executionId]
+      db.tx.event_executions[params.executionId]
         .update({
           activeStreamId: streamId,
           activeStreamClientId: clientId,
@@ -200,13 +200,13 @@ export async function finalizePersistedContextStepStreamForRuntime(params: {
 
   const now = new Date()
   const txs: any[] = [
-    db.tx.reaction_steps[params.session.stepId].update({
+    db.tx.event_steps[params.session.stepId].update({
       streamFinishedAt: now,
       streamAbortReason:
         params.mode === "abort" ? params.abortReason ?? "aborted" : null,
       updatedAt: now,
     }),
-    db.tx.reaction_executions[params.session.executionId].update({
+    db.tx.event_executions[params.session.executionId].update({
       activeStreamId: null,
       activeStreamClientId: null,
       lastStreamId: params.session.streamId,

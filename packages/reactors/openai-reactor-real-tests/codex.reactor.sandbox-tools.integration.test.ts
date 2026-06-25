@@ -5,8 +5,9 @@ import { init } from "@instantdb/admin"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "../../domain/src/runtime-handle.ts"
 import { configureRuntime } from "../../domain/src/runtime.ts"
-import { createContext, didToolExecute, eventsDomain } from "@ekairos/events"
-import { readPersistedContextStepStream } from "@ekairos/events/runtime"
+import { eventsDomain } from "@ekairos/events"
+import { createContext, didActionExecute } from "@ekairos/reactor/context"
+import { readPersistedContextStepStream } from "@ekairos/reactor/runtime"
 import { sandboxDomain, SandboxService } from "../../sandbox/src/index.ts"
 import { createCodexReactor, type CodexConfig } from "../openai-reactor/src/index.js"
 import { createTestApp } from "../../ekairos-test/src/provision.ts"
@@ -219,7 +220,7 @@ describeReal("codex reactor sandbox dynamic tools on Vercel", () => {
           }),
         }),
       )
-      .shouldContinue(({ reactionEvent }) => !didToolExecute(reactionEvent, "ekairos_mark_done"))
+      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "ekairos_mark_done"))
       .build()
 
     const triggerEvent = {

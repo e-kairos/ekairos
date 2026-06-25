@@ -2,6 +2,7 @@ export type {
   SandboxConfig,
   SandboxId,
   SandboxProvider,
+  SandboxProviderObject,
   SandboxRunCommandResult,
 } from "./types.js"
 
@@ -51,6 +52,33 @@ export type { ResolvedVercelSandboxConfig, VercelSandboxProfile } from "./vercel
 
 export { createApp, createOrUpdateApp } from "./app.js"
 export type { CreateOrUpdateAppArgs, CreateOrUpdateAppResult, GitSource } from "./app.js"
+
+export {
+  agentOsSandbox,
+  createAgentOsSandboxFs,
+  createAgentOsSandboxToolkit,
+  createSandboxSession,
+  daytonaSandbox,
+  justBashSandbox,
+  localSandbox,
+  spritesSandbox,
+  vercelSandbox,
+} from "./session.js"
+export type {
+  AgentOsSandboxClient,
+  LocalSandboxOptions,
+  SandboxExecInput,
+  SandboxFileInput,
+  SandboxProviderCreateOptions,
+  SandboxSession,
+  SandboxSessionCheckpoint,
+  SandboxSessionProvider,
+} from "./session.js"
+export { installCodexAuthToSandboxSession } from "./codex-auth.js"
+export type {
+  CodexSandboxAuthInstallResult,
+  CodexSandboxAuthSource,
+} from "./codex-auth.js"
 
 export {
   createVercelSandbox,

@@ -13,9 +13,20 @@ import type {
 } from "@instantdb/core"
 import { describe, it } from "vitest"
 
-const workspaceRoot = resolve(process.cwd(), "..", "..")
-dotenvConfig({ path: resolve(workspaceRoot, ".env.local"), quiet: true })
-dotenvConfig({ path: resolve(workspaceRoot, ".env"), quiet: true })
+const envRoots = [
+  process.cwd(),
+  resolve(process.cwd(), ".."),
+  resolve(process.cwd(), "..", ".."),
+  resolve(process.cwd(), "..", "..", ".."),
+  resolve(process.cwd(), "..", "ekairos-core"),
+  resolve(process.cwd(), "..", "..", "ekairos-core"),
+  resolve(process.cwd(), "..", "..", "..", "ekairos-core"),
+]
+
+for (const root of envRoots) {
+  dotenvConfig({ path: resolve(root, ".env.local"), quiet: true })
+  dotenvConfig({ path: resolve(root, ".env"), quiet: true })
+}
 
 type AnyInstantSchema = InstantSchemaDef<EntitiesDef, LinksDef<EntitiesDef>, RoomsDef>
 type CreateTestAppResult = {

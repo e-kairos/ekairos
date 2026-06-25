@@ -103,7 +103,7 @@ export const eventsDomainEntry: DomainRegistryEntry = {
   heroLabel: "Context runtime",
   heroTitle: "The interaction layer for AI workflows.",
   heroBody:
-    "Events owns the durable conversation and execution trail. UI components render that surface, while the package keeps context state, model reactions, domain actions, and replay out of the registry.",
+    "Events owns the durable context and execution trail. UI components render that surface, while @ekairos/reactor keeps model reactions, domain actions, and replay orchestration separate.",
   ladder: [
     {
       level: "in one sentence",
@@ -118,7 +118,7 @@ export const eventsDomainEntry: DomainRegistryEntry = {
     {
       level: "under the hood",
       title: "Contexts, items, executions, steps, and parts on a typed schema.",
-      body: "event_contexts is the aggregate root; event_items hold the turn history while event_executions and event_steps track each reaction run, and event_parts are the canonical replay surface. Actions like createContext, defineAction, and createAiSdkReactor wire models and typed domain actions into that durable trail.",
+      body: "event_contexts is the aggregate root; event_items hold the turn history while event_executions and event_steps track each reaction run, and event_parts are the canonical replay surface. @ekairos/reactor wires models and typed domain actions into that durable trail.",
     },
   ],
   schemaEntities: [
@@ -145,30 +145,30 @@ export const eventsDomainEntry: DomainRegistryEntry = {
   ],
   actions: [
     {
-      name: "createContext",
-      description: "Builds a registered context with narrative, skills, actions, model, and reactor.",
+      name: "Events",
+      description: "Creates and updates durable event contexts, items, executions, steps, and parts.",
     },
     {
-      name: "defineAction",
-      description: "Declares typed domain actions that a context reaction can call.",
+      name: "EventBuilder / Part",
+      description: "Typed builders for creating canonical event input, steps, and parts.",
     },
     {
-      name: "createAiSdkReactor",
-      description: "Adapts AI SDK model action-call output into canonical event items and parts.",
+      name: "ContextHandle",
+      description: "Runtime handle for context CRUD, event append, execution opening, and local materialization.",
     },
     {
-      name: "runContextReactionDirect",
-      description: "Executes a context reaction without registry-specific UI glue.",
+      name: "@ekairos/reactor",
+      description: "Separate package for reaction engines, models, actions, and workflow-safe orchestration.",
     },
     {
       name: "useContext",
       description: "React hook from @ekairos/events/react for reading and appending context items.",
     },
   ],
-  usageTitle: "Register a context. Render it with package state.",
+  usageTitle: "React with @ekairos/reactor. Render with @ekairos/events/react.",
   usageBody:
     "Product code defines the context once and registry UI imports the package hook directly. The component stays presentation-focused.",
-  usageCode: `import { createContext } from "@ekairos/events";
+  usageCode: `import { createContext } from "@ekairos/reactor/context";
 import { useContext } from "@ekairos/events/react";
 
 export const tenderContext = createContext("tender.response")

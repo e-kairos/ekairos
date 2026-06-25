@@ -37,7 +37,7 @@ function extractJsonObject(text: string): any | null {
 
 export async function persistObjectResultFromStoryStep(params: { env: any; datasetId: string }): Promise<{ ok: boolean }> {
   "use step"
-  const { getContextRuntime } = await import("@ekairos/events/runtime")
+  const { getContextRuntime } = await import("@ekairos/reactor/runtime")
   const runtime = (await getContextRuntime(params.env)) as any
   const store = runtime.store
   const contextKey = `structure:${params.datasetId}`

@@ -738,17 +738,14 @@ const useDefaultState: UseContextStateHook = (db, { contextId, contextKey }) => 
                 : { key: contextKey as any },
               limit: 1,
             },
-            items: {
+            events: {
               $: { order: { createdAt: "asc" } },
             },
             currentExecution: {},
             executions: {
               $: { order: { createdAt: "desc" }, limit: 50 },
-              trigger: {},
-              reaction: {},
-              items: {
-                $: { order: { createdAt: "asc" } },
-              },
+              input: {},
+              output: {},
               steps: {
                 $: { order: { createdAt: "asc" }, limit: 500 },
                 stream: {},
@@ -763,7 +760,7 @@ const useDefaultState: UseContextStateHook = (db, { contextId, contextKey }) => 
   );
 
   const ctx = (contextRes as any)?.data?.event_contexts?.[0] ?? null;
-  const raw = (ctx?.items ?? []) as ContextEventForUI[] | undefined;
+  const raw = (ctx?.events ?? []) as ContextEventForUI[] | undefined;
 
   return {
     context: ctx,

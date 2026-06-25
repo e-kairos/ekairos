@@ -1,55 +1,16 @@
+export { contextDomain, eventsDomain, reactionDomain } from "./schema.js"
+
 export {
-  context,
-  createContext,
-  createAiSdkReactor,
-  createScriptedReactor,
-  type CreateAiSdkReactorOptions,
-  type CreateScriptedReactorOptions,
-  type ScriptedReactorStep,
-  type ContextConfig,
-  type ContextResourcesParams,
-  type ContextInstance,
-  type ContextOptions,
-  type ContextStreamOptions,
-  type ContextReactor,
-  type ContextReactorParams,
-  type ContextReactionResult,
-  type ContextActionRequest,
-  type ContextReactionLLM,
-  ContextEngine,
-  defineAction,
-  action,
-  type RegistrableContextBuilder,
-  type ContextReactParams,
-  type ContextDirectReactParams,
-  type ContextDurableReactParams,
-  type ContextReactResult,
-  type ContextReactBase,
-  type ContextReactFinalResult,
-  type ContextDirectRun,
-  type ContextReactRun,
-  type ContextWorkflowRun,
-  type ContextDurableWorkflowPayload,
-  type ContextDurableWorkflowFunction,
-  type ContextModelInit,
-  type ContextTool,
-  type ContextAction,
-  type ContextActionBase,
-  type ContextActionExecuteParams,
-  type AnyContextAction,
-  type ContextActionDefinition,
-  type DefineContextActionDefinition,
-  type DefineContextActionExecute,
-  type LegacyContextActionDefinition,
-  type LegacyContextActionExecute,
-  type ContextActionExecute,
-  type ContextActionInput,
-  type ContextActionOutput,
-  type ContextProviderDefinedAction,
-  type ContextActionSchema,
-  type ContextToolExecuteContext,
-  runContextReactionDirect,
-} from "./context.js"
+  Events,
+  EventsClient,
+  EventBuilder,
+  Part,
+} from "./event.builder.js"
+
+export type {
+  EventBuilderStepInput,
+  EventCreateInput,
+} from "./event.builder.js"
 
 export type {
   ContextStore,
@@ -64,40 +25,93 @@ export type {
   ContextExternalResource,
   StoredContextResource,
   ContextItem,
+  ContextStep,
   ContextExecution,
 } from "./context.store.js"
 
+export {
+  coerceContextRuntime,
+} from "./context.config.js"
+
 export type {
-  WireDate,
-  ContextMirrorContext,
-  ContextMirrorExecution,
-  ContextMirrorWrite,
-  ContextMirrorRequest,
-} from "./mirror.js"
+  ContextEnvironment,
+  ContextRuntime as ContextRuntimeServicesRuntime,
+} from "./context.config.js"
 
 export {
-  registerContext,
-  getContext,
-  getContextFactory,
-  hasContext,
-  listContexts,
-  type ContextKey,
-} from "./context.registry.js"
+  getContextRuntimeServices,
+} from "./context.runtime.js"
 
-export { eventsDomain } from "./schema.js"
+export type {
+  ContextRuntime,
+  ContextRuntimeForDomain,
+  ContextRuntimeHandleForDomain,
+  ContextRuntimeServiceHandle,
+  ContextRuntimeServices,
+} from "./context.runtime.js"
 
 export {
-  didActionExecute,
-  extractActionCallsFromParts,
-  type ContextActionCall,
-} from "./context.action-calls.js"
+  ContextHandle,
+  createContextHandle,
+  getContextHandle,
+} from "./context.handle.js"
+
+export type {
+  ContextHandleCreateParams,
+  ContextHandleEventParams,
+  ContextHandleOpenExecutionParams,
+  ContextHandleOpenExecutionResult,
+  ContextHandlePrepareLocalOptions,
+  ContextHandlePrepareExecutionLocalOptions,
+  ContextHandlePreparePartLocalOptions,
+  ContextHandlePrepareSandboxOptions,
+  ContextHandlePrepareExecutionSandboxOptions,
+  ContextHandlePreparePartSandboxOptions,
+} from "./context.handle.js"
+
 export {
-  actionsToActionSpecs,
-  actionSpecToAiSdkTool,
-  type SerializableActionSpec,
-  type SerializableFunctionActionSpec,
-  type SerializableProviderDefinedActionSpec,
-} from "./tools-to-model-tools.js"
+  CONTEXT_LOCAL_SEGMENT_MAX_LENGTH,
+  getContextExecutionLocalRoot,
+  getContextLocalRoot,
+  getContextPartLocalRoot,
+  getContextResourceLocalRoot,
+  getContextStepLocalRoot,
+  prepareContextLocal,
+  prepareExecutionLocal,
+  prepareStepPartLocal,
+  safeContextLocalFilename,
+  safeContextLocalSegment,
+  safeContextResourceLocalSegment,
+} from "./context.local.js"
+
+export {
+  prepareContextSandbox,
+  prepareExecutionSandbox,
+  prepareStepPartSandbox,
+} from "./context.sandbox.js"
+
+export type {
+  ContextLocalFileMaterial,
+  ContextLocalFileReader,
+  ContextLocalRepositoryMaterializer,
+  PreparedContextLocal,
+  PreparedContextResource,
+  PreparedContextResourceFile,
+  PreparedExecutionLocal,
+  PreparedStepPartLocal,
+  PrepareContextLocalOptions,
+  PrepareExecutionLocalOptions,
+  PrepareStepPartLocalOptions,
+} from "./context.local.js"
+
+export type {
+  ContextSandboxRepositoryMaterializer,
+  ContextSandboxSession,
+  PrepareContextSandboxOptions,
+  PrepareExecutionSandboxOptions,
+  PrepareStepPartSandboxOptions,
+} from "./context.sandbox.js"
+
 export {
   reactorMetadataSchema,
   contextPartSchema,
@@ -114,6 +128,7 @@ export {
   parseContextPartEnvelope,
   normalizePartsForPersistence,
 } from "./context.parts.js"
+
 export type {
   ReactorMetadata,
   ContextEnginePart,
@@ -197,27 +212,33 @@ export type {
 } from "./context.contract.js"
 
 export {
-  DEFAULT_CODEX_TOOL_NAME,
-  DEFAULT_CODEX_MODEL,
-  codexToolInputSchema,
-  buildDefaultCodexNarrative,
-  didCodexToolExecute,
-  createCodexContextBuilder,
-  type CodexContextRuntimeMode,
-  type CodexContextReasoningLevel,
-  type CodexContextRuntime,
-  type CodexContextEnv,
-  type CodexToolInput,
-  type CodexToolOutput,
-  type CodexExecuteArgs,
-  type CodexContextBuilderConfig,
-  type CodexContextBuilder,
-} from "./codex.js"
-
-export {
   parseContextStreamEvent,
   assertContextStreamTransitions,
   validateContextStreamTimeline,
+} from "./context.stream.js"
+
+export type {
+  ContextStreamEvent,
+  ContextCreatedEvent,
+  ContextResolvedEvent,
+  ContextStatusChangedEvent,
+  ContextContentUpdatedEvent,
+  ContextDefinitionUpdatedEvent,
+  ContextResourcesUpdatedEvent,
+  ExecutionCreatedEvent,
+  ExecutionCompletedEvent,
+  ExecutionFailedEvent,
+  ItemCreatedEvent,
+  ItemUpdatedEvent,
+  ItemPendingEvent,
+  ItemCompletedEvent,
+  StepCreatedEvent,
+  StepUpdatedEvent,
+  StepCompletedEvent,
+  StepFailedEvent,
+  PartCreatedEvent,
+  PartUpdatedEvent,
+  ChunkEmittedEvent,
 } from "./context.stream.js"
 
 export {
@@ -226,9 +247,11 @@ export {
   validateContextStepStreamChunk,
   parseContextStepStreamChunk,
   encodeContextStepStreamChunk,
+  contextStreamByteLength,
 } from "./context.step-stream.js"
 
 export type {
+  ContextStepStreamChunk,
   ContextStepStreamChunkValidationOptions,
 } from "./context.step-stream.js"
 
@@ -255,28 +278,9 @@ export type {
 } from "./context.part-identity.js"
 
 export type {
-  ContextStreamEvent,
-  ContextCreatedEvent,
-  ContextResolvedEvent,
-  ContextStatusChangedEvent,
-  ContextContentUpdatedEvent,
-  ContextDefinitionUpdatedEvent,
-  ContextResourcesUpdatedEvent,
-  ExecutionCreatedEvent,
-  ExecutionCompletedEvent,
-  ExecutionFailedEvent,
-  ItemCreatedEvent,
-  ItemUpdatedEvent,
-  ItemPendingEvent,
-  ItemCompletedEvent,
-  StepCreatedEvent,
-  StepUpdatedEvent,
-  StepCompletedEvent,
-  StepFailedEvent,
-  PartCreatedEvent,
-  PartUpdatedEvent,
-  ChunkEmittedEvent,
-} from "./context.stream.js"
-
-export type { ContextStepStreamChunk } from "./context.step-stream.js"
-export type { ContextSkillPackage, ContextSkillPackageFile } from "./context.skill.js"
+  WireDate,
+  ContextMirrorContext,
+  ContextMirrorExecution,
+  ContextMirrorWrite,
+  ContextMirrorRequest,
+} from "./mirror.js"

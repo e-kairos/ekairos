@@ -163,10 +163,10 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
 
     const snapshot = await timer.measure("snapshotQueryMs", async () =>
       await currentDb().query({
-        reaction_executions: {
+        event_executions: {
           $: { where: { id: result.execution.id }, limit: 1 },
         },
-        reaction_steps: {
+        event_steps: {
           $: { where: { "execution.id": result.execution.id }, limit: 10 },
         },
         event_items: {
@@ -178,8 +178,8 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
       }),
     )
 
-    const executionRow = readRows(snapshot, "reaction_executions")[0]
-    const stepRows = readRows(snapshot, "reaction_steps")
+    const executionRow = readRows(snapshot, "event_executions")[0]
+    const stepRows = readRows(snapshot, "event_steps")
     const itemRows = readRows(snapshot, "event_items")
     const traceRows = readRows(snapshot, "reaction_trace_events")
 
@@ -194,7 +194,7 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
     const stepId = readString(stepRows[0], "id")
     expect(stepId).toBeTruthy()
     const partsSnapshot = await currentDb().query({
-      reaction_parts: {
+      event_parts: {
         $: {
           where: { stepId: stepId as any },
           limit: 50,
@@ -202,7 +202,7 @@ describeRealInstant("context ai sdk reactor + real AI Gateway model", () => {
         },
       },
     })
-    const partRows = readRows(partsSnapshot, "reaction_parts")
+    const partRows = readRows(partsSnapshot, "event_parts")
 
     const hasToolOutput = partRows.some((row) => {
       const part = asRecord(row.part)

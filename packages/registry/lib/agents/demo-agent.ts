@@ -1,4 +1,4 @@
-import { createContext } from "@ekairos/events"
+import { createContext } from "@ekairos/reactor/context"
 import { init } from "@instantdb/admin"
 import { z } from "zod"
 import { tool } from "ai"

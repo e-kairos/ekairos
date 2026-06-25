@@ -36,6 +36,12 @@
       "require": "./dist/context.js",
       "default": "./dist/context.js"
     },
+    "./reactor": {
+      "types": "./dist/reactor.d.ts",
+      "import": "./dist/reactor.js",
+      "require": "./dist/reactor.js",
+      "default": "./dist/reactor.js"
+    },
     "./domain": {
       "types": "./dist/domain.d.ts",
       "import": "./dist/domain.js",
@@ -62,9 +68,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ekairos/context": "workspace:*",
     "@ekairos/dataset": "workspace:*",
     "@ekairos/domain": "^1.22.0",
     "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
     "@instantdb/admin": "0.22.126"
   },
   "devDependencies": {

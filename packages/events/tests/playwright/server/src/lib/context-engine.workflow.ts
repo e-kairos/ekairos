@@ -1,7 +1,7 @@
 import {
   runContextReactionDirect,
   type ContextDurableWorkflowPayload,
-} from "@ekairos/events";
+} from "@ekairos/reactor/context";
 import { getWritable } from "workflow";
 import {
   storySmoke,

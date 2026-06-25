@@ -116,7 +116,7 @@ const componentPriority = [
     summary:
       "Published UI component for an `event_contexts` timeline with append support through the events React package.",
     emphasis:
-      "This is the current public registry surface. Runtime primitives stay in `@ekairos/events`; only the UI component is installed from the registry.",
+      "This is the current public registry surface. Event primitives stay in `@ekairos/events`; reaction engines live in `@ekairos/reactor`.",
     tags: ["event_contexts", "event_items", "@ekairos/events/react"],
   },
 ];
@@ -126,7 +126,7 @@ const installCommands = [
   "pnpm dlx shadcn@4.8.0 add https://registry.ekairos.dev/r/event-context-panel.json",
 ];
 
-const engineExports = [
+const reactorExports = [
   "createContext",
   "ContextEngine",
   "createScriptedReactor",
@@ -279,7 +279,7 @@ export default function EventsDomainPage() {
             The engine makes the schema behave like a product loop
           </h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            `@ekairos/events` is not only a set of entities. The context engine is the layer that
+            `@ekairos/events` owns the entities and persisted context surface. `@ekairos/reactor`
             turns those entities into a repeatable runtime: define a context, persist the visible
             turn, stream execution detail, and close on durable state.
           </p>
@@ -291,7 +291,7 @@ export default function EventsDomainPage() {
               Public entrypoints
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {engineExports.map((exportName) => (
+              {reactorExports.map((exportName) => (
                 <span
                   key={exportName}
                   className="rounded-full border border-border/70 bg-card px-2.5 py-1 font-mono text-[11px] text-muted-foreground"
@@ -301,7 +301,7 @@ export default function EventsDomainPage() {
               ))}
             </div>
             <div className="mt-4 rounded-xl border border-border/70 bg-card px-3 py-3 font-mono text-[11px] text-muted-foreground">
-              {`import { createContext, ContextEngine, createScriptedReactor, createAiSdkReactor } from "${eventsDomainEntry.schemaPackage}"`}
+              {`import { createContext, ContextEngine, createScriptedReactor, createAiSdkReactor } from "@ekairos/reactor/context"`}
             </div>
           </div>
 

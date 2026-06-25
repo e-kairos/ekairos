@@ -1,13 +1,15 @@
 import {
+  eventsDomain,
+  type ContextItem,
+} from "@ekairos/events"
+import {
   createContext,
   createContextStepStreamChunk,
   encodeContextStepStreamChunk,
-  eventsDomain,
   resolveContextPartChunkIdentity,
   runContextReactionDirect,
   type ContextDurableWorkflowPayload,
-  type ContextItem,
-} from "@ekairos/events"
+} from "@ekairos/reactor/context"
 import { EkairosRuntime } from "@ekairos/domain"
 import { init } from "@instantdb/admin"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"

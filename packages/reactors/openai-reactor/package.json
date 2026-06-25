@@ -43,11 +43,13 @@
     "test:reactor:workflow": "vitest run -c vitest.workflow.config.mts"
   },
   "peerDependencies": {
-    "@ekairos/events": "workspace:*"
+    "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*"
   },
   "devDependencies": {
     "@ekairos/domain": "workspace:*",
     "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
     "@ekairos/tsconfig": "workspace:*",
     "@instantdb/admin": "0.22.158",
     "@types/node": "^24.5.0",

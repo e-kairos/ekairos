@@ -9,7 +9,6 @@ import {
   failTaskExecute,
   getTaskExecute,
   openTaskExecute,
-  releaseTaskExecute,
   startTaskExecute,
 } from "./actions.js"
 
@@ -23,16 +22,20 @@ const taskRecordSchema = z.object({
   kind: z.string(),
   key: z.string(),
   state: z.enum(["open", "in_progress", "completed", "cancelled", "failed"]),
+  parentId: z.string().optional(),
+  dependsOnTaskIds: z.array(z.string()).optional(),
   instructions: z.string(),
   context: z.unknown(),
   outcomeKind: z.string().optional(),
   outcomeSchema: storedOutcomeSchema.optional(),
   resolvedOutcome: z.unknown().optional(),
   activeRunId: z.string().optional(),
+  activeDeploymentId: z.string().optional(),
   lastProgress: z.unknown().optional(),
   errorText: z.string().optional(),
   createdAt: z.unknown().optional(),
   updatedAt: z.unknown().optional(),
+  startedAt: z.unknown().optional(),
   resolvedAt: z.unknown().optional(),
 })
 
@@ -64,6 +67,8 @@ const openTaskInputSchema = z.object({
   id: z.string().optional(),
   kind: z.string(),
   key: z.string(),
+  parentTaskId: z.string().optional(),
+  dependsOnTaskIds: z.array(z.string()).optional(),
   instructions: z.string(),
   context: z.unknown().optional(),
   outcomeKind: z.string().optional(),
@@ -92,11 +97,7 @@ const failTaskInputSchema = z.object({
 const startTaskInputSchema = z.object({
   id: z.string(),
   runId: z.string(),
-})
-
-const releaseTaskInputSchema = z.object({
-  id: z.string(),
-  runId: z.string(),
+  deploymentId: z.string().optional(),
   actor: z.unknown().optional(),
   comment: z.string().optional(),
 })
@@ -122,65 +123,76 @@ export const tasksSchemaDomain = domain("tasks")
         outcomeSchema: i.json().optional(),
         outcome: i.json().optional(),
         activeRunId: i.string().optional().indexed(),
+        activeDeploymentId: i.string().optional().indexed(),
         lastProgress: i.json().optional(),
         errorText: i.string().optional(),
         createdAt: i.date().indexed(),
         updatedAt: i.date().indexed(),
+        startedAt: i.date().optional().indexed(),
         resolvedAt: i.date().optional().indexed(),
       }),
     },
-    links: {},
+    links: {
+      taskTasksChildren: {
+        forward: { on: "task_tasks", has: "many", label: "children" },
+        reverse: { on: "task_tasks", has: "one", label: "parent" },
+      },
+      taskTasksDependencies: {
+        forward: { on: "task_tasks", has: "many", label: "dependsOn" },
+        reverse: { on: "task_tasks", has: "many", label: "dependents" },
+      },
+    },
     rooms: {},
   })
 
-export const tasksDomain = tasksSchemaDomain
-  .withActions({
-    createTask: defineAction({
-      name: "tasks.createTask",
-      input: openTaskInputSchema,
-      output: taskServiceResultSchema,
-      execute: openTaskExecute,
-    }),
-    getTask: defineAction({
-      name: "tasks.getTask",
-      input: getTaskInputSchema,
-      output: taskServiceResultSchema,
-      execute: getTaskExecute,
-    }),
-    awaitOutcome: defineAction({
-      name: "tasks.awaitOutcome",
-      input: awaitOutcomeInputSchema,
-      output: taskOutcomeResultSchema,
-      execute: awaitOutcomeExecute,
-    }),
-    startTask: defineAction({
-      name: "tasks.startTask",
-      input: startTaskInputSchema,
-      output: taskServiceResultSchema,
-      execute: startTaskExecute,
-    }),
-    completeTask: defineAction({
-      name: "tasks.completeTask",
-      input: decideTaskInputSchema,
-      output: taskServiceResultSchema,
-      execute: decideTaskExecute,
-    }),
-    cancelTask: defineAction({
-      name: "tasks.cancelTask",
-      input: cancelTaskInputSchema,
-      output: taskServiceResultSchema,
-      execute: cancelTaskExecute,
-    }),
-    failTask: defineAction({
-      name: "tasks.failTask",
-      input: failTaskInputSchema,
-      output: taskServiceResultSchema,
-      execute: failTaskExecute,
-    }),
-    releaseTask: defineAction({
-      name: "tasks.releaseTask",
-      input: releaseTaskInputSchema,
-      output: taskServiceResultSchema,
-      execute: releaseTaskExecute,
-    }),
-  })
+const taskActions = {
+  createTask: defineAction({
+    name: "tasks.createTask",
+    input: openTaskInputSchema,
+    output: taskServiceResultSchema,
+    execute: openTaskExecute,
+  }),
+  getTask: defineAction({
+    name: "tasks.getTask",
+    input: getTaskInputSchema,
+    output: taskServiceResultSchema,
+    execute: getTaskExecute,
+  }),
+  awaitOutcome: defineAction({
+    name: "tasks.awaitOutcome",
+    input: awaitOutcomeInputSchema,
+    output: taskOutcomeResultSchema,
+    execute: awaitOutcomeExecute,
+  }),
+  startTask: defineAction({
+    name: "tasks.startTask",
+    input: startTaskInputSchema,
+    output: taskServiceResultSchema,
+    execute: startTaskExecute,
+  }),
+  completeTask: defineAction({
+    name: "tasks.completeTask",
+    input: decideTaskInputSchema,
+    output: taskServiceResultSchema,
+    execute: decideTaskExecute,
+  }),
+  cancelTask: defineAction({
+    name: "tasks.cancelTask",
+    input: cancelTaskInputSchema,
+    output: taskServiceResultSchema,
+    execute: cancelTaskExecute,
+  }),
+  failTask: defineAction({
+    name: "tasks.failTask",
+    input: failTaskInputSchema,
+    output: taskServiceResultSchema,
+    execute: failTaskExecute,
+  }),
+} as const
+
+type TasksDomainPublic = typeof tasksSchemaDomain & {
+  readonly actions: typeof taskActions
+}
+
+export const tasksDomain: TasksDomainPublic = tasksSchemaDomain
+  .withActions(taskActions) as unknown as TasksDomainPublic

@@ -20,6 +20,7 @@ export {
 export {
   Task,
   type TaskApprovalInput,
+  type TaskDefinitionOpenInput,
   type TaskOpenInput,
   type TaskOpenOptions,
   type TaskRecord,

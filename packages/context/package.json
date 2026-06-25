@@ -1,0 +1,53 @@
+{
+  "name": "@ekairos/context",
+  "version": "1.22.0",
+  "description": "Ekairos Context - typed domain events and workflow-safe reactions",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-kairos/ekairos.git",
+    "directory": "packages/context"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true}); require('fs').rmSync('.tsbuildinfo',{force:true})\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run -c vitest.config.mts"
+  },
+  "dependencies": {
+    "@ekairos/domain": "workspace:*",
+    "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
+    "ai": "^5.0.97",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@ai-sdk/openai": "^2.0.68",
+    "@ekairos/testing": "workspace:*",
+    "@ekairos/tsconfig": "workspace:*",
+    "@instantdb/admin": "0.22.158",
+    "@instantdb/core": "0.22.142",
+    "@types/node": "^24.5.0",
+    "dotenv": "^17.2.3",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.8"
+  }
+}

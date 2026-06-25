@@ -21,7 +21,7 @@ export type SandboxConfig = {
   /**
    * Provider selector (default: "sprites" unless SANDBOX_PROVIDER is set).
    */
-  provider?: "vercel" | "daytona" | "sprites"
+  provider?: SandboxProvider | SandboxProviderObject
   /**
    * Provider runtime, e.g. "python3.13", "node22"
    */
@@ -145,6 +145,39 @@ export type SandboxConfig = {
      */
     deleteOnStop?: boolean
   }
+  /**
+   * JustBash-specific options.
+   *
+   * JustBash is an in-process Vercel Sandbox-compatible provider. It is meant
+   * for fast local/ephemeral execution and does not support durable reconnect by
+   * sandbox id.
+   */
+  justbash?: {
+    cwd?: string
+    env?: Record<string, string>
+    timeoutMs?: number
+    overlayRoot?: string
+    python?: boolean
+    javascript?: boolean
+  }
+  /**
+   * AgentOS-specific options.
+   *
+   * AgentOS integrates through a Sandbox Agent client. The client is supplied
+   * at session creation time, not serialized into domain records.
+   */
+  agentos?: {
+    basePath?: string
+  }
+  /**
+   * Local session options. Local is intentionally session-only: it runs on the
+   * current machine and should not be serialized into sandbox records.
+   */
+  local?: {
+    basePath?: string
+    env?: Record<string, string>
+    cleanup?: boolean
+  }
 }
 
 export type SandboxRunCommandResult = {
@@ -153,5 +186,9 @@ export type SandboxRunCommandResult = {
   stderr: string
 }
 
-export type SandboxProvider = "vercel" | "daytona" | "sprites"
+export type SandboxProvider = "vercel" | "daytona" | "sprites" | "local" | "justbash" | "agentos"
+
+export type SandboxProviderObject = {
+  kind: SandboxProvider
+}
 

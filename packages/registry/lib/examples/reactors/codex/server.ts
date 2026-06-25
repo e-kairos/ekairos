@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
 import {
-  createContext,
   INPUT_TEXT_ITEM_TYPE,
   WEB_CHANNEL,
   type ContextItem,
 } from "@ekairos/events";
+import { createContext } from "@ekairos/reactor/context";
 import {
   readPersistedContextStepStream,
   resolveContextExecutionStreamPointer,
   type ContextEnvironment,
-} from "@ekairos/events/runtime";
+} from "@ekairos/reactor/runtime";
 import {
   createCodexReactor,
   type CodexConfig,

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { init } from "@instantdb/admin"
 import http from "node:http"
 import { eventsDomain } from "@ekairos/events"
-import { configureContextDurableWorkflow } from "@ekairos/events/runtime"
+import { configureContextDurableWorkflow } from "@ekairos/reactor/runtime"
 
 import {
   ASSISTANT_TEXT,

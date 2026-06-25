@@ -327,14 +327,30 @@ export function extractPersistedContextTree(
     ? (persistedContext.executions as Array<Record<string, unknown>>)
     : [];
 
-  const contextItems = Array.isArray(persistedContext?.items)
-    ? (persistedContext.items as ContextEventForUI[])
+  const contextItems = Array.isArray(persistedContext?.events)
+    ? (persistedContext.events as ContextEventForUI[])
     : [];
   const executionItems = persistedExecutions.flatMap((execution) =>
-    Array.isArray(execution.items)
-      ? (execution.items as ContextEventForUI[])
-      : [],
+    [
+      asRecord(execution.input) as ContextEventForUI | null,
+      asRecord(execution.output) as ContextEventForUI | null,
+    ].filter((event): event is ContextEventForUI => Boolean(event?.id)),
   );
+  const executionIdByEventId = new Map<string, string>();
+  for (const execution of persistedExecutions) {
+    const executionId = asString(execution.id);
+    if (!executionId) continue;
+
+    const linkedEventIds = [
+      linkedId(execution.input),
+      linkedId(execution.output),
+    ].filter(Boolean);
+
+    for (const eventId of linkedEventIds) {
+      executionIdByEventId.set(eventId, executionId);
+    }
+  }
+
   const persistedEventsById = new Map<string, ContextEventForUI>();
   for (const event of [...contextItems, ...executionItems]) {
     if (!event?.id) continue;
@@ -343,23 +359,30 @@ export function extractPersistedContextTree(
   const persistedEvents = sortEvents([...persistedEventsById.values()]);
 
   const persistedSteps = persistedExecutions.flatMap((execution) => {
+    const executionId = asString(execution.id);
+    const reactionId = linkedId(execution.output);
     const stepRows = Array.isArray(execution.steps)
       ? (execution.steps as Array<Record<string, unknown>>)
       : [];
     return stepRows.map((step) => ({
       ...step,
+      event:
+        step.event && typeof step.event === "object"
+          ? step.event
+          : reactionId
+            ? { id: reactionId }
+            : null,
       execution:
         step.execution && typeof step.execution === "object"
           ? step.execution
-          : { id: execution.id },
+          : executionId
+            ? { id: executionId }
+            : null,
     }));
   });
 
-  const executionIds = new Set(
-    persistedExecutions.map((row) => asString(row.id)).filter(Boolean),
-  );
   const filteredSteps = persistedSteps.filter((row) =>
-    executionIds.has(asString(asRecord(row.execution).id)),
+    asString((row as Record<string, unknown>).id),
   );
   const filteredStepIds = new Set(
     filteredSteps.map((row) => asString((row as Record<string, unknown>).id)).filter(Boolean),
@@ -395,7 +418,7 @@ export function extractPersistedContextTree(
   const reactionEventIdByExecutionId = new Map<string, string>();
   for (const execution of persistedExecutions) {
     const executionId = asString(execution.id);
-    const reactionId = linkedId(execution.reaction);
+    const reactionId = linkedId(execution.output);
     if (!executionId || !reactionId) continue;
     reactionEventIdByExecutionId.set(executionId, reactionId);
   }
@@ -814,7 +837,7 @@ export function buildEventStepsIndex(params: {
   const reactionEventIdByExecutionId = new Map<string, string>();
   for (const execution of params.executions) {
     const executionId = asString(execution.id);
-    const reactionId = linkedId(execution.reaction);
+    const reactionId = linkedId(execution.output);
     if (!executionId || !reactionId) continue;
     reactionEventIdByExecutionId.set(executionId, reactionId);
   }

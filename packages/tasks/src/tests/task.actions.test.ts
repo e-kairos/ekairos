@@ -33,7 +33,6 @@ describe("tasks domain actions", () => {
       "tasks.completeTask",
       "tasks.cancelTask",
       "tasks.failTask",
-      "tasks.releaseTask",
     ])
   })
 

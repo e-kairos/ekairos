@@ -49,6 +49,12 @@
       "require": "./dist/sandbox.js",
       "default": "./dist/sandbox.js"
     },
+    "./session": {
+      "types": "./dist/session.d.ts",
+      "import": "./dist/session.js",
+      "require": "./dist/session.js",
+      "default": "./dist/session.js"
+    },
     "./public": {
       "types": "./dist/public.d.ts",
       "import": "./dist/public.js",
@@ -87,10 +93,14 @@
     "@daytonaio/sdk": "^0.134.0",
     "@ekairos/domain": "workspace:*",
     "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
     "@instantdb/admin": "0.22.158",
     "@instantdb/core": "0.22.158",
+    "@rivet-dev/agent-os-sandbox": "0.1.1",
     "@vercel/sandbox": "2.0.0-beta.13",
     "@workflow/serde": "5.0.0-beta.1",
+    "just-bash": "3.0.2",
+    "sandbox-agent": "0.4.2",
     "workflow": "5.0.0-beta.5",
     "zod": "^4.3.6"
   },
