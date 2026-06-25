@@ -64,6 +64,28 @@ function runCapture(command, args, options = {}) {
   };
 }
 
+function runPublish(args, options = {}) {
+  const printable = `npm ${args.join(' ')}`;
+  console.log(`$ ${printable}`);
+
+  const result = spawnSync('npm', args, {
+    stdio: 'pipe',
+    cwd: options.cwd ?? rootDir,
+    shell: process.platform === 'win32',
+    env: process.env,
+    encoding: 'utf8',
+  });
+
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
+}
+
 function readPackageVersion(packageDir) {
   const packageJsonPath = path.join(rootDir, packageDir, 'package.json');
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
@@ -152,7 +174,25 @@ function publishPackage(pkg, tag) {
     args.push('--dry-run');
   }
 
-  run('npm', args, { cwd: path.join(rootDir, pkg.dir) });
+  const packageDir = path.join(rootDir, pkg.dir);
+  const result = runPublish(args, { cwd: packageDir });
+  if (result.status === 0) return;
+
+  const output = `${result.stdout}\n${result.stderr}`;
+  const provenanceTransparencyLogConflict =
+    useProvenance && output.includes('TLOG_CREATE_ENTRY_ERROR');
+  if (!provenanceTransparencyLogConflict) {
+    throw new Error(`Command failed (${result.status}): npm ${args.join(' ')}`);
+  }
+
+  console.warn(
+    `npm provenance transparency log already has an equivalent entry for ${pkg.name}@${pkg.version}; retrying publish without provenance.`,
+  );
+  const retryArgs = args.filter((arg) => arg !== '--provenance');
+  const retryResult = runPublish(retryArgs, { cwd: packageDir });
+  if (retryResult.status !== 0) {
+    throw new Error(`Command failed (${retryResult.status}): npm ${retryArgs.join(' ')}`);
+  }
 }
 
 function verifyVersionsMetadata(resolvedPackages) {
