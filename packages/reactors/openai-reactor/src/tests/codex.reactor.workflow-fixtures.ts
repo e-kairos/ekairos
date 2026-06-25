@@ -21,7 +21,7 @@ import {
   type CodexExecuteTurnArgs,
   type CodexMappedChunk,
   type CodexTurnResult,
-} from "../index.js"
+} from "../codex.reactor.js"
 
 export type CodexWorkflowTestEnv = {
   appId: string

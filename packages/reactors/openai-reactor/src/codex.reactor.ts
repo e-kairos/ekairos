@@ -16,7 +16,6 @@ import {
 } from "@ekairos/reactor/context"
 import type { ContextEnvironment } from "@ekairos/reactor/runtime"
 import { SANDBOX_EXECUTE_COMMAND_ACTION_NAME } from "@ekairos/sandbox/contract"
-import { randomUUID } from "node:crypto"
 
 import {
   asRecord,
@@ -26,6 +25,14 @@ import {
   readCodexDynamicActionDetails,
   type AnyRecord,
 } from "./shared.js"
+
+function safeIdSegment(value: unknown): string {
+  const segment = asString(value)
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  return segment || "unknown"
+}
 
 export type CodexConfig = {
   /** base URL of a codex app-server bridge; "local" with mode:"local" */
@@ -1259,7 +1266,12 @@ async function executeCodexSandboxTurn(
       const codexItemId = asString(item.id)
       if (!codexItemId || observedCommandProcesses.has(codexItemId)) return
       if (!hasStreamCapableSandboxDb(sandboxDb)) return
-      const processId = randomUUID()
+      const processId = [
+        "codex-command",
+        safeIdSegment(args.executionId),
+        safeIdSegment(args.stepId),
+        safeIdSegment(codexItemId),
+      ].join("-")
       const streamClientId = `sandbox-process:${processId}`
       const stream = sandboxDb.streams.createWriteStream({ clientId: streamClientId }) as WritableStream<string> & {
         streamId?: () => Promise<string>

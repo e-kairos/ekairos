@@ -1,6 +1,6 @@
 import type { ContextItem } from "@ekairos/events"
 
-import { executeOpenAIResponsesReactionStep } from "../index.js"
+import { executeOpenAIResponsesReactionStep } from "../responses.reactor.js"
 
 function inputItem(id: string, text: string): ContextItem {
   return {

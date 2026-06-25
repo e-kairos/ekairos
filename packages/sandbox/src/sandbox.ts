@@ -221,7 +221,8 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
         description: "Run a shell command in this sandbox.",
         input: sandboxExecuteCommandInputSchema,
         output: sandboxExecuteCommandOutputSchema,
-        execute: async ({ input }) => this.executeCommand(input),
+        execute: async ({ input }: { input: SandboxExecuteCommandInput }) =>
+          this.executeCommand(input),
       }),
     } as const
   }
