@@ -43,6 +43,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build required workspace packages
+        run: pnpm run build:required-check-packages
+
       - name: Run @ekairos/domain unit tests
         run: pnpm --filter @ekairos/domain run test:unit
 
@@ -74,6 +77,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build required workspace packages
+        run: pnpm run build:required-check-packages
 
       - name: Validate Instant token availability
         shell: bash
@@ -122,6 +128,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build required workspace packages
+        run: pnpm run build:required-check-packages
 
       - name: Run @ekairos/reactor workflow vitest
         run: pnpm --filter @ekairos/reactor run test:workflow

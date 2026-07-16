@@ -1,0 +1,61 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index a30c250..58067e2 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -43,6 +43,9 @@ jobs:
+       - name: Install dependencies
+         run: pnpm install --frozen-lockfile
+ 
++      - name: Build required workspace packages
++        run: pnpm run build:required-check-packages
++
+       - name: Run @ekairos/domain unit tests
+         run: pnpm --filter @ekairos/domain run test:unit
+ 
+@@ -75,6 +78,9 @@ jobs:
+       - name: Install dependencies
+         run: pnpm install --frozen-lockfile
+ 
++      - name: Build required workspace packages
++        run: pnpm run build:required-check-packages
++
+       - name: Validate Instant token availability
+         shell: bash
+         run: |
+@@ -123,6 +129,9 @@ jobs:
+       - name: Install dependencies
+         run: pnpm install --frozen-lockfile
+ 
++      - name: Build required workspace packages
++        run: pnpm run build:required-check-packages
++
+       - name: Run @ekairos/reactor workflow vitest
+         run: pnpm --filter @ekairos/reactor run test:workflow
+ 
+diff --git a/package.json b/package.json
+index ee0b5d4..3b19d15 100644
+--- a/package.json
++++ b/package.json
+@@ -16,6 +16,7 @@
+   "packageManager": "pnpm@10.15.1",
+   "scripts": {
+     "build": "node ./scripts/run-build.cjs",
++    "build:required-check-packages": "pnpm --filter @ekairos/platform run build && pnpm --filter @ekairos/domain run build && pnpm --filter @ekairos/testing run build && pnpm --filter @ekairos/events run build && pnpm --filter @ekairos/sandbox run build && pnpm --filter @ekairos/reactor run build",
+     "build:publish-packages": "pnpm --filter @ekairos/domain run build && pnpm --filter @ekairos/events run build && pnpm --filter @ekairos/reactor run build && pnpm --filter @ekairos/context run build && pnpm --filter @ekairos/tasks run build && pnpm --filter @ekairos/sandbox run build && pnpm --filter @ekairos/dataset run build && pnpm --filter @ekairos/story-react run build && pnpm --filter @ekairos/openai-reactor run build && pnpm --filter @ekairos/toolbar run build && pnpm --filter @ekairos/testing run build && pnpm --filter @ekairos/cli run build && pnpm --filter ekairos run build",
+     "dev": "turbo dev --concurrency=20",
+     "clean": "turbo clean",
+diff --git a/scripts/release-required-checks.json b/scripts/release-required-checks.json
+index e2a4617..d0dcbfc 100644
+--- a/scripts/release-required-checks.json
++++ b/scripts/release-required-checks.json
+@@ -1,5 +1,10 @@
+ {
+   "checks": [
++    {
++      "name": "Build required workspace packages",
++      "command": "pnpm",
++      "args": ["run", "build:required-check-packages"]
++    },
+     {
+       "name": "@ekairos/domain unit tests",
+       "command": "pnpm",
