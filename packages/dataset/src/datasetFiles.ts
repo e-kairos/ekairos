@@ -14,8 +14,8 @@ export function getDatasetWorkstation(datasetId: string): string {
   return `${getDatasetWorkdirBase()}/${datasetId}`
 }
 
-export function getDatasetResourcesDir(datasetId: string): string {
-  return `${getDatasetWorkstation(datasetId)}/resources`
+export function getDatasetSourcesDir(datasetId: string): string {
+  return `${getDatasetWorkstation(datasetId)}/sources`
 }
 
 export function getDatasetScriptsDir(datasetId: string): string {
@@ -33,7 +33,7 @@ export function getDatasetLogsDir(datasetId: string): string {
 export function getDatasetStandardDirs(datasetId: string): string[] {
   return [
     getDatasetWorkstation(datasetId),
-    getDatasetResourcesDir(datasetId),
+    getDatasetSourcesDir(datasetId),
     getDatasetScriptsDir(datasetId),
     getDatasetArtifactsDir(datasetId),
     getDatasetLogsDir(datasetId),

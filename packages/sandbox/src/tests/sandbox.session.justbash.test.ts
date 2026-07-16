@@ -19,6 +19,10 @@ describe("JustBash sandbox session", () => {
         content: "hello from justbash",
       })
 
+      await expect(session.exists("/workspace/input.txt")).resolves.toBe(true)
+      await expect(session.exists("/workspace")).resolves.toBe(true)
+      await expect(session.exists("/workspace/missing.txt")).resolves.toBe(false)
+
       const output = await session.exec({
         command: "cat",
         args: ["/workspace/input.txt"],

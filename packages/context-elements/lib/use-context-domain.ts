@@ -1,24 +1,12 @@
 "use client";
 
-import { useContext, type ContextSnapshot } from "./use-context";
+import { useContext, type ContextValue, type UseContextOptions } from "./use-context";
 
-type UseContextDomainOptions = {
-  contextKey: string;
-  orgId?: string;
-  refreshMs?: number;
-  ensure?: boolean;
-};
+export type UseContextDomainOptions = UseContextOptions;
 
-/**
- * Backwards-compatible alias for legacy consumers.
- * New usage should call `useContext` from `@ekairos/events/react`.
- */
-export function useContextDomain(options: UseContextDomainOptions) {
-  const { data, isLoading, error, refresh } = useContext(options);
-  return {
-    data: data as ContextSnapshot | null,
-    isLoading,
-    error,
-    refresh,
-  };
+export function useContextDomain(
+  db: unknown,
+  options: UseContextDomainOptions,
+): ContextValue {
+  return useContext(db, options);
 }

@@ -6,10 +6,10 @@ the `@ekairos/dataset` boundary.
 The repro intentionally starts a workflow that only runs:
 
 ```ts
-dataset(runtime, { datasetId, durable: true })
-  .sandbox({ sandboxId })
+dataset(runtime, { datasetId })
+  .sandbox(sandboxId)
   .from({ kind: "file", fileId })
-  .reactor(...)
+  .engine(...)
   .instructions(capturedInstructions)
   .schema(capturedOutputSchema)
   .asRows()

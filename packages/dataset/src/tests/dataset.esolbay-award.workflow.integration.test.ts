@@ -9,8 +9,13 @@ import { config as dotenvConfig } from "dotenv"
 import { init } from "@instantdb/admin"
 import { start } from "workflow/api"
 import { describe, expect, it } from "vitest"
+import {
+  createTestApp,
+  destroyTestApp,
+} from "../../../ekairos-test/src/provision.ts"
 
 import {
+  esolbayAwardDatasetWorkflowReproDomain,
   esolbayAwardDatasetOperationWorkflow,
   EsolbayAwardDatasetWorkflowReproRuntime,
 } from "./workflow/dataset.esolbay-award.workflow-repro.ts"
@@ -87,6 +92,54 @@ function getRequiredEnv(name: string): string {
   const value = readTrimmedEnv(name)
   if (!value) throw new Error(`Missing required environment variable: ${name}`)
   return value
+}
+
+function getInstantProvisionToken() {
+  return getRequiredEnv("INSTANT_PERSONAL_ACCESS_TOKEN")
+}
+
+async function copyCapturedFile(params: {
+  source: { appId: string; adminToken: string }
+  target: { appId: string; adminToken: string }
+  fileId: string
+}) {
+  const sourceDb = init({
+    appId: params.source.appId,
+    adminToken: params.source.adminToken,
+    useDateObjects: true,
+  } as any)
+  const sourceResult = await sourceDb.query({
+    $files: {
+      $: { where: { id: params.fileId }, limit: 1 },
+    },
+  } as any)
+  const sourceFile = sourceResult.$files?.[0] as Record<string, unknown> | undefined
+  const url = typeof sourceFile?.url === "string" ? sourceFile.url : ""
+  if (!sourceFile || !url) throw new Error(`Captured Esolbay file not found: ${params.fileId}`)
+
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`Captured Esolbay file download failed: ${response.status}`)
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  const name = String(sourceFile.name ?? sourceFile.filename ?? "captured-file")
+  const contentType = String(
+    sourceFile["content-type"] ?? sourceFile.contentType ?? response.headers.get("content-type") ?? "application/octet-stream",
+  )
+  const targetDb = init({
+    appId: params.target.appId,
+    adminToken: params.target.adminToken,
+    schema: esolbayAwardDatasetWorkflowReproDomain.toInstantSchema(),
+    useDateObjects: true,
+  } as any)
+  const uploaded = await targetDb.storage.uploadFile(
+    `/tests/esolbay-award/${Date.now()}-${name}`,
+    bytes,
+    { contentType, contentDisposition: name },
+  )
+  const fileId = String(uploaded?.data?.id ?? "")
+  if (!fileId) throw new Error("Captured Esolbay file copy did not return an id")
+  return { fileId, name, contentType, size: bytes.byteLength }
 }
 
 async function loadRunFixture(fileName: string): Promise<RunFixture> {
@@ -246,22 +299,37 @@ async function writeReproReport(report: Record<string, unknown>) {
   return reportPath
 }
 
-describe("Esolbay award dataset workflow repro", () => {
+const describeEsolbayRepro = process.env.RUN_ESOLBAY_AWARD_DATASET_REPRO === "1"
+  ? describe
+  : describe.skip
+
+describeEsolbayRepro("Esolbay award dataset workflow repro", () => {
   it.each(cases)(
     "runs the exact captured dataset operation for $name",
     async (reproCase) => {
       const fixture = await loadRunFixture(reproCase.fixtureFileName)
       const captured = fixture.input[0]
-      const credentials = await resolveOrgCredentials(captured.orgId)
-      const runtime = new EsolbayAwardDatasetWorkflowReproRuntime({
-        orgId: captured.orgId,
-        appId: credentials.appId,
-        adminToken: credentials.adminToken,
+      const sourceCredentials = await resolveOrgCredentials(captured.orgId)
+      const app = await createTestApp({
+        name: `dataset-esolbay-award-repro-${reproCase.name}-${Date.now()}`,
+        token: getInstantProvisionToken(),
+        schema: esolbayAwardDatasetWorkflowReproDomain.toInstantSchema(),
       })
-      const datasetId = createReproDatasetId(reproCase.name, captured.datasetId)
-      const restoreVercelEnv = await configureVercelSandboxEnv()
+      let restoreVercelEnv = () => {}
 
       try {
+        const copiedFile = await copyCapturedFile({
+          source: sourceCredentials,
+          target: app,
+          fileId: captured.fileId,
+        })
+        const runtime = new EsolbayAwardDatasetWorkflowReproRuntime({
+          orgId: captured.orgId,
+          appId: app.appId,
+          adminToken: app.adminToken,
+        })
+        const datasetId = createReproDatasetId(reproCase.name, captured.datasetId)
+        restoreVercelEnv = await configureVercelSandboxEnv()
         const startedAt = Date.now()
         const run = await start(esolbayAwardDatasetOperationWorkflow, [
           {
@@ -270,7 +338,7 @@ describe("Esolbay award dataset workflow repro", () => {
             originalWorkflowRunId: fixture.runId,
             originalDatasetId: captured.datasetId,
             datasetId,
-            fileId: captured.fileId,
+            fileId: copiedFile.fileId,
             instructions: captured.instructions,
             outputSchema: captured.outputSchema,
           },
@@ -288,7 +356,9 @@ describe("Esolbay award dataset workflow repro", () => {
           originalDatasetId: captured.datasetId,
           datasetId: result.datasetId,
           orgId: captured.orgId,
-          fileId: captured.fileId,
+          sourceFileId: captured.fileId,
+          copiedFile,
+          appId: app.appId,
           workflowRunId,
           workflowName: runFile.workflowName,
           totalDurationMs,
@@ -308,6 +378,10 @@ describe("Esolbay award dataset workflow repro", () => {
         expect(reportPath).toContain("dataset-esolbay-award-workflow-repro")
       } finally {
         restoreVercelEnv()
+        await destroyTestApp({
+          appId: app.appId,
+          token: getInstantProvisionToken(),
+        }).catch(() => {})
       }
     },
     TEST_TIMEOUT_MS,

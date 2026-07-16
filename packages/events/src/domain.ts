@@ -1,1 +1,1 @@
-export { contextDomain, eventsDomain, reactionDomain } from "./schema.js"
+export { contextDomain } from "./schema.js"

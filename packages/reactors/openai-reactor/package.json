@@ -1,7 +1,7 @@
 {
   "name": "@ekairos/openai-reactor",
   "version": "1.22.0",
-  "description": "OpenAI reactors for @ekairos/events",
+  "description": "Codex engine for the @ekairos/reactor Reaction API",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,52 +13,24 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./responses": {
-      "types": "./dist/responses.reactor.d.ts",
-      "import": "./dist/responses.reactor.js",
-      "default": "./dist/responses.reactor.js"
-    },
-    "./codex": {
-      "types": "./dist/codex.reactor.d.ts",
-      "import": "./dist/codex.reactor.js",
-      "default": "./dist/codex.reactor.js"
-    },
-    "./codex/local": {
-      "types": "./dist/codex.local.d.ts",
-      "import": "./dist/codex.local.js",
-      "default": "./dist/codex.local.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
-    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
+    "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('.tsbuildinfo',{force:true})\"",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:reactor": "vitest run src/tests/codex.reactor.test.ts --reporter=verbose",
-    "test:reactor:instant": "vitest run src/tests/codex.reactor.instant.test.ts --reporter=verbose",
-    "test:reactor:sandbox": "vitest run -c vitest.sandbox.config.mts",
-    "pretest:reactor:workflow": "pnpm --filter @ekairos/domain run build && pnpm --filter @ekairos/events run build && pnpm --filter @ekairos/reactor run build && pnpm --filter @ekairos/sandbox run build",
-    "test:reactor:workflow": "vitest run -c vitest.workflow.config.mts"
+    "test": "vitest run"
   },
   "peerDependencies": {
-    "@ekairos/events": "workspace:*",
     "@ekairos/reactor": "workspace:*"
   },
   "devDependencies": {
-    "@ekairos/domain": "workspace:*",
-    "@ekairos/events": "workspace:*",
     "@ekairos/reactor": "workspace:*",
     "@ekairos/tsconfig": "workspace:*",
-    "@instantdb/admin": "0.22.158",
     "@types/node": "^24.5.0",
-    "@workflow/serde": "5.0.0-beta.1",
-    "@workflow/vitest": "5.0.0-beta.5",
-    "dotenv": "^17.2.3",
     "typescript": "^5.9.2",
-    "vitest": "^4.0.8",
-    "workflow": "5.0.0-beta.5"
+    "vitest": "^4.0.8"
   },
   "repository": {
     "type": "git",
@@ -69,6 +41,9 @@
     "url": "https://github.com/e-kairos/ekairos/issues"
   },
   "dependencies": {
-    "@ekairos/sandbox": "workspace:*"
+    "@ekairos/events": "workspace:*",
+    "@ekairos/sandbox": "workspace:*",
+    "@workflow/serde": "5.0.0-beta.1",
+    "zod": "^4.3.6"
   }
 }

@@ -8,12 +8,12 @@
     {
       "name": "@ekairos/events unit tests",
       "command": "pnpm",
-      "args": ["--filter", "@ekairos/events", "run", "test:ai-sdk-reactor"]
+      "args": ["--filter", "@ekairos/events", "run", "test"]
     },
     {
-      "name": "@ekairos/openai-reactor workflow vitest",
+      "name": "@ekairos/reactor workflow vitest",
       "command": "pnpm",
-      "args": ["--filter", "@ekairos/openai-reactor", "run", "test:reactor:workflow"]
+      "args": ["--filter", "@ekairos/reactor", "run", "test:workflow"]
     }
   ]
 }

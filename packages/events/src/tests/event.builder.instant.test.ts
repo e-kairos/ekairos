@@ -1,131 +1,130 @@
 /* @vitest-environment node */
 
-import { afterAll, beforeAll, expect } from "vitest"
-import { init } from "@instantdb/admin"
+import { init, lookup } from "@instantdb/admin"
+import { i } from "@instantdb/core"
 import { randomUUID } from "node:crypto"
+import { afterAll, beforeAll, expect } from "vitest"
+import { z } from "zod"
+import { defineEvent, domain } from "../../../domain/src/index.ts"
 
-import {
-  Events,
-  Part,
-  contextDomain,
-} from "../index.ts"
-import { InstantStore } from "../stores/instant.store.ts"
+import { ContextHandle, Events, Part, contextDomain } from "../index.ts"
 import {
   describeInstant,
   destroyContextTestApp,
   itInstant,
   provisionContextTestApp,
 } from "./_env.ts"
-import { EventsTestRuntime } from "./context.test-runtime.ts"
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? value as Record<string, unknown> : {}
-}
+const testDomain = domain("eventProjectionTest")
+  .includes(contextDomain)
+  .withSchema({
+    entities: {
+      event_test_owners: i.entity({ email: i.string().unique().indexed() }),
+    },
+    links: {},
+    rooms: {},
+  })
+  .withEvents({
+    received: defineEvent({
+      payload: z.object({ subject: z.string() }),
+      links: {
+        attachments: { on: "$files", has: "many" },
+        owner: { on: "event_test_owners", has: "one" },
+      },
+    }),
+  })
 
-function asRows(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value as Record<string, unknown>[] : []
-}
+const attachmentsLabel = testDomain.events.received.physicalLinks.attachments.forwardLabel
+const ownerLabel = testDomain.events.received.physicalLinks.owner.forwardLabel
 
-describeInstant("Events builder", () => {
+describeInstant("Event persistence", () => {
   let appId = ""
-  let adminToken = ""
   let db: ReturnType<typeof init>
 
   beforeAll(async () => {
     const app = await provisionContextTestApp({
-      name: "events-builder",
-      schema: contextDomain.toInstantSchema(),
+      name: "events-domain-event",
+      schema: testDomain.instantSchema(),
     })
     appId = app.appId
-    adminToken = app.adminToken
-    db = init({
-      appId,
-      adminToken,
-      schema: contextDomain.toInstantSchema(),
-      useDateObjects: true,
-    } as any)
+    db = init({ ...app, schema: testDomain.instantSchema(), useDateObjects: true } as any)
   }, 60_000)
 
-  afterAll(async () => {
-    await destroyContextTestApp(appId)
-  }, 60_000)
+  afterAll(async () => destroyContextTestApp(appId), 60_000)
 
-  itInstant("creates an event with inline parts without creating reaction rows", async () => {
-    const runtime = new EventsTestRuntime({ appId, adminToken })
-    const event = await Events(runtime)
-      .builder({
-        id: randomUUID(),
-        type: "input",
-        channel: "web",
-      })
-      .simple(
-        Part.message("Generate a dataset for this file."),
-        Part.file({
-          fileId: "test-file-id",
-          filename: "items.csv",
-          mediaType: "text/csv",
-        }),
-      )
-      .create()
-
-    expect(event.content.parts).toHaveLength(2)
-
-    const snapshot = await db.query({
-      event_items: {
-        $: { where: { id: event.id as any }, limit: 1 },
-      },
-      event_steps: {
-        $: { limit: 10 },
-      },
-    } as any)
-
-    const row = asRows((snapshot as any).event_items)[0]
-    const parts = asRows(asRecord(row?.content).parts)
-    expect(parts).toHaveLength(2)
-    expect(parts[0]?.type).toBe("message")
-    expect(asRecord(parts[0]?.content).text).toBe(
-      "Generate a dataset for this file.",
+  itInstant("persists payload, physical links, Context, and eventParts", async () => {
+    const ownerId = randomUUID()
+    await db.transact([
+      db.tx.event_test_owners[ownerId].create({ email: "owner@example.test" }),
+    ])
+    const upload = await db.storage.uploadFile(
+      `/events/${randomUUID()}-source.txt`,
+      Buffer.from("source"),
+      { contentType: "text/plain" },
     )
-    expect(parts[1]?.type).toBe("message")
-    const fileBlocks = asRows(asRecord(parts[1]?.content).blocks)
-    expect(fileBlocks[0]?.type).toBe("file")
-    expect(fileBlocks[0]?.fileId).toBe("test-file-id")
-    expect(asRows((snapshot as any).event_steps)).toHaveLength(0)
-
-    const messages = await new InstantStore(db).itemsToModelMessages([event])
-    expect(JSON.stringify(messages)).toContain("Generate a dataset for this file.")
-    expect(JSON.stringify(messages)).toContain("test-file-id")
-  }, 60_000)
-
-  itInstant("supports explicit step and part chaining", async () => {
-    const runtime = new EventsTestRuntime({ appId, adminToken })
-    const event = await Events(runtime)
-      .builder({
+    const fileId = (upload as any).data.id as string
+    const context = await ContextHandle.create({ db }, {
+      key: `event-test:${randomUUID()}`,
+      content: { purpose: "projection" },
+    })
+    const event = await Events({ db }).emit(
+      testDomain.events.received({ subject: "Files" }).link({
+        attachments: [fileId],
+        owner: lookup("email", "owner@example.test") as unknown as string,
+      }),
+      {
         id: randomUUID(),
-        type: "input",
         channel: "email",
-      })
-      .step({ iteration: 10 })
-      .part(Part.message("First step"))
-      .part(Part.json({ accepted: true }))
-      .step({ iteration: 20 })
-      .part(Part.message("Second step"))
-      .create()
+        contextId: context.id,
+        parts: [Part.message("Inspect the attachment")],
+      },
+    )
 
-    const snapshot = await db.query({
-      event_items: {
-        $: { where: { id: event.id as any }, limit: 1 },
+    const result = await db.query({
+      context_events: {
+        $: { where: { id: event.id }, limit: 1 },
+        context: {},
+        eventParts: {},
+        [attachmentsLabel]: {},
+        [ownerLabel]: {},
       },
     } as any)
-
-    const row = asRows((snapshot as any).event_items)[0]
-    const parts = asRows(asRecord(row?.content).parts)
-    expect(parts).toHaveLength(3)
-    expect(asRecord(parts[0]?.content).text).toBe("First step")
-    expect(asRows(asRecord(parts[1]?.content).blocks)[0]).toMatchObject({
-      type: "json",
-      value: { accepted: true },
+    const row = result.context_events[0]
+    expect(row).toMatchObject({
+      type: "eventProjectionTest.received",
+      payload: { subject: "Files" },
     })
-    expect(asRecord(parts[2]?.content).text).toBe("Second step")
+    expect(row.context.id).toBe(context.id)
+    expect(row[attachmentsLabel].map((file: any) => file.id)).toEqual([fileId])
+    expect(row[ownerLabel].id).toBe(ownerId)
+    expect(row.eventParts[0]).toMatchObject({
+      index: 0,
+      type: "message",
+      content: { text: "Inspect the attachment" },
+    })
+  }, 60_000)
+
+  itInstant("accepts only an identical retry for a stable Event id", async () => {
+    const ownerId = randomUUID()
+    await db.transact([
+      db.tx.event_test_owners[ownerId].create({ email: `${ownerId}@example.test` }),
+    ])
+    const id = randomUUID()
+    const createdAt = new Date("2026-07-14T12:00:00.000Z")
+    const draft = testDomain.events.received({ subject: "Immutable" }).link({
+      attachments: [],
+      owner: ownerId,
+    })
+    const envelope = { id, channel: "test", createdAt }
+    const first = await Events({ db }).emit(draft, envelope)
+    expect(await Events({ db }).emit(draft, envelope)).toEqual(first)
+
+    await expect(Events({ db }).emit(
+      testDomain.events.received({ subject: "Changed" }).link({
+        attachments: [],
+        owner: ownerId,
+      }),
+      envelope,
+    )).rejects.toThrow(`context_event_conflict:${id}`)
   }, 60_000)
 })

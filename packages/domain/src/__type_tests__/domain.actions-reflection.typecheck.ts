@@ -4,113 +4,113 @@ import { z } from "zod";
 import {
   defineDomainAction,
   domain,
+  EkairosRuntime,
   type DomainActionBelongsTo,
   type DomainActionOwner,
   type DomainActionsOf,
-  type DomainRuntime,
-} from "../index.ts";
+} from "../index";
+import {
+  executeDomainAction,
+  prepareDomainActionExecution,
+} from "../internal";
+
+type AssertTrue<Value extends true> = Value;
+type AssertFalse<Value extends false> = Value;
+
+const getSandbox = defineDomainAction({
+  input: z.object({ sandboxId: z.string(), detail: z.boolean() }),
+  output: z.object({ id: z.string() }),
+  execute: async ({ input }) => ({ id: input.sandboxId }),
+});
+
+// @ts-expect-error implementations are private even before registration.
+getSandbox.execute;
 
 const reflectedDomain = domain("typed-action-reflection")
   .withSchema({
     entities: {
-      typed_action_tasks: i.entity({
-        title: i.string(),
-      }),
+      typed_action_tasks: i.entity({ title: i.string() }),
     },
     links: {},
     rooms: {},
   })
-  .withActions({
-    getSandbox: defineDomainAction({
-      name: "typedActionReflection.getSandbox",
-      input: z.object({ sandboxId: z.string() }),
-      output: z.object({ id: z.string() }),
-      execute: async ({ input }) => ({ id: input.sandboxId }),
-    }),
-  });
+  .withActions({ getSandbox });
 
-const reflectedActions: DomainActionsOf<typeof reflectedDomain> = reflectedDomain.actions;
+const rootDomain = domain("typed-action-root")
+  .includes(reflectedDomain)
+  .withSchema({ entities: {}, links: {}, rooms: {} })
+  .withActions({ readSandbox: reflectedDomain.actions.getSandbox });
 
-type AssertTrue<T extends true> = T;
-type AssertFalse<T extends false> = T;
+const reflectedActions: DomainActionsOf<typeof reflectedDomain> =
+  reflectedDomain.actions;
+const reexposed = rootDomain.actions.readSandbox;
 
-type GetSandboxAction = typeof reflectedActions.getSandbox;
-type GetSandboxOwner = DomainActionOwner<GetSandboxAction>;
-type GetSandboxRuntime = DomainRuntime<GetSandboxOwner>;
+const canonicalId: "typed-action-reflection.getSandbox" = reexposed.id;
+const ownerDomain: "typed-action-reflection" = reexposed.ownerDomain;
+const originalKey: "getSandbox" = reexposed.key;
 
+// @ts-expect-error registered descriptors are not directly executable.
+reexposed.execute;
+// @ts-expect-error action keys are the literal membership keys.
+rootDomain.actions.getSandbox;
+
+type GetSandboxOwner = DomainActionOwner<typeof reexposed>;
 const reflectedOwner: GetSandboxOwner = reflectedDomain;
 
 const unrelatedDomain = domain("unrelated-action-owner")
-  .withSchema({
-    entities: {},
-    links: {},
-    rooms: {},
-  });
+  .withSchema({ entities: {}, links: {}, rooms: {} });
 
-// @ts-expect-error action owner is the domain that registered it.
+// @ts-expect-error re-exposure does not rebind the original owner.
 const unrelatedOwner: GetSandboxOwner = unrelatedDomain;
 
-type _actionBelongsToReflectedDomain = AssertTrue<
-  DomainActionBelongsTo<GetSandboxAction, typeof reflectedDomain>
+type _actionBelongsToRoot = AssertTrue<
+  DomainActionBelongsTo<typeof reexposed, typeof rootDomain>
 >;
-type _actionDoesNotBelongToUnrelatedDomain = AssertFalse<
-  DomainActionBelongsTo<GetSandboxAction, typeof unrelatedDomain>
+type _actionDoesNotBelongToUnrelated = AssertFalse<
+  DomainActionBelongsTo<typeof reexposed, typeof unrelatedDomain>
 >;
 
-const scopedRuntime: GetSandboxRuntime = {
-  domain: reflectedDomain,
-  db: {
-    query: async () => ({}),
-    transact: async () => ({}),
-    tx: {},
-  },
-  schema: reflectedDomain.instantSchema(),
-  context: reflectedDomain.context,
-  contextString: reflectedDomain.contextString,
-  env: {},
-  actions: {} as GetSandboxRuntime["actions"],
-};
-
-reflectedActions.getSandbox.execute({
-  input: { sandboxId: "sandbox_1" },
-  runtime: scopedRuntime,
-});
-
-const scopedGetSandbox = reflectedActions.getSandbox.scope({ sandboxId: "sandbox_1" });
-
-scopedGetSandbox.execute({
-  input: {},
-  runtime: scopedRuntime,
-});
-
-scopedRuntime.actions.getSandbox = reflectedActions.getSandbox as GetSandboxRuntime["actions"]["getSandbox"];
-
-const runtimeScopedGetSandbox = scopedRuntime.actions.getSandbox.scope({
+const scoped = reflectedActions.getSandbox.scope({
   sandboxId: "sandbox_1",
 });
+const scopedId: "typed-action-reflection.getSandbox" = scoped.id;
+scoped.input.parse({ detail: true });
 
-runtimeScopedGetSandbox({});
+class ReflectionRuntime extends EkairosRuntime<
+  { orgId: string },
+  typeof rootDomain,
+  { query: (query: unknown) => Promise<unknown> }
+> {
+  protected getDomain() {
+    return rootDomain;
+  }
 
-// @ts-expect-error sandboxId was already bound by the scoped raw action.
-scopedGetSandbox.execute({
-  input: { sandboxId: "sandbox_1" },
-  runtime: scopedRuntime,
-});
+  protected resolveDb() {
+    return { query: async (query: unknown) => query };
+  }
+}
 
-// @ts-expect-error sandboxId was already bound by the scoped runtime method.
-runtimeScopedGetSandbox({ sandboxId: "sandbox_1" });
+async function typecheckExecution() {
+  const runtime = new ReflectionRuntime({ orgId: "org_1" });
+  const active = await runtime.use(reflectedDomain);
+  await active.actions.getSandbox({ sandboxId: "sandbox_1", detail: true });
+  const preparation = await prepareDomainActionExecution(runtime, scoped, {
+    detail: true,
+  });
+  const effectiveSandboxId: string = preparation.effectiveInput.sandboxId;
+  await executeDomainAction(runtime, scoped, preparation);
+  void effectiveSandboxId;
 
-reflectedActions.getSandbox.execute({
-  input: { sandboxId: "sandbox_1" },
-  // @ts-expect-error registered actions require a runtime scoped to their owner domain.
-  runtime: {},
-});
+  // @ts-expect-error sandboxId was removed from the remaining scoped input.
+  await executeDomainAction(runtime, scoped, {
+    sandboxId: "sandbox_1",
+    detail: true,
+  });
+}
 
-// @ts-expect-error action keys are the literal keys declared in withActions().
-reflectedActions.missingSandbox;
-
-reflectedActions.getSandbox.execute({
-  // @ts-expect-error action inputs keep the declared shape.
-  input: { wrong: "sandbox_1" },
-  runtime: {},
-});
+void canonicalId;
+void ownerDomain;
+void originalKey;
+void reflectedOwner;
+void scopedId;
+void typecheckExecution;

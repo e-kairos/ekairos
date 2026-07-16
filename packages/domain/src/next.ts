@@ -3,12 +3,13 @@ import {
   type RuntimeDomainSource,
   type RuntimeResolveOptions,
 } from "./runtime.js"
-import { getDomainActionBinding, getDomainActions } from "./index.js"
+import { getDomainActions } from "./index.js"
 import { createHash, createHmac, timingSafeEqual } from "node:crypto"
 
 type RuntimeLike = {
   env?: Record<string, unknown>
   db(options?: RuntimeResolveOptions): Promise<any>
+  use(domain: any, options?: RuntimeResolveOptions): Promise<any>
   meta(): {
     domain?: RuntimeDomainSource | null
     schema?: unknown
@@ -60,50 +61,22 @@ function serializeActionSchema(value: unknown) {
   }
 }
 
-function resolveActionKey(domain: RuntimeDomainSource | null, action: unknown) {
-  const binding = getDomainActionBinding(action as any) as any
-  if (typeof binding?.key === "string" && binding.key.trim()) {
-    return binding.key.trim()
-  }
-
-  if (!domain || typeof (domain as any).getActions !== "function") {
-    return undefined
-  }
-
-  const actionName = String((action as any)?.name ?? "").trim()
-  const actions = (domain as any).getActions() as unknown[]
-  for (const candidate of actions) {
-    if (String((candidate as any)?.name ?? "").trim() !== actionName) continue
-    const candidateBinding = getDomainActionBinding(candidate as any) as any
-    if (typeof candidateBinding?.key === "string" && candidateBinding.key.trim()) {
-      return candidateBinding.key.trim()
-    }
-  }
-
-  return undefined
-}
-
 function listRuntimeActions(domain: RuntimeDomainSource | null) {
   return getDomainActions(domain).map((action) => ({
-    name: String(action.name ?? "").trim(),
-    key: resolveActionKey(domain, action),
+    id: action.id,
+    ownerDomain: action.ownerDomain,
+    key: action.key,
     description: typeof action.description === "string" ? action.description : null,
     inputSchema: serializeActionSchema((action as any).inputSchema),
     outputSchema: serializeActionSchema((action as any).outputSchema),
   }))
 }
 
-function findRuntimeAction(domain: RuntimeDomainSource | null, name: string) {
-  const normalized = String(name ?? "").trim()
+function findRuntimeAction(domain: RuntimeDomainSource | null, id: string) {
+  const normalized = String(id ?? "").trim()
   if (!normalized) return null
 
-  return (
-    getDomainActions(domain).find((action) => {
-      if (String(action.name ?? "").trim() === normalized) return true
-      const key = resolveActionKey(domain, action)
-      return typeof key === "string" && key === normalized
-    }) ?? null
-  )
+  return getDomainActions(domain).find((action) => action.id === normalized) ?? null
 }
 
 function buildDomainSummary(domain: RuntimeDomainSource | null) {
@@ -128,17 +101,6 @@ function buildDomainSummary(domain: RuntimeDomainSource | null) {
     rooms: listKeys(domain.rooms),
     meta: domain.meta ?? {},
   }
-}
-
-function resolveImpersonatedDb(db: any, body: any) {
-  if (typeof db?.asUser !== "function") return db
-
-  const asEmail = String(body?.asEmail ?? "").trim()
-  if (asEmail) return db.asUser({ email: asEmail })
-
-  if (Boolean(body?.asGuest)) return db.asUser({ guest: true })
-
-  return db
 }
 
 const EKAIROS_DOMAIN_KEY_ID_HEADER = "x-ekairos-domain-key-id"
@@ -350,16 +312,15 @@ export function createRuntimeRouteHandler<
       const runtime = await createRuntimeFor(body, env)
       const meta = runtime.meta()
       const domain = (meta.domain ?? null) as RuntimeDomainSource | null
-      const db = resolveImpersonatedDb(await runtime.db(), body)
 
       if (op === "action") {
-        const actionName = String((body as any)?.action ?? "")
-        const action = findRuntimeAction(domain, actionName)
+        const actionId = String((body as any)?.action ?? "")
+        const action = findRuntimeAction(domain, actionId)
         if (!action) {
           return json(
             {
               ok: false,
-              error: `runtime_action_not_found:${actionName}`,
+              error: `runtime_action_not_found:${actionId}`,
             },
             { status: 404 },
           )
@@ -368,18 +329,13 @@ export function createRuntimeRouteHandler<
         try {
           const output = await executeRuntimeAction({
             action: action as any,
-            runtime: {
-              ...runtime,
-              async db() {
-                return db
-              },
-            } as any,
+            runtime: runtime as any,
             input: (body as any)?.input ?? {},
           })
 
           return json({
             ok: true,
-            action: action.name,
+            action: action.id,
             output,
             source: "runtime-route",
           })
@@ -399,6 +355,7 @@ export function createRuntimeRouteHandler<
       if (!query) return new Response("Missing query", { status: 400 })
 
       try {
+        const db = await runtime.db()
         const result = await db.query(query)
         return json({
           ok: true,

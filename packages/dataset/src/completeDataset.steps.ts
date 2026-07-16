@@ -34,7 +34,7 @@ export async function persistDatasetStep({ runtime, datasetId, sandboxId, summar
     "use step"
 
     const resolvedOutputPath = outputPath ?? getDatasetOutputPath(datasetId)
-    const storagePath = resolveExecutionStoragePath(resolvedOutputPath, datasetId)
+    const storagePath = resolveSessionStoragePath(resolvedOutputPath, datasetId)
     if (summary) {
         console.log(`[Dataset ${datasetId}] Persisting completed dataset: ${summary}`)
     }
@@ -287,7 +287,7 @@ async function annotateNotationFromJsonl(params: {
     )
 }
 
-function resolveExecutionStoragePath(outputPath: string, datasetId: string): string {
+function resolveSessionStoragePath(outputPath: string, datasetId: string): string {
     const normalized = String(outputPath ?? "").replace(/\\/g, "/")
     const marker = "/tmp/ekairos/contexts/"
     if (normalized.startsWith(marker)) {

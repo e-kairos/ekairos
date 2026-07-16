@@ -7,7 +7,6 @@ import {
   type RuntimeDomainAction,
 } from "../runtime.js"
 import type { RuntimeDomainSource } from "../runtime.js"
-import { getDomainActionBinding } from "../index.js"
 import { createRemoteJWKSet, jwtVerify } from "jose"
 
 type RefreshTokenUser = {
@@ -66,36 +65,16 @@ function serializeActionSchema(value: unknown) {
   }
 }
 
-function resolveDomainActionKeyByName(source: RuntimeDomainSource | null, actionName: string) {
-  if (!source || typeof (source as any).getActions !== "function") return null
-  const actions = (source as any).getActions() as unknown[]
-  for (const action of actions) {
-    const name = String((action as any)?.name ?? "").trim()
-    if (name !== actionName) continue
-    const binding = getDomainActionBinding(action as any) as any
-    if (typeof binding?.key === "string" && binding.key.trim()) {
-      return binding.key.trim()
-    }
-  }
-  return null
-}
-
 function listActions() {
-  const source = resolveSource(getRuntimeConfig())
-  return getRuntimeActions().map((action) => {
-    const binding = getDomainActionBinding(action as any) as any
-    return {
-      name: String(action.name ?? "").trim(),
-      key:
-        typeof binding?.key === "string"
-          ? binding.key
-          : resolveDomainActionKeyByName(source, String(action.name ?? "").trim()),
+  return getRuntimeActions().map((action) => ({
+      id: action.id,
+      ownerDomain: action.ownerDomain,
+      key: action.key,
       description:
         typeof action.description === "string" ? action.description : null,
       inputSchema: serializeActionSchema((action as any).inputSchema),
       outputSchema: serializeActionSchema((action as any).outputSchema),
-    }
-  })
+    }))
 }
 
 function resolveInstantAppId() {
@@ -384,22 +363,10 @@ function createRouteRuntime(env: Record<string, unknown>, resolved: any, db: any
   }
 }
 
-function resolveActionByAlias(name: string): RuntimeDomainAction<any, any, any> | null {
-  const normalized = String(name ?? "").trim()
+function resolveActionById(id: string): RuntimeDomainAction<any, any, any> | null {
+  const normalized = String(id ?? "").trim()
   if (!normalized) return null
-  const actions = getRuntimeActions()
-  const source = resolveSource(getRuntimeConfig())
-  return (
-    actions.find((action) => {
-      if (String(action.name ?? "").trim() === normalized) return true
-      const binding = getDomainActionBinding(action as any) as any
-      const key =
-        typeof binding?.key === "string"
-          ? binding.key
-          : resolveDomainActionKeyByName(source, String(action.name ?? "").trim())
-      return typeof key === "string" && key === normalized
-    }) ?? null
-  )
+  return getRuntimeActions().find((action) => action.id === normalized) ?? null
 }
 
 export async function handleDomainCliGet(req: Request): Promise<Response> {
@@ -467,7 +434,7 @@ export async function handleDomainCliPost(req: Request): Promise<Response> {
   const sourceType = resolveSourceType(auth, body)
 
   if (op === "action") {
-    const action = resolveActionByAlias(String(body?.action ?? ""))
+    const action = resolveActionById(String(body?.action ?? ""))
     if (!action) {
       return json(
         {
@@ -487,7 +454,7 @@ export async function handleDomainCliPost(req: Request): Promise<Response> {
       })
       return json({
         ok: true,
-        action: action.name,
+        action: action.id,
         output,
         actor,
         source: sourceType,

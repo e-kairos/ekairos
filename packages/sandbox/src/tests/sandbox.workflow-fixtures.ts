@@ -179,10 +179,7 @@ export async function executeSandboxSerdeHandle(
   input: SandboxExecuteCommandInput,
 ) {
   "use step"
-  const result = await sandbox.actions()[Sandbox.executeCommandActionName].execute(
-    input,
-    {} as any,
-  )
+  const result = await sandbox.executeCommand(input)
 
   return {
     sandboxId: sandbox.sandboxId,

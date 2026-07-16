@@ -19,29 +19,42 @@ export default function ChannelQuickstartPage() {
       }
     >
       <Section title="1 — Install and push the schema">
-        <Code title="terminal">{`pnpm add @ekairos/channel @ekairos/agent
+        <Code title="terminal">{`pnpm add @ekairos/channel
 npx instant-cli@latest push schema`}</Code>
         <p>
           The channel domain composes the events domain, so pushing{" "}
-          <InlineCode>agentDomain</InlineCode> (which includes channel) gives you everything:
+          <InlineCode>channelDomain</InlineCode> gives you everything:
         </p>
-        <Code title="instant.schema.ts">{`import { agentDomain } from "@ekairos/agent/schema";
+        <Code title="instant.schema.ts">{`import { channelDomain } from "@ekairos/channel/schema";
 
-export default agentDomain.toInstantSchema();`}</Code>
+export default channelDomain.toInstantSchema();`}</Code>
         <Callout>
           Already have an app domain? Compose instead:{" "}
-          <InlineCode>domain(&quot;app&quot;).includes(agentDomain).withSchema(&#123;...&#125;)</InlineCode>. Your
+          <InlineCode>domain(&quot;app&quot;).includes(channelDomain).withSchema(&#123;...&#125;)</InlineCode>. Your
           entities and the channel entities live in the same InstantDB app — that is what makes the
           UI plug &amp; play.
         </Callout>
       </Section>
 
       <Section title="2 — Boot the platforms">
-        <Code title="lib/channels.ts">{`import { createChannels } from "@ekairos/channel/platforms";
-import { db } from "@/lib/db"; // InstantDB admin client
+        <Code title="lib/channels.ts">{`import { Context } from "@ekairos/context";
+import { bindReaction, createChannels } from "@ekairos/channel/platforms";
+import { runtime } from "@/lib/runtime";
+import { support, answerInbound } from "@/lib/support-domain";
+
+const react = bindReaction({
+  runtime,
+  reaction: answerInbound,
+  event: (inbound) =>
+    support.events.messageReceived({
+      text: inbound.message.text ?? "",
+      participant: inbound.message.participant,
+    }).link({ message: inbound.message.id }),
+  replyText: (effect) => effect.payload.reply,
+});
 
 export const channels = await createChannels({
-  db,
+  runtime,
   userName: "ekairos",
   platforms: {
     slack: {
@@ -51,14 +64,12 @@ export const channels = await createChannels({
     telegram: { botToken: process.env.TELEGRAM_BOT_TOKEN! },
   },
   resolveContextId: async ({ channel, threadKey }) => {
-    // one platform conversation = one agent thread
-    const thread = await ensureThread({ key: \`\${channel}:\${threadKey}\` });
-    return thread.contextId;
+    const context = await Context(runtime).create({
+      key: \`\${channel}:\${threadKey}\`,
+    });
+    return context.id;
   },
-  react: async (inbound) => {
-    const reaction = await reactOnThread(inbound.contextId, inbound.message);
-    return reaction.text; // posted back on the same platform, persisted outbound
-  },
+  react,
 });`}</Code>
         <p>
           Each configured platform needs its adapter package installed once (
@@ -96,16 +107,16 @@ export async function POST(
         <Code title="terminal">{`pnpm dlx shadcn@latest add https://registry.ekairos.dev/r/channel-timeline.json`}</Code>
         <Code title="app/threads/[key]/page.tsx">{`"use client";
 
-import { db } from "@/lib/db.client"; // InstantDB react client
+import type { ChannelMessage } from "@ekairos/channel";
 import { ChannelTimeline } from "@/components/ekairos/channel/channel-timeline";
 
-export function ThreadConversation({ contextId }: { contextId: string }) {
-  return <ChannelTimeline db={db} contextId={contextId} />;
+export function ThreadConversation({ messages }: { messages: ChannelMessage[] }) {
+  return <ChannelTimeline messages={messages} />;
 }`}</Code>
         <p>
-          No fetch, no API route, no props plumbing: the component queries{" "}
-          <InlineCode>channel_messages</InlineCode> reactively. A whatsapp reply appears in the
-          timeline the moment the webhook persists it.
+          Pass canonical <InlineCode>channel_messages</InlineCode> from your read path. The timeline
+          renders the same shape for every platform, so whatsapp, email and web messages remain one
+          ordered conversation.
         </p>
       </Section>
 

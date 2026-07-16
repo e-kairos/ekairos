@@ -1,101 +1,80 @@
+import { defineEvent, domain } from "@ekairos/domain";
+import { contextDomain, Part } from "@ekairos/context";
 import {
-  createContext,
-  createScriptedReactor,
-  didActionExecute,
-} from "@ekairos/reactor/context";
-import { tool } from "ai";
+  defineReaction,
+  type ReactionEngine,
+  type ReactionEngineActions,
+  type ReactionEngineInput,
+} from "@ekairos/reactor";
+import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";
 import { z } from "zod";
-import {
-  createSmokeSuccessModel,
-  createSmokeToolErrorModel,
-} from "./story-smoke.model";
 
 export type SmokeContext = { lastMessage?: string };
+export type StorySmokeMode = "success" | "tool-error" | "scripted";
 
-type StorySmokeMode = "success" | "tool-error" | "scripted";
+const smokeOutput = z.object({
+  ok: z.boolean(),
+  message: z.string(),
+});
 
-function createStorySmoke(mode: StorySmokeMode) {
-  if (mode === "scripted") {
-    return createContext("story.smoke.scripted")
-      .context((ctx) => {
-        const existing = (ctx.content ?? {}) as Partial<SmokeContext>;
-        return { ...existing };
-      })
-      .narrative(() => "Story smoke deterministic workflow (scripted reactor).")
-      .actions(() => ({
-        echo: tool({
-          description: "Return the input payload as a simple echo response.",
-          inputSchema: z.object({
-            message: z.string(),
-          }),
-          execute: async ({ message }) => ({ ok: true, message }),
-        }),
-      }))
-      .reactor(
-        createScriptedReactor({
-          steps: [
-            {
-              assistantEvent: {
-                content: {
-                  parts: [
-                    { type: "text", text: "Scripted reactor requesting echo." },
-                    {
-                      type: "tool-echo",
-                      toolCallId: "scripted-smoke-tool-call",
-                      input: { message: "ping" },
-                    },
-                  ],
-                },
-              },
-              actionRequests: [
-                {
-                  actionRef: "scripted-smoke-tool-call",
-                  actionName: "echo",
-                  input: { message: "ping" },
-                },
-              ],
-              messagesForModel: [],
-              llm: {
-                provider: "scripted",
-                model: "story-smoke-scripted",
-                promptTokens: 0,
-                completionTokens: 0,
-                totalTokens: 0,
-                latencyMs: 0,
-              },
-            },
-          ],
-        }),
-      )
-      .shouldContinue(({ reactionEvent }) => !didActionExecute(reactionEvent, "echo"))
-      .build();
+class StorySmokeEngine implements ReactionEngine<SmokeContext> {
+  constructor(readonly mode: StorySmokeMode) {}
+
+  static [WORKFLOW_SERIALIZE](instance: StorySmokeEngine) {
+    return { mode: instance.mode };
   }
 
-  const storyKey = mode === "tool-error" ? "story.smoke.tool-error" : "story.smoke";
-  const model = mode === "tool-error" ? createSmokeToolErrorModel : createSmokeSuccessModel;
-  return createContext(storyKey)
-    .context((ctx) => {
-      const existing = (ctx.content ?? {}) as Partial<SmokeContext>;
-      return { ...existing };
-    })
-    .narrative(() => "Story smoke deterministic workflow.")
-    .actions(() => ({
-      echo: tool({
-        description: "Return the input payload as a simple echo response.",
-        inputSchema: z.object({
-          message: z.string(),
-        }),
-        execute: async ({ message }) => {
-          if (mode === "tool-error") {
-            throw new Error("echo_failed");
-          }
-          return { ok: true, message };
-        },
-      }),
-    }))
-    .model(model)
-    .shouldContinue(() => false)
-    .build();
+  static [WORKFLOW_DESERIALIZE](data: { mode: StorySmokeMode }) {
+    return new StorySmokeEngine(data.mode);
+  }
+
+  async agent<TOutput, TActions extends ReactionEngineActions>(
+    input: ReactionEngineInput<SmokeContext, TOutput, TActions>,
+  ) {
+    const request = storySmokeDomain.events.requested.payload.parse(
+      input.trigger.payload,
+    );
+    const candidate = this.mode === "tool-error"
+      ? { ok: false, message: "echo_failed" }
+      : { ok: true, message: request.message };
+    const output = input.output
+      ? input.output.parse(candidate)
+      : candidate as TOutput;
+    return { output, parts: [Part.message(JSON.stringify(candidate))] };
+  }
+}
+
+export const storySmokeDomain = domain("storySmoke")
+  .includes(contextDomain)
+  .withSchema({ entities: {}, links: {}, rooms: {} })
+  .withEvents({
+    requested: defineEvent({
+      payload: z.object({ message: z.string(), mode: z.enum(["success", "tool-error", "scripted"]) }),
+    }),
+    completed: defineEvent({ payload: smokeOutput }),
+  });
+
+function createStorySmoke(mode: StorySmokeMode) {
+  const key = mode === "tool-error"
+    ? "story.smoke.tool-error"
+    : mode === "scripted"
+      ? "story.smoke.scripted"
+      : "story.smoke";
+  const engine = new StorySmokeEngine(mode);
+
+  return defineReaction(
+    storySmokeDomain.events.requested,
+    { key, scope: storySmokeDomain, engine, sandbox: false },
+    async reaction => {
+      const response = await reaction.given(reaction.trigger).agent({
+        instruction: "Echo the persisted trigger through the deterministic ReactionEngine.",
+        output: smokeOutput,
+      });
+      return await reaction.given(response).emit(
+        storySmokeDomain.events.completed(response.payload),
+      );
+    },
+  );
 }
 
 export const storySmoke = createStorySmoke("success");

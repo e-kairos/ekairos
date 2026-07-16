@@ -1,8 +1,10 @@
 import type {
-  ReactorActionMap,
-  ReactorEngine,
-  ReactorEngineStepInput,
+  ReactionEngine,
+  ReactionEngineActions,
+  ReactionEngineInput,
 } from "@ekairos/reactor"
+import type { ContextPartEnvelope } from "@ekairos/events"
+import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import {
   installCodexAuthToSandboxSession,
   type CodexSandboxAuthSource,
@@ -10,10 +12,14 @@ import {
 } from "@ekairos/sandbox"
 
 import {
+  buildCodexDynamicTools,
+  buildCodexInstruction,
+  codexActionResponse,
   codexSandboxBridgeScript,
   codexSandboxTurnRunnerScript,
+  executeCodexAction,
   type CodexTurnResult,
-} from "./codex.reactor.js"
+} from "./codex.runtime.js"
 
 export type CodexEngineAuthConfig =
   | ({
@@ -67,7 +73,7 @@ function asString(value: unknown): string {
 }
 
 function requireSandbox(
-  sandbox: ReactorEngineStepInput<unknown, unknown, unknown, ReactorActionMap>["sandbox"],
+  sandbox: ReactionEngineInput<unknown, unknown, ReactionEngineActions>["sandbox"],
 ): SandboxSession {
   if (!sandbox) {
     throw new Error("codex_engine_sandbox_required")
@@ -183,7 +189,21 @@ function parseCodexResult(output: string): CodexTurnResult {
   if (!line) {
     throw new Error("codex_engine_result_missing")
   }
-  return JSON.parse(line.slice("EKAIROS_CODEX_RESULT\t".length)) as CodexTurnResult
+  const result = JSON.parse(line.slice("EKAIROS_CODEX_RESULT\t".length)) as CodexTurnResult
+  if (result.status !== "completed" && result.status !== "action_required") {
+    throw new Error("codex_engine_result_status_invalid")
+  }
+  const completedTurn = asRecord((result as Record<string, unknown>).completedTurn)
+  const status = asString(completedTurn.status).trim().toLowerCase()
+  const error = asRecord(completedTurn.error)
+  if (status === "failed" || Object.keys(error).length > 0) {
+    throw new Error(
+      asString(error.message) ||
+        asString(error.error) ||
+        `codex_turn_failed_${asString(result.turnId) || "unknown"}`,
+    )
+  }
+  return result
 }
 
 function parseStructuredOutput(text: string) {
@@ -198,45 +218,151 @@ function parseStructuredOutput(text: string) {
   }
 }
 
-export function codexEngine<TContext = unknown, TEnv = unknown>(
-  config: CodexEngineConfig = {},
-): ReactorEngine<TContext, TEnv> {
-  return {
-    async step<TOutput, TActions extends ReactorActionMap>(
-      input: ReactorEngineStepInput<TContext, TEnv, TOutput, TActions>,
-    ) {
-      const sandbox = requireSandbox(input.sandbox)
-      const prepared = await prepareCodexInSandbox(sandbox, config)
-      const instructionPath = joinSandboxPath(
-        prepared.workRoot,
-        `instruction-${input.executionId}-${input.step.key}.txt`,
-      )
-      const instruction = [
-        input.step.instructions,
-        input.step.payload === undefined
-          ? ""
-          : `\nPayload:\n${JSON.stringify(input.step.payload, null, 2)}`,
-        input.step.output
-          ? "\nReturn only valid JSON matching the requested result shape."
-          : "",
-      ].join("\n")
+export class CodexEngine<TContext = unknown>
+  implements ReactionEngine<TContext> {
+  readonly config: Readonly<CodexEngineConfig>
 
-      await sandbox.writeFile({
+  constructor(config: CodexEngineConfig = {}) {
+    this.config = Object.freeze({ ...config })
+  }
+
+  static [WORKFLOW_SERIALIZE](instance: CodexEngine) {
+    return { config: instance.config }
+  }
+
+  static [WORKFLOW_DESERIALIZE](data: { config: CodexEngineConfig }) {
+    return new CodexEngine(data.config)
+  }
+
+  async agent<TOutput, TActions extends ReactionEngineActions>(
+    input: ReactionEngineInput<TContext, TOutput, TActions>,
+  ) {
+    const sandbox = requireSandbox(input.sandbox)
+    const prepared = await prepareCodexInSandbox(sandbox, this.config)
+    const instructionPath = joinSandboxPath(
+      prepared.workRoot,
+      `instruction-${input.sessionId}-${input.reactionId}.txt`,
+    )
+    const toolsPath = joinSandboxPath(
+      prepared.workRoot,
+      `tools-${input.sessionId}-${input.reactionId}.json`,
+    )
+
+    await sandbox.writeFiles([
+      {
         path: instructionPath,
-        content: instruction,
-      })
+        content: buildCodexInstruction(input),
+      },
+      {
+        path: toolsPath,
+        content: JSON.stringify(buildCodexDynamicTools(input.actions)),
+      },
+    ])
 
+    const maxActionCalls = Math.max(1, input.maxRounds ?? 32)
+    const parts: ContextPartEnvelope[] = []
+    let statePath = ""
+    let responsePath = ""
+    let turn: CodexTurnResult | undefined
+    for (let actionCall = 0; actionCall <= maxActionCalls; actionCall += 1) {
+      const environment = [
+        `HOME=${shQuote(sandbox.workspaceRoot)}`,
+        `CODEX_HOME=${shQuote(prepared.codexHome)}`,
+        `CODEX_BRIDGE_URL=http://127.0.0.1:${prepared.bridgePort}`,
+        `CODEX_INSTRUCTION_FILE=${shQuote(instructionPath)}`,
+        `CODEX_TOOLS_FILE=${shQuote(toolsPath)}`,
+        `CODEX_REPO_PATH=${shQuote(prepared.repoPath)}`,
+        `CODEX_MODEL=${shQuote(this.config.model ?? "")}`,
+        statePath ? `CODEX_STATE_FILE=${shQuote(statePath)}` : "",
+        responsePath ? `CODEX_ACTION_RESPONSE_FILE=${shQuote(responsePath)}` : "",
+      ].filter(Boolean)
       const result = await runShell(
         sandbox,
         [
           "set -euo pipefail",
-          `HOME=${shQuote(sandbox.workspaceRoot)} CODEX_HOME=${shQuote(prepared.codexHome)} CODEX_BRIDGE_URL=http://127.0.0.1:${prepared.bridgePort} CODEX_INSTRUCTION_FILE=${shQuote(instructionPath)} CODEX_REPO_PATH=${shQuote(prepared.repoPath)} CODEX_MODEL=${shQuote(config.model ?? "")} node ${shQuote(prepared.turnRunnerPath)}`,
+          `${environment.join(" ")} node ${shQuote(prepared.turnRunnerPath)}`,
         ].join("\n"),
         "codex_engine_turn",
       )
-      const turn = parseCodexResult(result.output ?? "")
-      if (!input.step.output) return turn.assistantText
-      return parseStructuredOutput(turn.assistantText)
-    },
+      turn = parseCodexResult(result.output ?? "")
+      if (turn.status === "completed") break
+      if (!turn.action) throw new Error("codex_engine_action_request_missing")
+      if (actionCall === maxActionCalls) {
+        throw new Error(`codex_engine_max_action_calls:${maxActionCalls}`)
+      }
+
+      parts.push({
+        type: "action",
+        content: {
+          status: "started",
+          actionName: turn.action.name,
+          actionCallId: turn.action.callId,
+          input: turn.action.input,
+        },
+      })
+      const actionResult = await executeCodexAction(input.actions, turn.action, {
+        runtime: input.runtime,
+        context: input.context,
+        trigger: input.trigger,
+        sessionId: input.sessionId,
+        reactionId: input.reactionId,
+        reactionKey: input.reactionKey,
+        actionCallId: turn.action.callId,
+      })
+      parts.push({
+        type: "action",
+        content: actionResult.success
+          ? {
+              status: "completed",
+              actionName: turn.action.name,
+              actionCallId: turn.action.callId,
+              output: actionResult.output,
+            }
+          : {
+              status: "failed",
+              actionName: turn.action.name,
+              actionCallId: turn.action.callId,
+              error: { message: actionResult.errorText ?? "unknown_error" },
+            },
+      })
+      statePath = joinSandboxPath(
+        prepared.workRoot,
+        `state-${input.sessionId}-${input.reactionId}-${actionCall}.json`,
+      )
+      responsePath = joinSandboxPath(
+        prepared.workRoot,
+        `action-${input.sessionId}-${input.reactionId}-${actionCall}.json`,
+      )
+      await sandbox.writeFiles([
+        { path: statePath, content: JSON.stringify(turn) },
+        {
+          path: responsePath,
+          content: JSON.stringify(codexActionResponse(turn.action, actionResult)),
+        },
+      ])
+    }
+    if (!turn || turn.status !== "completed") {
+      throw new Error("codex_engine_turn_incomplete")
+    }
+    return {
+      output: input.output
+        ? parseStructuredOutput(turn.assistantText)
+        : turn.assistantText as TOutput,
+      parts,
+      metadata: {
+        provider: "codex",
+        providerContextId: turn.providerContextId,
+        turnId: turn.turnId,
+        usage: turn.usage,
+        reasoning: turn.reasoningText,
+        diff: turn.diff,
+      },
+    }
   }
+}
+
+export function codexEngine<TContext = unknown>(
+  config: CodexEngineConfig = {},
+): CodexEngine<TContext> {
+  return new CodexEngine(config)
 }

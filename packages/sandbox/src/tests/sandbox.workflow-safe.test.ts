@@ -2,7 +2,6 @@
 
 import { describe, expect, it } from "vitest"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
-import { createContextPartSchema } from "@ekairos/events"
 
 import { Sandbox } from "../sandbox"
 import { sandboxDomain } from "../actions"
@@ -58,126 +57,64 @@ describe("sandbox workflow-safe boundary", () => {
         runtime: "node22",
         ports: [3000],
         purpose: "unit-test",
+        workspaceRoot: "/workspace",
       },
     })
 
     const restored = (Sandbox as any)[WORKFLOW_DESERIALIZE](serialized)
     expect(restored).toBeInstanceOf(Sandbox)
     expect(restored.sandboxId).toBe("sandbox_123")
+    expect(restored.workspaceRoot).toBe("/workspace")
     expect(restored.state).toEqual(serialized.state)
   })
 
-  it("exposes executeCommand actions and matching context parts", () => {
-    const runtime = new SandboxWorkflowTestRuntime(env)
-    const sandbox = Sandbox.from(runtime, {
-      version: 1,
-      sandboxId: "sandbox_123",
-      provider: "sprites",
-    })
-    const actions = sandbox.actions()
+  it("opens a durable sandbox by id without retaining a provider session", async () => {
+    const queries: unknown[] = []
+    const runtime = {
+      env,
+      meta: () => ({ domain: sandboxDomain }),
+      use: async () => ({
+        db: {
+          query: async (query: unknown) => {
+            queries.push(query)
+            return {
+              sandbox_sandboxes: [{
+                id: "sandbox_123",
+                provider: "vercel",
+                externalSandboxId: "remote_123",
+                runtime: "node22",
+              }],
+            }
+          },
+        },
+        actions: {},
+      }),
+    }
 
-    expect(Object.keys(actions)).toEqual([Sandbox.executeCommandActionName])
-    expect(
-      Sandbox.executeCommandInputSchema.parse({
-        command: "pnpm",
-        args: ["test"],
-        cwd: "/workspace/app",
-      }),
-    ).toEqual({
-      command: "pnpm",
-      args: ["test"],
-      cwd: "/workspace/app",
-    })
-    expect(() =>
-      Sandbox.executeCommandInputSchema.parse({
-        sandboxId: "sandbox_123",
-        command: "pnpm",
-      }),
-    ).toThrow()
-    expect(
-      Sandbox.executeCommandOutputSchema.parse({
-        sandboxId: "sandbox_123",
-        success: true,
-        exitCode: 0,
-        output: "ok",
-      }),
-    ).toEqual({
-      sandboxId: "sandbox_123",
-      success: true,
-      exitCode: 0,
-      output: "ok",
-    })
+    const sandbox = await Sandbox.open(runtime as any, "sandbox_123")
 
-    const partSchema = createContextPartSchema(actions)
-    expect(
-      partSchema.parse({
-        type: "action",
-        content: {
-          status: "started",
-          actionName: Sandbox.executeCommandActionName,
-          actionCallId: "call_1",
-          input: {
-            command: "pnpm",
-            args: ["test"],
-          },
-        },
-      }),
-    ).toMatchObject({
-      type: "action",
-      content: {
-        status: "started",
-        actionName: Sandbox.executeCommandActionName,
-      },
-    })
-    expect(() =>
-      partSchema.parse({
-        type: "action",
-        content: {
-          status: "started",
-          actionName: Sandbox.executeCommandActionName,
-          actionCallId: "call_1",
-          input: {
-            sandboxId: "sandbox_123",
-            command: "pnpm",
-          },
-        },
-      }),
-    ).toThrow()
-    expect(
-      partSchema.parse({
-        type: "action",
-        content: {
-          status: "completed",
-          actionName: Sandbox.executeCommandActionName,
-          actionCallId: "call_1",
-          output: {
-            success: true,
-            exitCode: 0,
-            output: "ok",
-          },
-        },
-      }),
-    ).toMatchObject({
-      type: "action",
-      content: {
-        status: "completed",
-        actionName: Sandbox.executeCommandActionName,
-      },
-    })
-    expect(() =>
-      partSchema.parse({
-        type: "action",
-        content: {
-          status: "started",
-          actionName: "sandbox_unknown",
-          actionCallId: "call_2",
-          input: { command: "pwd" },
-        },
-      }),
-    ).toThrow()
+    expect(sandbox.id).toBe("sandbox_123")
+    expect(sandbox.provider).toBe("vercel")
+    expect(sandbox.workspaceRoot).toBe("/vercel/sandbox")
+    expect(sandbox.state.externalSandboxId).toBe("remote_123")
+    expect(queries).toHaveLength(1)
   })
 
-  it("executes exposed sandbox actions through the domain with sandboxId bound", async () => {
+  it("fails explicitly when a durable sandbox id does not exist", async () => {
+    const runtime = {
+      env,
+      meta: () => ({ domain: sandboxDomain }),
+      use: async () => ({
+        db: { query: async () => ({ sandbox_sandboxes: [] }) },
+        actions: {},
+      }),
+    }
+
+    await expect(Sandbox.open(runtime as any, "missing"))
+      .rejects.toThrow("sandbox_not_found:missing")
+  })
+
+  it("executes commands through the domain with sandboxId bound", async () => {
     const useCalls: unknown[] = []
     const commandCalls: unknown[] = []
     const runtime = {
@@ -214,15 +151,12 @@ describe("sandbox workflow-safe boundary", () => {
       provider: "sprites",
     })
 
-    const result = await sandbox.actions()[Sandbox.executeCommandActionName].execute(
-      {
-        command: "pnpm",
-        args: ["test"],
-        cwd: "/workspace/app",
-        metadata: { reason: "unit" },
-      },
-      {} as any,
-    )
+    const result = await sandbox.executeCommand({
+      command: "pnpm",
+      args: ["test"],
+      cwd: "/workspace/app",
+      metadata: { reason: "unit" },
+    })
 
     expect(useCalls).toEqual([sandboxDomain])
     expect(commandCalls).toEqual([
@@ -234,7 +168,7 @@ describe("sandbox workflow-safe boundary", () => {
         kind: "command",
         mode: "foreground",
         metadata: {
-          source: "sandbox.action",
+          source: "sandbox.handle",
           reason: "unit",
         },
       },

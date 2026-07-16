@@ -17,7 +17,7 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/*": ["./*"],
-      "@ekairos/domain": ["../domain/src"],
+      "@ekairos/domain": ["../domain/dist"],
       "@repo/shadcn-ui/components/ui/*": ["./components/ui/*"],
       "@repo/shadcn-ui/lib/utils": ["./lib/utils"]
     }

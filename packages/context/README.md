@@ -1,38 +1,59 @@
 # @ekairos/context
 
-Typed domain events and workflow-safe reactions.
+`@ekairos/context` combines durable Context handles, typed Events, and Reaction
+execution without adding a second persistence model.
 
-`@ekairos/context` is the final public entrypoint for the new context framework:
-
-- domains declare typed events with `defineEvent(...)` and `.withEvents(...)`;
-- concrete runtimes create events through `domain(runtime).events.*`;
-- reactions are declared with `defineReaction(...)`;
-- reaction executions append durable steps and parts and finish with an optional typed result.
+## Create and revise Context data
 
 ```ts
-import { defineEvent, defineReaction, Part } from "@ekairos/context"
-
-const received = defineEvent({
-  payload: z.object({ subject: z.string(), body: z.string() }),
-  parts: ({ payload }) => [Part.message({ text: payload.body })],
-})
-
-const emailDomain = domain("email")
-  .includes(contextDomain)
-  .withSchema({ entities: {}, links: {}, rooms: {} })
-  .withEvents({ received })
-
-const reaction = defineReaction({
-  key: "email.classify",
-  scope: emailDomain,
-  context: z.object({ inboxId: z.string() }),
-  output: z.object({ label: z.string() }),
-  run: async ({ execution }) => {
-    const classification = await execution.step("classify", {
-      instructions: "Classify the email.",
-      output: z.object({ label: z.string() }),
-    })
-    await execution.complete(classification)
+const context = await Context(runtime).create({
+  key: "requisition:REQ-42",
+  content: {
+    requisition: { id: "REQ-42", version: 7 },
   },
 })
+
+const current = await context.updateContent({
+  requisition: { id: "REQ-42", version: 8 },
+})
 ```
+
+The next Reaction sees version 8 at `reaction.context.content` and version 7 at
+`reaction.context.previous`.
+
+## Emit and react
+
+```ts
+const trigger = await Context(runtime).events.emit(
+  requisition.events.messageReceived({
+    message: "Quote the attachments.",
+  }).link({
+    requisition: "REQ-42",
+    files: fileIds,
+  }),
+  {
+    channel: "email",
+    contextId: current.id,
+  },
+)
+
+const response = await current.react(trigger, messageReaction)
+console.log(response.payload)
+```
+
+The Event exists independently from the Reaction. The same Event can trigger
+different definitions or react in different Contexts.
+
+## Runtime conveniences
+
+```ts
+const contexts = Context(runtime)
+
+await contexts.create({ key, content })
+await contexts.get({ key })
+await contexts.events.emit(draft, envelope)
+await contexts.use(requisitionDomain)
+```
+
+Reaction definitions and engines live in `@ekairos/reactor`; persistence lives
+in `@ekairos/events`.

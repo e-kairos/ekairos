@@ -1,7 +1,7 @@
 import { i } from "@instantdb/core";
-import { domain, type DomainSchemaResult } from "@ekairos/domain";
+import { domain, type MaterializedDomainLike } from "@ekairos/domain";
 
-export const ekairosTestDomain: DomainSchemaResult = domain("ekairos.testing")
+export const ekairosTestDomain = domain("ekairos.testing")
   .schema({
     entities: {
       test_runs: i.entity({
@@ -80,10 +80,10 @@ export const ekairosTestDomain: DomainSchemaResult = domain("ekairos.testing")
 export type EkairosTestDomain = typeof ekairosTestDomain;
 
 export function createAppTestingDomain(params: {
-  appDomain: DomainSchemaResult;
-  testDomain?: DomainSchemaResult;
+  appDomain: MaterializedDomainLike;
+  testDomain?: MaterializedDomainLike;
   name?: string;
-}): DomainSchemaResult {
+}) {
   return domain(params.name ?? "app.testing")
     .includes(params.appDomain)
     .includes(params.testDomain ?? ekairosTestDomain)

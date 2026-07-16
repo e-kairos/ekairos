@@ -13,71 +13,71 @@ import {
 } from "./service.js"
 
 export async function openTaskExecute({
-  runtime,
+  domain,
   input,
 }: {
-  runtime: TasksRuntime
+  domain: TasksRuntime
   input: TaskOpenActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  return await new TaskService(runtime).openRaw(input)
+  return await new TaskService(domain).openRaw(input)
 }
 
 export async function decideTaskExecute({
-  runtime,
+  domain,
   input,
 }: {
-  runtime: TasksRuntime
+  domain: TasksRuntime
   input: TaskDecideActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  return await new TaskService(runtime).decide(input)
+  return await new TaskService(domain).decide(input)
 }
 
 export async function cancelTaskExecute({
-  runtime,
+  domain,
   input,
 }: {
-  runtime: TasksRuntime
+  domain: TasksRuntime
   input: TaskCancelActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  return await new TaskService(runtime).cancel(input)
+  return await new TaskService(domain).cancel(input)
 }
 
 export async function failTaskExecute({
-  runtime,
+  domain,
   input,
 }: {
-  runtime: TasksRuntime
+  domain: TasksRuntime
   input: TaskFailActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  return await new TaskService(runtime).fail(input)
+  return await new TaskService(domain).fail(input)
 }
 
 export async function startTaskExecute({
-  runtime,
+  domain,
   input,
 }: {
-  runtime: TasksRuntime
+  domain: TasksRuntime
   input: TaskStartActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  return await new TaskService(runtime).start(input)
+  return await new TaskService(domain).start(input)
 }
 
 export async function getTaskExecute({
-  runtime,
+  domain,
   input,
 }: {
-  runtime: TasksRuntime
+  domain: TasksRuntime
   input: TaskGetActionInput
 }): Promise<ServiceResult<TaskRecord>> {
-  return await new TaskService(runtime).getRaw(input)
+  return await new TaskService(domain).getRaw(input)
 }
 
 export async function awaitOutcomeExecute({
-  runtime,
+  domain,
   input,
 }: {
-  runtime: TasksRuntime
+  domain: TasksRuntime
   input: TaskAwaitOutcomeActionInput
 }): Promise<ServiceResult<unknown>> {
-  return await new TaskService(runtime).awaitOutcome(input)
+  return await new TaskService(domain).awaitOutcome(input)
 }

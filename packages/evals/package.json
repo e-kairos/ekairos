@@ -1,0 +1,57 @@
+{
+  "name": "@ekairos/evals",
+  "version": "1.22.0",
+  "description": "Ekairos Evals - context-based evaluation for reactors: every case is a persisted reaction, every scorer judges the real trace",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-kairos/ekairos.git",
+    "directory": "packages/evals"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js",
+      "default": "./dist/schema.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run -c vitest.config.mts"
+  },
+  "dependencies": {
+    "@ekairos/context": "workspace:*",
+    "@ekairos/domain": "workspace:*",
+    "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
+    "@instantdb/admin": "0.22.158",
+    "@instantdb/core": "0.22.142",
+    "ai": "catalog:",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@ekairos/tsconfig": "workspace:*",
+    "@types/node": "^24.5.0",
+    "dotenv": "^17.2.3",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.8"
+  }
+}

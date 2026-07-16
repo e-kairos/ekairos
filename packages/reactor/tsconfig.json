@@ -25,6 +25,19 @@
       "@ekairos/events/*": ["../events/dist/*"]
     }
   },
-  "include": ["src/index.ts", "src/context.ts", "src/runtime.ts", "src/reactor.ts"],
+  "include": [
+    "src/index.ts",
+    "src/internal.ts",
+    "src/reactor.ts",
+    "src/reaction.ts",
+    "src/reactor.durable.ts",
+    "src/reaction.operation.ts",
+    "src/reaction-view.ts",
+    "src/agent.ts",
+    "src/context.action-calls.ts",
+    "src/dataset-adapter.ts",
+    "src/tools-to-model-tools.ts",
+    "src/reactors/ai-sdk.agent.ts"
+  ],
   "exclude": ["node_modules", "**/*.test.ts", "**/tests/**", "src/__type_tests__"]
 }

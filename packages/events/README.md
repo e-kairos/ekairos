@@ -1,90 +1,95 @@
 # @ekairos/events
 
-Context-first durable execution runtime for Ekairos.
+`@ekairos/events` persists typed facts and the causal journal used by Ekairos.
+It does not execute models.
 
-## What this package does
-
-- creates durable contexts with `createContext(...)`
-- persists executions, steps, parts, and items
-- runs direct or durable `react(...)` loops
-- adapts model/tool output into canonical `event_parts`
-
-## Main APIs
-
-- `createContext`
-- `ContextEngine`
-- `createAiSdkReactor`
-- `createScriptedReactor`
-- `runContextReactionDirect`
-- `eventsDomain`
-
-## Runtime model
-
-Canonical entities:
-
-- `event_contexts`
-- `event_items`
-- `event_executions`
-- `event_steps`
-- `event_parts`
-- `event_trace_*`
-
-`event_parts` is the source of truth for replay.
-
-## Example
+## Domain composition
 
 ```ts
-import { createContext } from "@ekairos/events";
+import { domain } from "@ekairos/domain"
+import { contextDomain } from "@ekairos/events"
 
-const supportContext = createContext<{ orgId: string }>("support.agent")
-  .context((stored, env) => ({
-    ...stored.content,
-    orgId: env.orgId,
-  }))
-  .narrative(() => "You are a precise assistant.")
-  .actions(() => ({}))
-  .build();
+export const appDomain = domain("app")
+  .includes(contextDomain)
+  .withSchema({ entities: {}, links: {}, rooms: {} })
 ```
 
-Run directly:
+## Emit a domain Event
 
 ```ts
-const shell = await supportContext.react(triggerEvent, {
-  runtime,
-  context: { key: "support:org_123" },
-  durable: false,
-});
-
-const final = await shell.run!;
+const received = await Events(runtime).emit(
+  requisition.events.messageReceived({
+    message: "Quote the attached requisition.",
+  }).link({
+    requisition: requisitionId,
+    files: fileIds,
+  }),
+  {
+    id: crypto.randomUUID(),
+    channel: "email",
+    contextId,
+    createdAt: new Date(),
+    metadata: { receivedAt: new Date().toISOString() },
+  },
+)
 ```
 
-Run durably:
+The Event stores its payload, logical links, generated physical InstantDB links,
+metadata, and optional ordered Parts. Linked `$files` remain relations; they are
+not copied into Context content.
+
+## Query explicit history
+
+`Events.query` accepts the selection nested under `context_events`:
 
 ```ts
-const shell = await supportContext.react(triggerEvent, {
-  runtime,
-  context: { key: "support:org_123" },
-});
-
-const final = await shell.run!.returnValue;
+const history = await Events(runtime).query({
+  $: {
+    where: {
+      "context.id": contextId,
+      domain: "requisition",
+    },
+    order: { createdAt: "asc" },
+  },
+})
 ```
 
-## Tool execution model
+History is never loaded implicitly. Pass the selected Events to
+`reaction.given(history)` when they should become causal model input.
 
-Context tools now receive runtime-aware execution context.
-That lets a tool do this inside `"use step"`:
+## Event Parts
 
 ```ts
-async function execute(input, ctx) {
-  "use step";
-  const domain = await ctx.runtime.use(myDomain);
-  return await domain.actions.doSomething(input);
-}
+const event = await Events(runtime)
+  .builder({
+    type: "message.received",
+    payload: { message: "Inspect this file." },
+    contextId,
+  })
+  .part(Part.message("Inspect this file."))
+  .part(Part.file({ fileId, filename: "offer.pdf", mediaType: "application/pdf" }))
+  .create()
 ```
 
-## Tests
+Parts use provider-neutral types: `message`, `reasoning`, `source`, `action`,
+and `engine`. Action calls persist separate started/completed/failed Parts.
 
-```bash
-pnpm --filter @ekairos/events test
-pnpm --filter @ekairos/events test:workflow
+## Durable graph
+
+```text
+Context
+  Session
+    trigger -> Event
+    rootReaction -> Reaction
+    reactions -> Reaction*
+
+Reaction
+  causes -> Event*
+  effects -> Event*
+
+Event
+  eventParts -> EventPart*
 ```
+
+The root package exports Event builders, Context handles, the Context domain,
+Parts, React subscriptions, and runtime service contracts.

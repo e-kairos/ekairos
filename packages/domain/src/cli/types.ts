@@ -50,12 +50,3 @@ export type DomainCliActionResponse = {
     isGuest?: boolean
   } | null
 }
-
-export type DomainCliSession = {
-  version: 1
-  baseUrl: string
-  appId: string
-  refreshToken: string
-  apiURI: string
-  savedAt: string
-}

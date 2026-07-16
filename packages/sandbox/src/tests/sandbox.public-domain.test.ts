@@ -32,7 +32,7 @@ describe("sandbox public/full domain composition", () => {
     expect(Object.keys((fullSchema.entities.sandbox_sandboxes as any).attrs)).toContain(
       "providerConfig",
     )
-    expect(Object.values(fullSandboxDomain.actions).map((action) => action.name)).toContain(
+    expect(Object.values(fullSandboxDomain.actions).map((action) => action.id)).toContain(
       "sandbox.runCommandProcess",
     )
   })

@@ -59,9 +59,6 @@ export type AgentProps = {
     reasoningLevel?: "off" | "low" | "medium" | "high";
     contextId?: string;
   }) => Promise<Record<string, unknown>> | Record<string, unknown>;
-  enableResumableStreams?: boolean;
-  streamChunkDelayMs?: number;
-  onDataChunk?: (chunk: unknown) => void;
   actionComponents?: Record<string, any>;
   classNames?: AgentClassNames;
   /** Optional centered state shown before the first message. */

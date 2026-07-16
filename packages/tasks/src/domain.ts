@@ -1,5 +1,11 @@
 import { i } from "@instantdb/core"
-import { defineAction, domain } from "@ekairos/domain"
+import {
+  DOMAIN_ACTION_FULL_INPUT_TYPE,
+  DOMAIN_ACTION_OWNER_TYPE,
+  DOMAIN_ACTION_RUNTIME_TYPE,
+  defineAction,
+  domain,
+} from "@ekairos/domain"
 import { z } from "zod"
 
 import {
@@ -147,52 +153,40 @@ export const tasksSchemaDomain = domain("tasks")
 
 const taskActions = {
   createTask: defineAction({
-    name: "tasks.createTask",
     input: openTaskInputSchema,
     output: taskServiceResultSchema,
     execute: openTaskExecute,
   }),
   getTask: defineAction({
-    name: "tasks.getTask",
     input: getTaskInputSchema,
     output: taskServiceResultSchema,
     execute: getTaskExecute,
   }),
   awaitOutcome: defineAction({
-    name: "tasks.awaitOutcome",
     input: awaitOutcomeInputSchema,
     output: taskOutcomeResultSchema,
     execute: awaitOutcomeExecute,
   }),
   startTask: defineAction({
-    name: "tasks.startTask",
     input: startTaskInputSchema,
     output: taskServiceResultSchema,
     execute: startTaskExecute,
   }),
   completeTask: defineAction({
-    name: "tasks.completeTask",
     input: decideTaskInputSchema,
     output: taskServiceResultSchema,
     execute: decideTaskExecute,
   }),
   cancelTask: defineAction({
-    name: "tasks.cancelTask",
     input: cancelTaskInputSchema,
     output: taskServiceResultSchema,
     execute: cancelTaskExecute,
   }),
   failTask: defineAction({
-    name: "tasks.failTask",
     input: failTaskInputSchema,
     output: taskServiceResultSchema,
     execute: failTaskExecute,
   }),
 } as const
 
-type TasksDomainPublic = typeof tasksSchemaDomain & {
-  readonly actions: typeof taskActions
-}
-
-export const tasksDomain: TasksDomainPublic = tasksSchemaDomain
-  .withActions(taskActions) as unknown as TasksDomainPublic
+export const tasksDomain = tasksSchemaDomain.withActions(taskActions)

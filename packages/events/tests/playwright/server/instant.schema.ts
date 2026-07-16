@@ -3,13 +3,13 @@
  */
 
 import { domain } from "@ekairos/domain";
-import { eventsDomain } from "@ekairos/events";
+import { contextDomain } from "@ekairos/events";
 
 const appDomain = domain("story-workflow-smoke")
-  .includes(eventsDomain)
-  .schema({ entities: {}, links: {}, rooms: {} });
+  .includes(contextDomain)
+  .withSchema({ entities: {}, links: {}, rooms: {} });
 
-const schema = appDomain.toInstantSchema();
+const schema = appDomain.instantSchema();
 
 export type AppSchema = typeof schema;
 export default schema;

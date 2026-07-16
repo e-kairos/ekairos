@@ -52,11 +52,14 @@
     "dev": "tsc -p tsconfig.json --watch",
     "watch": "tsc -p tsconfig.json --watch",
     "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run -c vitest.config.mts"
   },
   "dependencies": {
+    "@ekairos/context": "workspace:*",
     "@ekairos/domain": "workspace:*",
     "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
     "@instantdb/core": "0.22.142",
     "chat": "^4.30.0"
   },
@@ -86,7 +89,11 @@
   },
   "devDependencies": {
     "@ekairos/tsconfig": "workspace:*",
+    "@instantdb/admin": "0.22.158",
     "@types/node": "^24.5.0",
-    "typescript": "^5.9.2"
+    "dotenv": "^17.2.3",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.8",
+    "zod": "^4.3.6"
   }
 }

@@ -8,7 +8,6 @@ const DEFAULT_EXCLUDED_FILTERS = [
   "--filter=!registry",
   "--filter=!context-elements",
   "--filter=!@ekairos/events-workflow-smoke",
-  "--filter=!@ekairos/structure-workflow-smoke",
 ];
 
 function parseTimeout()

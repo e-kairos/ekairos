@@ -17,17 +17,17 @@ import type {
   AnyDatasetRuntime,
   DatasetBuildResult,
   DatasetReader,
-  DatasetTextResourceInput,
+  DatasetTextSourceInput,
   MaterializeRowsParams,
 } from "./types.js"
 
-export function defaultTextResourceName(resource: DatasetTextResourceInput): string {
-  if (resource.name?.trim()) return resource.name.trim()
-  const mimeType = String(resource.mimeType ?? "").toLowerCase()
-  if (mimeType.includes("csv")) return "resource.csv"
-  if (mimeType.includes("json")) return "resource.json"
-  if (mimeType.includes("yaml") || mimeType.includes("yml")) return "resource.yaml"
-  return "resource.txt"
+export function defaultTextSourceName(source: DatasetTextSourceInput): string {
+  if (source.name?.trim()) return source.name.trim()
+  const mimeType = String(source.mimeType ?? "").toLowerCase()
+  if (mimeType.includes("csv")) return "source.csv"
+  if (mimeType.includes("json")) return "source.json"
+  if (mimeType.includes("yaml") || mimeType.includes("yml")) return "source.yaml"
+  return "source.txt"
 }
 
 export async function getDatasetDb<Runtime extends AnyDatasetRuntime>(
@@ -163,23 +163,23 @@ export async function materializeRowsToDataset<Runtime extends AnyDatasetRuntime
   return params.datasetId
 }
 
-export async function uploadInlineTextResource<Runtime extends AnyDatasetRuntime>(
+export async function uploadInlineTextSource<Runtime extends AnyDatasetRuntime>(
   runtime: Runtime,
   datasetId: string,
-  resource: DatasetTextResourceInput,
+  source: DatasetTextSourceInput,
 ) {
   "use step"
 
   const db = await getDatasetDb(runtime)
-  const fileName = defaultTextResourceName(resource)
-  const storagePath = `/dataset/resource/${datasetId}/${Date.now()}-${fileName}`
-  const uploadResult = await db.storage.uploadFile(storagePath, Buffer.from(resource.text, "utf-8"), {
-    contentType: resource.mimeType ?? "text/plain",
+  const fileName = defaultTextSourceName(source)
+  const storagePath = `/dataset/source/${datasetId}/${Date.now()}-${fileName}`
+  const uploadResult = await db.storage.uploadFile(storagePath, Buffer.from(source.text, "utf-8"), {
+    contentType: source.mimeType ?? "text/plain",
     contentDisposition: fileName,
   })
   const fileId = uploadResult?.data?.id
   if (!fileId) {
-    throw new Error("dataset_text_resource_upload_failed")
+    throw new Error("dataset_text_source_upload_failed")
   }
   return fileId as string
 }

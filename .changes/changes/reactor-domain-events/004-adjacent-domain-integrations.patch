@@ -1,0 +1,2490 @@
+*** Begin ECU Patch
+Key: 004-adjacent-domain-integrations
+Title: Align adjacent domains with the runtime
+Purpose: Move Tasks, Evals, Lab, Platform, and smoke fixtures onto scoped Domain actions and the causal Reaction contract.
+
+*** Begin Context
+These packages prove that approvals remain task-owned, evaluations and coding flows are ordinary domain integrations, and action implementations use the scoped domain database passed by the runtime rather than ad hoc roots.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/packages/evals/README.md b/packages/evals/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..79a41943287702dad0885452adaa5be87aada812
+--- /dev/null
++++ b/packages/evals/README.md
+@@ -0,0 +1,51 @@
++# @ekairos/evals
++
++Context-based evaluation for Reaction definitions. Every case creates a
++persisted Context, emits a typed trigger Event, runs the definition, and scores
++its returned effect together with the real Session graph.
++
++```ts
++const suite = defineEval({
++  key: "inventory.behavior",
++  definition: inventoryReaction,
++  cases: [{
++    key: "bc-5hp",
++    event: inventory.events.stockRequested({ sku: "BC-5HP" }),
++    content: { warehouse: "AR-01" },
++    expected: { unitsInStock: 42 },
++  }],
++  scorers: [
++    scorers.custom("effect_payload", ({ output, expected }) => ({
++      score: output.payload.unitsInStock === expected.unitsInStock ? 1 : 0,
++    })),
++    scorers.sessionCompleted(),
++  ],
++})
++
++const report = await suite.run({ runtime })
++report.cases[0] // { key, contextId, sessionId, output, scores, passed }
++```
++
++Each case performs:
++
++```ts
++const context = await Context(runtime).create({ content: evalCase.content })
++const trigger = await Events(runtime).emit(evalCase.event, { contextId: context.id })
++const output = await context.react(trigger, definition)
++```
++
++Scorers receive `{ evalCase, output, expected, snapshot }`. The snapshot
++contains Session status, ordered Reactions, Events, flattened Event Parts, and
++root effects.
++
++Built-ins:
++
++- `scorers.actionCalled(name, { atLeast?, atMost? })`
++- `scorers.sessionCompleted(status?)`
++- `scorers.llmJudge({ criteria, model? })`
++- `scorers.exactOutput()`
++- `scorers.custom(name, fn)`
++
++Persisted `eval_results` link to `context_contexts` and `context_sessions`.
++Compose `evalDomain` into the application schema when durable reports are
++required.
+diff --git a/packages/evals/package.json b/packages/evals/package.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..5d69f8d4aa199a454590779f389a6037ef87e871
+--- /dev/null
++++ b/packages/evals/package.json
+@@ -0,0 +1,57 @@
++{
++  "name": "@ekairos/evals",
++  "version": "1.22.0",
++  "description": "Ekairos Evals - context-based evaluation for reactors: every case is a persisted reaction, every scorer judges the real trace",
++  "type": "module",
++  "main": "dist/index.js",
++  "types": "dist/index.d.ts",
++  "files": [
++    "dist",
++    "README.md"
++  ],
++  "publishConfig": {
++    "access": "public"
++  },
++  "license": "MIT",
++  "repository": {
++    "type": "git",
++    "url": "git+https://github.com/e-kairos/ekairos.git",
++    "directory": "packages/evals"
++  },
++  "exports": {
++    ".": {
++      "types": "./dist/index.d.ts",
++      "import": "./dist/index.js",
++      "default": "./dist/index.js"
++    },
++    "./schema": {
++      "types": "./dist/schema.d.ts",
++      "import": "./dist/schema.js",
++      "default": "./dist/schema.js"
++    }
++  },
++  "scripts": {
++    "build": "tsc -p tsconfig.json",
++    "dev": "tsc -p tsconfig.json --watch",
++    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
++    "typecheck": "tsc --noEmit",
++    "test": "vitest run -c vitest.config.mts"
++  },
++  "dependencies": {
++    "@ekairos/context": "workspace:*",
++    "@ekairos/domain": "workspace:*",
++    "@ekairos/events": "workspace:*",
++    "@ekairos/reactor": "workspace:*",
++    "@instantdb/admin": "0.22.158",
++    "@instantdb/core": "0.22.142",
++    "ai": "catalog:",
++    "zod": "^4.3.6"
++  },
++  "devDependencies": {
++    "@ekairos/tsconfig": "workspace:*",
++    "@types/node": "^24.5.0",
++    "dotenv": "^17.2.3",
++    "typescript": "^5.9.2",
++    "vitest": "^4.0.8"
++  }
++}
+diff --git a/packages/evals/src/evals.ts b/packages/evals/src/evals.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f0d3bbfb835225bdca183367599877b800266453
+--- /dev/null
++++ b/packages/evals/src/evals.ts
+@@ -0,0 +1,437 @@
++import { randomUUID } from "node:crypto"
++
++import { id } from "@instantdb/core"
++import type { DomainEventDraft } from "@ekairos/domain"
++import {
++  Context,
++  Events,
++  type ContextRuntimeWithDomainUse,
++} from "@ekairos/context"
++import {
++  type ReactionDefinition,
++  type ReactionEffect,
++} from "@ekairos/reactor"
++
++/**
++ * Every eval case emits a real domain event into a fresh persisted Context and
++ * executes the supplied ReactionDefinition. Scorers receive the returned
++ * effects as `output` plus the persisted execution trace.
++ */
++
++export type EvalsRuntime = ContextRuntimeWithDomainUse & {
++  db(): Promise<any>
++}
++
++export type EvalCase = {
++  key: string
++  /** The real domain event draft used to trigger the reaction. */
++  event: DomainEventDraft<any, any, any, any, any, any>
++  /** Context content supplied to the reaction. */
++  content: unknown
++  /** Ground truth handed to scorers. */
++  expected?: unknown
++  /** Text-only cases were removed. This keeps accidental legacy input invalid. */
++  text?: never
++}
++
++export type EvalScore = {
++  score: number
++  reason?: string
++}
++
++export type EvalEventSnapshot = {
++  id: string
++  type: string
++  domain: string | null
++  name: string | null
++  createdAt: unknown
++  parts: Array<Record<string, any>>
++}
++
++export type EvalReactionSnapshot = {
++  id: string
++  type: string
++  status: string
++  position: number
++  depth: number
++  causeIds: string[]
++  effectIds: string[]
++}
++
++export type EvalContextSnapshot = {
++  contextId: string
++  contextKey: string | null
++  sessionId: string
++  sessionStatus: string
++  reactions: EvalReactionSnapshot[]
++  events: EvalEventSnapshot[]
++  /** Canonical parts of every Event, flattened in causal order. */
++  parts: Array<Record<string, any>>
++  effects: Array<Record<string, any>>
++}
++
++export type EvalScorerInput = {
++  evalCase: EvalCase
++  /** Effect or effects returned by `context.react(...)`. */
++  output: ReactionEffect
++  expected: unknown
++  snapshot: EvalContextSnapshot
++}
++
++export type EvalScorer = {
++  name: string
++  /** Scores in [0, 1]. */
++  score(input: EvalScorerInput): Promise<EvalScore> | EvalScore
++}
++
++export type EvalSuiteConfig = {
++  key: string
++  definition: ReactionDefinition<any, any, any, any>
++  cases: EvalCase[]
++  scorers: EvalScorer[]
++  /** A case passes when every scorer reaches this threshold. Default 1. */
++  passThreshold?: number
++}
++
++export type EvalCaseResult = {
++  key: string
++  contextId: string | null
++  sessionId: string | null
++  /** Effect or effects returned by the evaluated reaction. */
++  output: ReactionEffect | undefined
++  scores: Array<EvalScore & { name: string }>
++  passed: boolean
++  error?: string
++  durationMs: number
++}
++
++export type EvalReport = {
++  suiteKey: string
++  runId: string | null
++  startedAt: string
++  finishedAt: string
++  cases: EvalCaseResult[]
++  summary: {
++    total: number
++    passed: number
++    /** Mean score per scorer across scored cases. */
++    scorers: Record<string, number>
++  }
++}
++
++export type EvalSuite = EvalSuiteConfig & {
++  run(options: RunEvalOptions): Promise<EvalReport>
++}
++
++export type RunEvalOptions = {
++  runtime: EvalsRuntime
++  /**
++   * Persist the run and per-case results as eval_runs / eval_results entities
++   * linked to their contexts. Degrades to a warning when the schema is not
++   * provisioned. Default true.
++   */
++  persist?: boolean
++}
++
++export function defineEval(config: EvalSuiteConfig): EvalSuite {
++  if (!config.key?.trim()) throw new Error("defineEval requires a key.")
++  if (!config.definition) throw new Error(`Eval "${config.key}" requires a reaction definition.`)
++  if (!config.cases?.length) throw new Error(`Eval "${config.key}" has no cases.`)
++  if (!config.scorers?.length) throw new Error(`Eval "${config.key}" has no scorers.`)
++  return {
++    ...config,
++    run: (options) => runEval(config, options),
++  }
++}
++
++export async function runEval(
++  suite: EvalSuiteConfig,
++  options: RunEvalOptions,
++): Promise<EvalReport> {
++  const startedAt = new Date()
++  const passThreshold = suite.passThreshold ?? 1
++  const results: EvalCaseResult[] = []
++
++  for (const evalCase of suite.cases) {
++    results.push(
++      await runEvalCase({
++        suite,
++        evalCase,
++        runtime: options.runtime,
++        passThreshold,
++      }),
++    )
++  }
++
++  const finishedAt = new Date()
++  const scorerTotals = new Map<string, { sum: number; count: number }>()
++  for (const result of results) {
++    for (const score of result.scores) {
++      const entry = scorerTotals.get(score.name) ?? { sum: 0, count: 0 }
++      entry.sum += score.score
++      entry.count += 1
++      scorerTotals.set(score.name, entry)
++    }
++  }
++
++  const report: EvalReport = {
++    suiteKey: suite.key,
++    runId: null,
++    startedAt: startedAt.toISOString(),
++    finishedAt: finishedAt.toISOString(),
++    cases: results,
++    summary: {
++      total: results.length,
++      passed: results.filter((result) => result.passed).length,
++      scorers: Object.fromEntries(
++        [...scorerTotals.entries()].map(([name, { sum, count }]) => [
++          name,
++          count > 0 ? sum / count : 0,
++        ]),
++      ),
++    },
++  }
++
++  if (options.persist !== false) {
++    report.runId = await persistEvalReport(options.runtime, report)
++  }
++
++  return report
++}
++
++async function runEvalCase(params: {
++  suite: EvalSuiteConfig
++  evalCase: EvalCase
++  runtime: EvalsRuntime
++  passThreshold: number
++}): Promise<EvalCaseResult> {
++  const { suite, evalCase, runtime } = params
++  const caseStartedAt = Date.now()
++  const contextKey = `eval:${suite.key}:${evalCase.key}:${randomUUID().slice(0, 8)}`
++  let contextId: string | null = null
++
++  try {
++    const context = await Context(runtime).create({
++      key: contextKey,
++      content: evalCase.content,
++    })
++    contextId = context.id
++
++    const trigger = await Events(runtime).emit(evalCase.event, {
++      id: randomUUID(),
++      channel: "web",
++      contextId: context.id,
++      createdAt: new Date(),
++    })
++    const output = await context.react(trigger, suite.definition)
++    const snapshot = await fetchContextSnapshot(runtime, {
++      contextId: context.id,
++      contextKey,
++      triggerId: trigger.id,
++    })
++
++    const scores: Array<EvalScore & { name: string }> = []
++    for (const scorer of suite.scorers) {
++      try {
++        const score = await scorer.score({
++          evalCase,
++          output,
++          expected: evalCase.expected,
++          snapshot,
++        })
++        scores.push({
++          name: scorer.name,
++          score: clampScore(score.score),
++          reason: score.reason,
++        })
++      } catch (error) {
++        scores.push({
++          name: scorer.name,
++          score: 0,
++          reason: `scorer failed: ${errorMessage(error)}`,
++        })
++      }
++    }
++
++    return {
++      key: evalCase.key,
++      contextId: context.id,
++      sessionId: snapshot.sessionId,
++      output,
++      scores,
++      passed:
++        scores.length > 0 &&
++        scores.every((score) => score.score >= params.passThreshold),
++      durationMs: Date.now() - caseStartedAt,
++    }
++  } catch (error) {
++    return {
++      key: evalCase.key,
++      contextId,
++      sessionId: null,
++      output: undefined,
++      scores: [],
++      passed: false,
++      error: errorMessage(error),
++      durationMs: Date.now() - caseStartedAt,
++    }
++  }
++}
++
++export async function fetchContextSnapshot(
++  runtime: EvalsRuntime,
++  ref: {
++    contextId: string
++    contextKey: string | null
++    sessionId?: string
++    triggerId?: string
++  },
++): Promise<EvalContextSnapshot> {
++  const db = await runtime.db()
++  const snapshot = await db.query({
++    context_contexts: {
++      $: { where: { id: ref.contextId }, limit: 1 },
++      sessions: {
++        trigger: {},
++        rootReaction: { effects: {} },
++        reactions: { causes: {}, effects: {} },
++      },
++      events: { eventParts: {} },
++    },
++  })
++
++  const contextRow = asRows(snapshot?.context_contexts)[0] ?? {}
++  const sessions = asRows(contextRow.sessions)
++  const session =
++    (ref.sessionId
++      ? sessions.find((row) => String(row.id) === ref.sessionId)
++      : undefined) ??
++    (ref.triggerId
++      ? sessions.find((row) => String(one(row.trigger)?.id ?? "") === ref.triggerId)
++      : undefined) ??
++    sessions[0] ??
++    {}
++
++  const reactions: EvalReactionSnapshot[] = asRows(session.reactions)
++    .sort((left, right) => Number(left.position ?? 0) - Number(right.position ?? 0))
++    .map((reaction) => ({
++      id: String(reaction.id ?? ""),
++      type: String(reaction.type ?? ""),
++      status: String(reaction.status ?? ""),
++      position: Number(reaction.position ?? 0),
++      depth: Number(reaction.depth ?? 0),
++      causeIds: asRows(reaction.causes).map((event) => String(event.id)),
++      effectIds: asRows(reaction.effects).map((event) => String(event.id)),
++    }))
++  const events: EvalEventSnapshot[] = asRows(contextRow.events)
++    .sort(compareCreatedAt)
++    .map((event) => ({
++      id: String(event.id ?? ""),
++      type: String(event.type ?? ""),
++      domain: event.domain ? String(event.domain) : null,
++      name: event.name ? String(event.name) : null,
++      createdAt: event.createdAt ?? null,
++      parts: asRows(event.eventParts)
++        .sort((left, right) => Number(left.index ?? 0) - Number(right.index ?? 0))
++        .map((part) => asRecord(part.content)),
++    }))
++  const rootReaction = one(session.rootReaction)
++
++  return {
++    contextId: ref.contextId,
++    contextKey: contextRow.key ? String(contextRow.key) : ref.contextKey,
++    sessionId: String(session.id ?? ref.sessionId ?? ""),
++    sessionStatus: String(session.status ?? ""),
++    reactions,
++    events,
++    parts: events.flatMap((event) => event.parts),
++    effects: asRows(rootReaction?.effects),
++  }
++}
++
++async function persistEvalReport(
++  runtime: EvalsRuntime,
++  report: EvalReport,
++): Promise<string | null> {
++  try {
++    const db = await runtime.db()
++    const runId = id()
++
++    await db.transact([
++      db.tx.eval_runs[runId].update({
++        suiteKey: report.suiteKey,
++        status: report.summary.passed === report.summary.total ? "passed" : "failed",
++        casesTotal: report.summary.total,
++        casesPassed: report.summary.passed,
++        summary: report.summary,
++        startedAt: new Date(report.startedAt),
++        finishedAt: new Date(report.finishedAt),
++      }),
++    ])
++
++    for (const result of report.cases) {
++      const resultId = id()
++      const transactions = [
++        db.tx.eval_results[resultId].update({
++          caseKey: result.key,
++          passed: result.passed,
++          output: toJsonSafe(result.output),
++          scores: result.scores,
++          error: result.error ?? null,
++          createdAt: new Date(),
++        }),
++        db.tx.eval_results[resultId].link({
++          run: runId,
++          ...(result.contextId ? { context: result.contextId } : {}),
++          ...(result.sessionId ? { session: result.sessionId } : {}),
++        }),
++      ]
++      await db.transact(transactions)
++    }
++
++    return runId
++  } catch (error) {
++    console.warn(
++      `[ekairos/evals] could not persist eval run (is evalDomain provisioned?): ${errorMessage(error)}`,
++    )
++    return null
++  }
++}
++
++function clampScore(value: number): number {
++  if (!Number.isFinite(value)) return 0
++  return Math.min(1, Math.max(0, value))
++}
++
++function asRows(value: unknown): Record<string, any>[] {
++  return Array.isArray(value) ? (value as Record<string, any>[]) : []
++}
++
++function asRecord(value: unknown): Record<string, any> {
++  return value && typeof value === "object" ? (value as Record<string, any>) : {}
++}
++
++function one(value: unknown): Record<string, any> | null {
++  if (Array.isArray(value)) {
++    const first = value[0]
++    return first && typeof first === "object" ? asRecord(first) : null
++  }
++  return value && typeof value === "object" ? asRecord(value) : null
++}
++
++function compareCreatedAt(left: Record<string, any>, right: Record<string, any>): number {
++  return new Date(left.createdAt ?? 0).getTime() - new Date(right.createdAt ?? 0).getTime()
++}
++
++function toJsonSafe(value: unknown): unknown {
++  if (value === undefined) return null
++  try {
++    return JSON.parse(JSON.stringify(value))
++  } catch {
++    return String(value)
++  }
++}
++
++function errorMessage(error: unknown): string {
++  return error instanceof Error ? error.message : String(error)
++}
+diff --git a/packages/evals/src/index.ts b/packages/evals/src/index.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8a96d1b00afa4ccce6fdac857b397d5021d84303
+--- /dev/null
++++ b/packages/evals/src/index.ts
+@@ -0,0 +1,22 @@
++export {
++  defineEval,
++  runEval,
++  fetchContextSnapshot,
++  type EvalCase,
++  type EvalCaseResult,
++  type EvalContextSnapshot,
++  type EvalReport,
++  type EvalScore,
++  type EvalScorer,
++  type EvalScorerInput,
++  type EvalEventSnapshot,
++  type EvalReactionSnapshot,
++  type EvalSuite,
++  type EvalSuiteConfig,
++  type EvalsRuntime,
++  type RunEvalOptions,
++} from "./evals.js"
++
++export * as scorers from "./scorers.js"
++
++export { evalDomain } from "./schema.js"
+diff --git a/packages/evals/src/schema.ts b/packages/evals/src/schema.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e6caeafd444d3985c3c9df326884ce7c50e6dfb7
+--- /dev/null
++++ b/packages/evals/src/schema.ts
+@@ -0,0 +1,46 @@
++import { i } from "@instantdb/core"
++import { domain } from "@ekairos/domain"
++import { contextDomain } from "@ekairos/events/schema"
++
++const entities = {
++  eval_runs: i.entity({
++    suiteKey: i.string().optional().indexed(),
++    status: i.string().optional().indexed(),
++    casesTotal: i.number().optional(),
++    casesPassed: i.number().optional(),
++    summary: i.json().optional(),
++    startedAt: i.date().optional().indexed(),
++    finishedAt: i.date().optional(),
++  }),
++  eval_results: i.entity({
++    caseKey: i.string().optional().indexed(),
++    passed: i.boolean().optional().indexed(),
++    output: i.json().optional(),
++    expected: i.json().optional(),
++    scores: i.json().optional(),
++    error: i.string().optional(),
++    createdAt: i.date().optional().indexed(),
++  }),
++}
++
++const links = {
++  evalRunResults: {
++    forward: { on: "eval_runs", has: "many", label: "results" },
++    reverse: { on: "eval_results", has: "one", label: "run", onDelete: "cascade" },
++  },
++  evalResultContext: {
++    forward: { on: "eval_results", has: "one", label: "context" },
++    reverse: { on: "context_contexts", has: "many", label: "evalResults" },
++  },
++  evalResultSession: {
++    forward: { on: "eval_results", has: "one", label: "session" },
++    reverse: { on: "context_sessions", has: "many", label: "evalResults" },
++  },
++} as const
++
++export const evalDomain = domain({
++  name: "evals",
++  packageName: "@ekairos/evals",
++})
++  .includes(contextDomain)
++  .withSchema({ entities, links, rooms: {} as const })
+diff --git a/packages/evals/src/scorers.ts b/packages/evals/src/scorers.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..a629c746d2bc5471bc8f8866b9920f1d42771c18
+--- /dev/null
++++ b/packages/evals/src/scorers.ts
+@@ -0,0 +1,173 @@
++import type { EvalScore, EvalScorer, EvalScorerInput } from "./evals.js"
++
++/**
++ * Built-in scorers. All of them work over the persisted context trace — the
++ * canonical parts every reactor reaction leaves behind — plus the typed
++ * output, so agent behavior (not just answers) is evaluable.
++ */
++
++/** Deep-equality between the case output and `expected`. */
++export function exactOutput(): EvalScorer {
++  return {
++    name: "exact_output",
++    score({ output, expected }) {
++      const equal = deepEqual(output, expected)
++      return {
++        score: equal ? 1 : 0,
++        reason: equal ? undefined : `expected ${short(expected)}, got ${short(output)}`,
++      }
++    },
++  }
++}
++
++/**
++ * Verifies the model actually executed an action during the reaction —
++ * behavioral assertions like "it must have read the document before
++ * answering". Matches completed canonical action parts by name.
++ */
++export function actionCalled(
++  actionName: string,
++  options: { atLeast?: number; atMost?: number } = {},
++): EvalScorer {
++  const atLeast = options.atLeast ?? 1
++  return {
++    name: `action_called:${actionName}`,
++    score({ snapshot }) {
++      const calls = snapshot.parts.filter(
++        (part) =>
++          part?.type === "action" &&
++          part?.content?.actionName === actionName &&
++          part?.content?.status === "completed",
++      ).length
++      const withinMax = options.atMost === undefined || calls <= options.atMost
++      const ok = calls >= atLeast && withinMax
++      return {
++        score: ok ? 1 : 0,
++        reason: ok
++          ? undefined
++          : `action "${actionName}" completed ${calls}x (expected >= ${atLeast}${options.atMost !== undefined ? `, <= ${options.atMost}` : ""})`,
++      }
++    },
++  }
++}
++
++/** The Reaction Session finished with the given status (default "completed"). */
++export function sessionCompleted(status = "completed"): EvalScorer {
++  return {
++    name: "session_completed",
++    score({ snapshot }) {
++      const ok = snapshot.sessionStatus === status
++      return {
++        score: ok ? 1 : 0,
++        reason: ok ? undefined : `session status: ${snapshot.sessionStatus}`,
++      }
++    },
++  }
++}
++
++/** Free-form scorer over output + trace. */
++export function custom(
++  name: string,
++  score: (input: EvalScorerInput) => Promise<EvalScore> | EvalScore,
++): EvalScorer {
++  return { name, score }
++}
++
++/**
++ * LLM-as-judge over the case output and the assistant's visible messages,
++ * scored against free-form criteria. Returns the judge's score in [0, 1].
++ */
++export function llmJudge(options: {
++  criteria: string
++  model?: string
++  name?: string
++}): EvalScorer {
++  return {
++    name: options.name ?? "llm_judge",
++    async score({ evalCase, output, expected, snapshot }) {
++      const { generateText } = await import("ai")
++      const transcript = snapshot.parts
++        .filter((part) => part?.type === "message")
++        .map((part) => extractText(part))
++        .filter(Boolean)
++        .join("\n")
++
++      const result = await generateText({
++        model: options.model ?? "openai/gpt-5.4-nano",
++        system:
++          "You are a strict evaluator of AI agent behavior. Respond with ONLY a minified JSON " +
++          'object: {"score": <0..1>, "reason": "<short>"} — no prose, no code fences.',
++        prompt: [
++          `Criteria: ${options.criteria}`,
++          evalCase.text ? `User input: ${evalCase.text}` : "",
++          expected !== undefined ? `Expected: ${short(expected)}` : "",
++          `Agent output: ${short(output)}`,
++          transcript ? `Agent messages:\n${transcript}` : "",
++        ]
++          .filter(Boolean)
++          .join("\n\n"),
++      })
++
++      const parsed = parseJudge(result.text)
++      return { score: parsed.score, reason: parsed.reason }
++    },
++  }
++}
++
++function parseJudge(text: string): { score: number; reason?: string } {
++  try {
++    const trimmed = text
++      .trim()
++      .replace(/^```(?:json)?\s*/i, "")
++      .replace(/\s*```$/, "")
++    const value = JSON.parse(trimmed)
++    const score = Number(value?.score)
++    return {
++      score: Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : 0,
++      reason: typeof value?.reason === "string" ? value.reason : undefined,
++    }
++  } catch {
++    return { score: 0, reason: `unparseable judge response: ${text.slice(0, 200)}` }
++  }
++}
++
++function extractText(part: Record<string, any>): string {
++  const content = part?.content
++  if (typeof content?.text === "string") return content.text
++  const blocks = Array.isArray(content?.blocks) ? content.blocks : []
++  return blocks
++    .filter((block: any) => block?.type === "text" && typeof block.text === "string")
++    .map((block: any) => block.text)
++    .join("\n")
++}
++
++function deepEqual(left: unknown, right: unknown): boolean {
++  if (Object.is(left, right)) return true
++  if (
++    typeof left !== "object" ||
++    typeof right !== "object" ||
++    left === null ||
++    right === null
++  ) {
++    return false
++  }
++  if (Array.isArray(left) !== Array.isArray(right)) return false
++  const leftKeys = Object.keys(left as object)
++  const rightKeys = Object.keys(right as object)
++  if (leftKeys.length !== rightKeys.length) return false
++  return leftKeys.every((key) =>
++    deepEqual(
++      (left as Record<string, unknown>)[key],
++      (right as Record<string, unknown>)[key],
++    ),
++  )
++}
++
++function short(value: unknown): string {
++  try {
++    const text = JSON.stringify(value)
++    return text.length > 300 ? `${text.slice(0, 300)}…` : text
++  } catch {
++    return String(value)
++  }
++}
+diff --git a/packages/evals/src/tests/evals.instant.test.ts b/packages/evals/src/tests/evals.instant.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ac30aafdf2b11d23de9e42b223bc42573a57a2ac
+--- /dev/null
++++ b/packages/evals/src/tests/evals.instant.test.ts
+@@ -0,0 +1,208 @@
++/* @vitest-environment node */
++
++import { afterAll, beforeAll, describe, expect, it } from "vitest"
++import { init } from "@instantdb/admin"
++import { z } from "zod"
++
++import { defineEvent, domain, EkairosRuntime } from "@ekairos/domain"
++import { contextDomain } from "@ekairos/context"
++import { defineReaction, type ReactionEngine } from "@ekairos/reactor"
++import {
++  destroyContextTestApp,
++  hasInstantProvisionToken,
++  provisionContextTestApp,
++} from "../../../events/src/tests/_env.ts"
++
++import { defineEval } from "../evals.ts"
++import * as scorers from "../scorers.ts"
++import { evalDomain } from "../schema.ts"
++
++const describeInstant = hasInstantProvisionToken() ? describe : describe.skip
++
++const evalsTestDomain = domain("evalsTest")
++  .includes(contextDomain)
++  .includes(evalDomain)
++  .withSchema({ entities: {}, links: {}, rooms: {} })
++  .withEvents({
++    requested: defineEvent({
++      payload: z.object({ question: z.string() }),
++    }),
++    answered: defineEvent({
++      payload: z.object({ answer: z.string() }),
++    }),
++  })
++
++const answerSchema = z.object({ answer: z.string() })
++const answerEngine: ReactionEngine = {
++  async agent<TOutput>() {
++    return { output: { answer: "42" } as TOutput }
++  },
++}
++
++const answerReaction = defineReaction(
++  evalsTestDomain.events.requested,
++  {
++    key: "evals.answer",
++    scope: evalsTestDomain,
++    engine: answerEngine,
++    sandbox: false,
++  },
++  async current => {
++    const answer = await current.given(current.trigger).agent({
++      instruction: `Answer ${current.context.content.topic}.`,
++      output: answerSchema,
++    })
++    return await current.given(answer).emit(
++      evalsTestDomain.events.answered(answer.payload),
++    )
++  },
++)
++
++const effectPayloadScorer = scorers.custom(
++  "effect_payload",
++  ({ output, expected }) => {
++    const effect = Array.isArray(output) ? output[0] : output
++    const equal = (effect as any)?.payload?.answer === (expected as any)?.answer
++    return { score: equal ? 1 : 0 }
++  },
++)
++
++describe("@ekairos/evals Reaction API", () => {
++  it("requires a ReactionDefinition", () => {
++    expect(() => defineEval({
++      key: "missing-definition",
++      definition: undefined as never,
++      cases: [{
++        key: "case",
++        event: evalsTestDomain.events.requested({ question: "answer" }),
++        content: { topic: "the question" },
++      }],
++      scorers: [effectPayloadScorer],
++    })).toThrow("requires a reaction definition")
++  })
++})
++
++type EvalsTestEnv = { appId: string; adminToken: string }
++
++class EvalsTestRuntime extends EkairosRuntime<
++  EvalsTestEnv,
++  typeof evalsTestDomain,
++  ReturnType<typeof init>
++> {
++  protected getDomain() {
++    return evalsTestDomain
++  }
++
++  protected async resolveDb(env: EvalsTestEnv) {
++    return init({
++      appId: env.appId,
++      adminToken: env.adminToken,
++      schema: evalsTestDomain.instantSchema(),
++      useDateObjects: true,
++    } as any)
++  }
++}
++
++describeInstant("@ekairos/evals persisted Reaction runs", () => {
++  let appId = ""
++  let db: ReturnType<typeof init>
++  let runtime: EvalsTestRuntime
++
++  beforeAll(async () => {
++    const app = await provisionContextTestApp({
++      name: `evals-reaction-test-${Date.now()}`,
++      schema: evalsTestDomain.instantSchema(),
++    })
++    appId = app.appId
++    db = init({
++      appId,
++      adminToken: app.adminToken,
++      schema: evalsTestDomain.instantSchema(),
++      useDateObjects: true,
++    } as any)
++    runtime = new EvalsTestRuntime({
++      appId,
++      adminToken: app.adminToken,
++    })
++  }, 5 * 60 * 1000)
++
++  afterAll(async () => {
++    if (process.env.APP_TEST_PERSIST !== "true") {
++      await destroyContextTestApp(appId)
++    }
++  })
++
++  it("emits case events, scores returned effects, and persists trace links", async () => {
++    const suite = defineEval({
++      key: "reaction.answers",
++      definition: answerReaction,
++      cases: [
++        {
++          key: "meaning-of-life",
++          event: evalsTestDomain.events.requested({
++            question: "What is the answer?",
++          }),
++          content: { topic: "the meaning of life" },
++          expected: { answer: "42" },
++        },
++        {
++          key: "wrong-expectation",
++          event: evalsTestDomain.events.requested({
++            question: "What is the answer?",
++          }),
++          content: { topic: "the meaning of life" },
++          expected: { answer: "43" },
++        },
++      ],
++      scorers: [effectPayloadScorer, scorers.sessionCompleted()],
++    })
++
++    const report = await suite.run({ runtime })
++
++    expect(report.summary).toMatchObject({
++      total: 2,
++      passed: 1,
++      scorers: {
++        effect_payload: 0.5,
++        session_completed: 1,
++      },
++    })
++
++    const passing = report.cases.find(entry => entry.key === "meaning-of-life")
++    expect(passing).toMatchObject({
++      passed: true,
++      output: {
++        domain: "evalsTest",
++        name: "answered",
++        payload: { answer: "42" },
++      },
++    })
++    expect(passing?.contextId).toBeTruthy()
++    expect(passing?.sessionId).toBeTruthy()
++
++    const persisted = await db.query({
++      eval_runs: {
++        $: { where: { id: String(report.runId) }, limit: 1 },
++        results: {
++          context: {},
++          session: {
++            trigger: {},
++            rootReaction: { effects: {} },
++          },
++        },
++      },
++    } as any)
++    const run = (persisted as any).eval_runs?.[0]
++    expect(run).toMatchObject({
++      suiteKey: "reaction.answers",
++      casesTotal: 2,
++      casesPassed: 1,
++    })
++    expect(run?.results).toHaveLength(2)
++    for (const result of run?.results ?? []) {
++      expect(result.context?.id).toBeTruthy()
++      expect(result.session?.trigger?.name).toBe("requested")
++      expect(result.session?.rootReaction?.effects?.[0]?.name).toBe("answered")
++    }
++  }, 120_000)
++})
+diff --git a/packages/evals/tsconfig.json b/packages/evals/tsconfig.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..2507652e1282ee054feb93796f6b14f99fa76436
+--- /dev/null
++++ b/packages/evals/tsconfig.json
+@@ -0,0 +1,16 @@
++{
++  "extends": "@ekairos/tsconfig/base.json",
++  "compilerOptions": {
++    "outDir": "dist",
++    "rootDir": "src",
++    "lib": ["ES2020", "DOM"],
++    "module": "ES2020",
++    "moduleResolution": "Bundler",
++    "sourceMap": false,
++    "declarationMap": false,
++    "inlineSourceMap": false,
++    "inlineSources": false
++  },
++  "include": ["src"],
++  "exclude": ["node_modules", "**/*.test.ts", "**/tests/**"]
++}
+diff --git a/packages/evals/vitest.config.mts b/packages/evals/vitest.config.mts
+new file mode 100644
+index 0000000000000000000000000000000000000000..35cb00e92bb59c3825839fcc2498c9da701f0fb7
+--- /dev/null
++++ b/packages/evals/vitest.config.mts
+@@ -0,0 +1,11 @@
++import { defineConfig } from "vitest/config"
++
++export default defineConfig({
++  test: {
++    environment: "node",
++    testTimeout: 10 * 60 * 1000,
++    hookTimeout: 10 * 60 * 1000,
++    reporters: ["default"],
++    include: ["src/tests/**/*.test.ts"],
++  },
++})
+diff --git a/packages/lab-smoke/package.json b/packages/lab-smoke/package.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..71d8792e9679726bc0c32841976a22c49234e8e7
+--- /dev/null
++++ b/packages/lab-smoke/package.json
+@@ -0,0 +1,33 @@
++{
++  "name": "@ekairos/lab-smoke",
++  "version": "1.22.0",
++  "private": true,
++  "description": "Ekairos Lab smoke tests",
++  "type": "module",
++  "scripts": {
++    "build": "tsc -p tsconfig.json",
++    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
++    "typecheck": "tsc --noEmit",
++    "test": "vitest run",
++    "smoke:codex": "tsx src/codex-cli-smoke.ts"
++  },
++  "dependencies": {
++    "@ekairos/context": "workspace:*",
++    "@ekairos/domain": "workspace:*",
++    "@ekairos/events": "workspace:*",
++    "@ekairos/lab": "workspace:*",
++    "@ekairos/reactor": "workspace:*",
++    "@ekairos/sandbox": "workspace:*",
++    "@ekairos/testing": "workspace:*",
++    "@instantdb/admin": "0.22.158",
++    "dotenv": "^17.2.3",
++    "zod": "^4.3.6"
++  },
++  "devDependencies": {
++    "@ekairos/tsconfig": "workspace:*",
++    "@types/node": "^24.5.0",
++    "tsx": "^4.19.2",
++    "typescript": "^5.9.2",
++    "vitest": "^4.0.8"
++  }
++}
+diff --git a/packages/lab-smoke/src/codex-cli-smoke.ts b/packages/lab-smoke/src/codex-cli-smoke.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..09efef6117226e412b00b106568f616bb39d8a77
+--- /dev/null
++++ b/packages/lab-smoke/src/codex-cli-smoke.ts
+@@ -0,0 +1,76 @@
++import { spawn } from "node:child_process"
++
++const model = process.env.EKAIROS_LAB_CODEX_MODEL || "gpt-5.5"
++const prompt = "Return exactly: ekairos-lab-codex-smoke-ok"
++
++function psQuote(value: string) {
++  return `'${value.replace(/'/g, "''")}'`
++}
++
++const codexArgs = [
++  "exec",
++  "--ignore-user-config",
++  "--model",
++  model,
++  "--dangerously-bypass-approvals-and-sandbox",
++  prompt,
++]
++
++const command =
++  process.platform === "win32"
++    ? "powershell.exe"
++    : "codex"
++
++const args =
++  process.platform === "win32"
++    ? [
++        "-NoProfile",
++        "-Command",
++        [
++          "codex",
++          "exec",
++          "--ignore-user-config",
++          "--model",
++          psQuote(model),
++          "--dangerously-bypass-approvals-and-sandbox",
++          psQuote(prompt),
++        ].join(" "),
++      ]
++    : codexArgs
++
++const child = spawn(
++  command,
++  args,
++  {
++    stdio: ["ignore", "pipe", "pipe"],
++    shell: false,
++  },
++)
++
++let stdout = ""
++let stderr = ""
++child.stdout.on("data", (chunk) => {
++  stdout += String(chunk)
++})
++child.stderr.on("data", (chunk) => {
++  stderr += String(chunk)
++})
++
++child.on("close", (code) => {
++  const output = [stdout, stderr].join("\n")
++  const evidence = output
++    .split(/\r?\n/)
++    .filter((line) =>
++      /model:|approval:|sandbox:|session id:|ekairos-lab-codex-smoke-ok|ERROR:|not supported/i.test(line),
++    )
++    .join("\n")
++
++  console.log(evidence.trim())
++  if (code !== 0) {
++    process.exit(code ?? 1)
++  }
++  if (!output.includes("ekairos-lab-codex-smoke-ok")) {
++    console.error("Codex smoke did not return the expected marker.")
++    process.exit(1)
++  }
++})
+diff --git a/packages/lab-smoke/src/tests/lab-coding.instant.test.ts b/packages/lab-smoke/src/tests/lab-coding.instant.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2587e897be3de62d8a593de0f5a31c90b61d5226
+--- /dev/null
++++ b/packages/lab-smoke/src/tests/lab-coding.instant.test.ts
+@@ -0,0 +1,299 @@
++import { randomUUID } from "node:crypto"
++import { resolve } from "node:path"
++import { init } from "@instantdb/admin"
++import { defineAction, defineEvent, domain, EkairosRuntime } from "@ekairos/domain"
++import { Context } from "@ekairos/context"
++import { Events, contextDomain } from "@ekairos/events"
++import { defineLabCodingReaction, type LabCodingContext } from "@ekairos/lab"
++import type { ReactionEngine, ReactionEngineInput } from "@ekairos/reactor"
++import { sandboxSchemaDomain } from "@ekairos/sandbox/schema"
++import { createTestApp, destroyTestApp } from "@ekairos/testing/provision"
++import { config as dotenvConfig } from "dotenv"
++import { z } from "zod"
++import {
++  afterAll,
++  beforeAll,
++  describe,
++  expect,
++  it,
++} from "vitest"
++
++const envRoots = [
++  process.cwd(),
++  resolve(process.cwd(), ".."),
++  resolve(process.cwd(), "..", ".."),
++  resolve(process.cwd(), "..", "..", ".."),
++  resolve(process.cwd(), "..", "ekairos-core"),
++  resolve(process.cwd(), "..", "..", "ekairos-core"),
++  resolve(process.cwd(), "..", "..", "..", "ekairos-core"),
++]
++
++for (const root of envRoots) {
++  dotenvConfig({ path: resolve(root, ".env.local"), quiet: true })
++  dotenvConfig({ path: resolve(root, ".env"), quiet: true })
++}
++
++function getInstantProvisionToken() {
++  return String(process.env.INSTANT_PERSONAL_ACCESS_TOKEN ?? "").trim()
++}
++
++const describeInstant = getInstantProvisionToken() ? describe : describe.skip
++const itInstant = getInstantProvisionToken() ? it : it.skip
++
++type SandboxCall = { command: string; args?: string[]; cwd?: string }
++const sandboxCalls: SandboxCall[] = []
++
++const runCommandProcess = defineAction({
++  input: z.object({
++    sandboxId: z.string(),
++    command: z.string(),
++    args: z.array(z.string()).optional(),
++    cwd: z.string().optional(),
++  }).passthrough(),
++  output: z.any(),
++  async execute({ input }) {
++    sandboxCalls.push({ command: input.command, args: input.args, cwd: input.cwd })
++    const command = [input.command, ...(input.args ?? [])].join(" ")
++    let success = true
++    let exitCode = 0
++    let output = "ok\n"
++    let error = ""
++
++    if (
++      input.command === "test" &&
++      input.args?.[0] === "-e" &&
++      input.args?.[1]?.endsWith("/.git")
++    ) {
++      success = false
++      exitCode = 1
++      output = ""
++    } else if (input.command === "git" && input.args?.includes("--is-inside-work-tree")) {
++      success = false
++      exitCode = 128
++      output = ""
++      error = "not a repo"
++    } else if (input.command === "git" && input.args?.[0] === "clone") {
++      output = "cloned\n"
++    } else if (input.command === "git" && input.args?.includes("status")) {
++      output = " M README.md\n"
++    } else if (input.command === "git" && input.args?.includes("add")) {
++      output = ""
++    } else if (input.command === "git" && input.args?.includes("commit")) {
++      output = "[main abc123] smoke\n"
++    } else if (input.command === "git" && input.args?.includes("push")) {
++      output = "pushed\n"
++    } else if (input.command === "git" && input.args?.includes("rev-parse")) {
++      output = "abc123\n"
++    }
++
++    const processId = `process-${randomUUID()}`
++    return {
++      ok: true,
++      data: {
++        processId,
++        streamId: `stream-${processId}`,
++        streamClientId: `sandbox-process:${processId}`,
++        result: { success, exitCode, output, error, command },
++      },
++    }
++  },
++})
++
++const writeFiles = defineAction({
++  input: z.object({
++    sandboxId: z.string(),
++    files: z.array(z.object({
++      path: z.string(),
++      contentBase64: z.string(),
++    })),
++  }),
++  output: z.any(),
++  async execute() {
++    return { ok: true, data: undefined }
++  },
++})
++
++const readFile = defineAction({
++  input: z.object({ sandboxId: z.string(), path: z.string() }),
++  output: z.any(),
++  async execute() {
++    return { ok: true, data: { contentBase64: "" } }
++  },
++})
++
++const stopSandbox = defineAction({
++  input: z.object({ sandboxId: z.string() }),
++  output: z.any(),
++  async execute() {
++    return { ok: true, data: undefined }
++  },
++})
++
++const labSmokeDomain = domain("labSmoke")
++  .includes(contextDomain)
++  .includes(sandboxSchemaDomain)
++  .withSchema({ entities: {}, links: {}, rooms: {} })
++  .withEvents({
++    codingRequested: defineEvent({ payload: z.object({ request: z.string() }) }),
++    codingCompleted: defineEvent({ payload: z.any() }),
++  })
++  .withActions({ runCommandProcess, writeFiles, readFile, stopSandbox })
++
++class LabSmokeRuntime extends EkairosRuntime<
++  { appId: string; adminToken: string },
++  typeof labSmokeDomain,
++  ReturnType<typeof init>
++> {
++  protected getDomain() {
++    return labSmokeDomain
++  }
++
++  protected async resolveDb(env: { appId: string; adminToken: string }) {
++    return init({
++      appId: env.appId,
++      adminToken: env.adminToken,
++      schema: labSmokeDomain.instantSchema(),
++      useDateObjects: true,
++    } as any)
++  }
++}
++
++function asRows(value: unknown): Record<string, unknown>[] {
++  return Array.isArray(value) ? value as Record<string, unknown>[] : []
++}
++
++function asRecord(value: unknown): Record<string, unknown> {
++  return value && typeof value === "object" ? value as Record<string, unknown> : {}
++}
++
++describeInstant("lab coding reaction smoke", () => {
++  let appId = ""
++  let adminToken = ""
++  let db: ReturnType<typeof init>
++
++  beforeAll(async () => {
++    const app = await createTestApp({
++      name: "lab-smoke",
++      token: getInstantProvisionToken(),
++      schema: labSmokeDomain.instantSchema() as any,
++    })
++    appId = app.appId
++    adminToken = app.adminToken
++    db = init({
++      appId,
++      adminToken,
++      schema: labSmokeDomain.instantSchema(),
++      useDateObjects: true,
++    } as any)
++  }, 60_000)
++
++  afterAll(async () => {
++    const token = getInstantProvisionToken()
++    if (appId && token) {
++      await destroyTestApp({ appId, token })
++    }
++  }, 60_000)
++
++  itInstant("clones, inspects, runs the AI step, and persists the execution trace", async () => {
++    const runtime = new LabSmokeRuntime({ appId, adminToken })
++    const sandboxId = randomUUID()
++    const contextKey = `lab-smoke:repository:${randomUUID()}`
++    const context = await Context(runtime).create({
++      key: contextKey,
++      content: {
++        repositoryUrl: "https://github.com/e-kairos/ekairos-lab-smoke",
++        repositoryRef: "main",
++        repositoryPath: "ekairos-lab-smoke",
++        request: "Update README.md with a smoke marker.",
++        commitMessage: "test: update lab smoke readme",
++        push: {
++          remote: "origin",
++          branch: `lab-smoke-${randomUUID()}`,
++        },
++      },
++    })
++    await db.transact([
++      db.tx.sandbox_sandboxes[sandboxId].update({
++        provider: "local",
++        externalSandboxId: sandboxId,
++        status: "running",
++        createdAt: Date.now(),
++        params: { workspaceRoot: "/workspace" },
++      }),
++    ])
++    const triggerEvent = await Events(runtime).emit(
++      labSmokeDomain.events.codingRequested({ request: "Update the README." }),
++      {
++        id: randomUUID(),
++        contextId: context.id,
++        channel: "web",
++        createdAt: new Date(),
++      },
++    )
++
++    sandboxCalls.length = 0
++    const engine: ReactionEngine<LabCodingContext> = {
++      async agent<TOutput>(input: ReactionEngineInput<LabCodingContext, TOutput>) {
++        const inspected = input.given[input.given.length - 1]
++        const candidate = {
++          status: "completed",
++          summary: "Smoke coding task completed after clone and inspection.",
++          repositoryPath: input.context.content.repositoryPath,
++          changedFiles: ["README.md"],
++          verification: String(asRecord(inspected?.payload).output ?? "").trim(),
++        }
++        return { output: input.output!.parse(candidate) }
++      },
++    }
++    const reaction = defineLabCodingReaction({
++      trigger: labSmokeDomain.events.codingRequested,
++      scope: labSmokeDomain,
++      engine,
++      sandbox: sandboxId,
++      completed: result => labSmokeDomain.events.codingCompleted(result),
++    })
++
++    const effect = await context.react(triggerEvent, reaction)
++
++    expect(effect.payload.status).toBe("completed")
++    expect(effect.payload.repositoryPath).toContain("ekairos-lab-smoke")
++    expect(effect.payload.commit?.status).toBe("committed")
++    expect(effect.payload.push?.status).toBe("pushed")
++    expect(sandboxCalls.some((call) => call.command === "git" && call.args?.[0] === "clone")).toBe(true)
++    expect(sandboxCalls.some((call) => call.command === "git" && call.args?.includes("status"))).toBe(true)
++    expect(sandboxCalls.some((call) => call.command === "git" && call.args?.includes("commit"))).toBe(true)
++    expect(sandboxCalls.some((call) => call.command === "git" && call.args?.includes("push"))).toBe(true)
++
++    const snapshot = await db.query({
++      context_contexts: {
++        $: { where: { key: contextKey }, limit: 1 },
++        sessions: {
++          rootReaction: { effects: {} },
++          reactions: { effects: { eventParts: {} } },
++        },
++      },
++    } as any)
++
++    const storedContext = asRows((snapshot as any).context_contexts)[0]
++    const session = asRows(storedContext?.sessions)[0]
++    const reactions = asRows(session?.reactions)
++      .sort((left, right) => Number(left.position) - Number(right.position))
++    expect(reactions.map((entry) => entry.type)).toEqual([
++      "lab.coding",
++      "git.clone",
++      "shell",
++      "agent",
++      "git.commit",
++      "git.push",
++      "emit",
++    ])
++    expect(reactions.every((entry) => entry.status === "completed")).toBe(true)
++    const root = asRecord(
++      Array.isArray(session?.rootReaction)
++        ? session.rootReaction[0]
++        : session?.rootReaction,
++    )
++    const storedEffect = asRows(root.effects)[0]
++    expect(asRecord(storedEffect?.payload).status).toBe("completed")
++  }, 60_000)
++})
+diff --git a/packages/lab-smoke/tsconfig.json b/packages/lab-smoke/tsconfig.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..b26eef71b23f79578ddefe2cba92662f00adb346
+--- /dev/null
++++ b/packages/lab-smoke/tsconfig.json
+@@ -0,0 +1,28 @@
++{
++  "extends": "../tsconfig/base.json",
++  "compilerOptions": {
++    "outDir": "dist",
++    "rootDir": "src",
++    "module": "ESNext",
++    "moduleResolution": "bundler",
++    "target": "ES2020",
++    "skipLibCheck": true,
++    "incremental": true,
++    "tsBuildInfoFile": ".tsbuildinfo",
++    "baseUrl": ".",
++    "lib": ["ES2020", "DOM"],
++    "sourceMap": false,
++    "declarationMap": false,
++    "inlineSourceMap": false,
++    "inlineSources": false,
++    "paths": {
++      "@ekairos/events": ["../events/dist/index.d.ts"],
++      "@ekairos/events/*": ["../events/dist/*"],
++      "@ekairos/lab": ["../lab/dist/index.d.ts"],
++      "@ekairos/reactor": ["../reactor/dist/index.d.ts"],
++      "@ekairos/sandbox": ["../sandbox/dist/index.d.ts"]
++    }
++  },
++  "include": ["src/**/*.ts"],
++  "exclude": ["node_modules", "dist"]
++}
+diff --git a/packages/lab-smoke/vitest.config.mts b/packages/lab-smoke/vitest.config.mts
+new file mode 100644
+index 0000000000000000000000000000000000000000..aceb7f627bdc3645b1aa1499c6d7e5220b8fd44c
+--- /dev/null
++++ b/packages/lab-smoke/vitest.config.mts
+@@ -0,0 +1,11 @@
++import { defineConfig } from "vitest/config"
++
++export default defineConfig({
++  test: {
++    environment: "node",
++    testTimeout: 6 * 60 * 1000,
++    hookTimeout: 6 * 60 * 1000,
++    reporters: ["default"],
++    include: ["src/tests/**/*.test.ts"],
++  },
++})
+diff --git a/packages/lab/README.md b/packages/lab/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..be3bddc93f3ee4832213469f9a8a33ee32d5015b
+--- /dev/null
++++ b/packages/lab/README.md
+@@ -0,0 +1,8 @@
++# @ekairos/lab
++
++Ekairos Lab contains concrete reactions for operating on code workspaces through
++`@ekairos/reactor` and a durable sandbox ID.
++
++The package intentionally stays thin: context and execution persistence belong
++to `@ekairos/events` / `@ekairos/reactor`, while sandbox provisioning belongs to
++`@ekairos/sandbox`.
+diff --git a/packages/lab/package.json b/packages/lab/package.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..2c7af449504a5d62fd39df963f3e2cacccd4d3b3
+--- /dev/null
++++ b/packages/lab/package.json
+@@ -0,0 +1,43 @@
++{
++  "name": "@ekairos/lab",
++  "version": "1.22.0",
++  "description": "Ekairos Lab - coding reactions built on context, reactor, and sandbox",
++  "type": "module",
++  "main": "dist/index.js",
++  "types": "dist/index.d.ts",
++  "files": [
++    "dist",
++    "README.md"
++  ],
++  "publishConfig": {
++    "access": "public"
++  },
++  "license": "MIT",
++  "repository": {
++    "type": "git",
++    "url": "git+https://github.com/e-kairos/ekairos.git",
++    "directory": "packages/lab"
++  },
++  "exports": {
++    ".": {
++      "types": "./dist/index.d.ts",
++      "import": "./dist/index.js",
++      "default": "./dist/index.js"
++    }
++  },
++  "scripts": {
++    "build": "tsc -p tsconfig.json",
++    "dev": "tsc -p tsconfig.json --watch",
++    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
++    "typecheck": "tsc --noEmit"
++  },
++  "dependencies": {
++    "@ekairos/reactor": "workspace:*",
++    "zod": "^4.3.6"
++  },
++  "devDependencies": {
++    "@ekairos/tsconfig": "workspace:*",
++    "@types/node": "^24.5.0",
++    "typescript": "^5.9.2"
++  }
++}
+diff --git a/packages/lab/src/index.ts b/packages/lab/src/index.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3757d31023cfc93441de3bc3fe5c550bcc50899f
+--- /dev/null
++++ b/packages/lab/src/index.ts
+@@ -0,0 +1,147 @@
++import {
++  defineReaction,
++  type ReactionDefinitionOptions,
++  type ReactionDefinition,
++  type ReactionEngine,
++  type ReactionRun,
++} from "@ekairos/reactor"
++import { z } from "zod"
++
++export const labCodingContextSchema = z.object({
++  repositoryUrl: z.string().url(),
++  repositoryRef: z.string().optional(),
++  repositoryPath: z.string().min(1).default("repository"),
++  request: z.string().min(1),
++  commitMessage: z.string().min(1).optional(),
++  push: z.object({
++    remote: z.string().min(1).default("origin"),
++    branch: z.string().min(1),
++  }).optional(),
++})
++
++export const labCodingResultSchema = z.object({
++  status: z.enum(["completed", "needs_followup"]),
++  summary: z.string().min(1),
++  repositoryPath: z.string().min(1),
++  changedFiles: z.array(z.string()).default([]),
++  verification: z.string().optional(),
++  commit: z.object({
++    status: z.enum(["committed", "unchanged"]),
++    commitSha: z.string().optional(),
++    changedFiles: z.array(z.string()).default([]),
++  }).optional(),
++  push: z.object({
++    status: z.literal("pushed"),
++    remote: z.string(),
++    ref: z.string(),
++  }).optional(),
++})
++
++export type LabCodingContext = z.infer<typeof labCodingContextSchema>
++export type LabCodingResult = z.infer<typeof labCodingResultSchema>
++export type LabEnv = Record<string, unknown>
++
++type LabReactionRun = ReactionRun<LabCodingContext, any, any>
++type LabCompletionDraft = Parameters<
++  ReturnType<LabReactionRun["given"]>["emit"]
++>[0]
++type LabCompletionEffect = Awaited<ReturnType<
++  ReturnType<LabReactionRun["given"]>["emit"]
++>>
++
++export type LabCodingReactionOptions = {
++  key?: string
++  trigger: Parameters<typeof defineReaction>[0]
++  scope: ReactionDefinitionOptions<LabCodingContext, any>["scope"]
++  engine: ReactionEngine<LabCodingContext>
++  sandbox: ReactionDefinitionOptions<LabCodingContext, any>["sandbox"]
++  completed(result: LabCodingResult): LabCompletionDraft
++}
++
++function codingInstructions(params: {
++  request: string
++  repositoryPath: string
++  sandboxId?: string
++}) {
++  return [
++    "You are operating inside an Ekairos Lab coding workspace.",
++    "Use the causal operation history as the factual workspace trace.",
++    `Repository path: ${params.repositoryPath}`,
++    params.sandboxId ? `Sandbox ID: ${params.sandboxId}` : "",
++    "Return a concise typed result. Do not claim changes unless they were actually made.",
++    "",
++    "Request:",
++    params.request,
++  ].filter(Boolean).join("\n")
++}
++
++export function defineLabCodingReaction(
++  options: LabCodingReactionOptions,
++): ReactionDefinition<LabCodingContext, any, any, LabCompletionEffect> {
++  return defineReaction(
++    options.trigger,
++    {
++      key: options.key ?? "lab.coding",
++      scope: options.scope,
++      engine: options.engine,
++      sandbox: options.sandbox,
++    },
++    async reaction => {
++      const context = labCodingContextSchema.parse(reaction.context.content)
++      const repo = await reaction.given(reaction.trigger).git({
++        operation: "clone",
++        target: context.repositoryPath,
++        url: context.repositoryUrl,
++        ref: context.repositoryRef,
++      })
++
++      const inspected = await reaction.given(repo).shell({
++        command: "git",
++        args: ["-C", repo.payload.path, "status", "--short"],
++      })
++
++      const computed = await reaction.given(inspected).agent({
++        instruction: codingInstructions({
++          request: context.request,
++          repositoryPath: repo.payload.path,
++          sandboxId: reaction.sandboxId,
++        }),
++        output: labCodingResultSchema,
++      })
++
++      let result = computed.payload
++      if (context.push) {
++        const commit = await reaction.given(computed).git({
++          operation: "commit",
++          repository: repo.payload.path,
++          message: context.commitMessage ?? context.request,
++          all: true,
++        })
++        const pushed = await reaction.given(commit).git({
++          operation: "push",
++          repository: repo.payload.path,
++          remote: context.push.remote,
++          ref: context.push.branch,
++          setUpstream: true,
++        })
++
++        result = labCodingResultSchema.parse({
++          ...computed.payload,
++          commit: {
++            status: commit.payload.status,
++            commitSha: commit.payload.commitSha,
++            changedFiles: commit.payload.changedFiles,
++          },
++          push: {
++            status: pushed.payload.status,
++            remote: pushed.payload.remote,
++            ref: pushed.payload.ref,
++          },
++        })
++        return await reaction.given(pushed).emit(options.completed(result))
++      }
++
++      return await reaction.given(computed).emit(options.completed(result))
++    },
++  )
++}
+diff --git a/packages/lab/tsconfig.json b/packages/lab/tsconfig.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..901fce3e57cde237c3dbce2023cf4acb6f35cea9
+--- /dev/null
++++ b/packages/lab/tsconfig.json
+@@ -0,0 +1,25 @@
++{
++  "extends": "../tsconfig/base.json",
++  "compilerOptions": {
++    "outDir": "dist",
++    "rootDir": "src",
++    "module": "ESNext",
++    "moduleResolution": "bundler",
++    "target": "ES2020",
++    "skipLibCheck": true,
++    "incremental": true,
++    "tsBuildInfoFile": ".tsbuildinfo",
++    "baseUrl": ".",
++    "lib": ["ES2020", "DOM"],
++    "sourceMap": false,
++    "declarationMap": false,
++    "inlineSourceMap": false,
++    "inlineSources": false,
++    "paths": {
++      "@ekairos/reactor": ["../reactor/dist/index.d.ts"],
++      "@ekairos/reactor/*": ["../reactor/dist/*"]
++    }
++  },
++  "include": ["src/**/*.ts"],
++  "exclude": ["node_modules", "dist"]
++}
+diff --git a/packages/platform/README.md b/packages/platform/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..7e5e13aef4a812f08e5b68cabb999800743d8b25
+--- /dev/null
++++ b/packages/platform/README.md
+@@ -0,0 +1,61 @@
++# @ekairos/platform
++
++Typed client for the Ekairos Platform API. Scope today: applications ("projects"),
++runtime environments, and signed domain API keys. Domain queries/actions through the
++SDK are planned; use `ekairos domain ... --app=<appId>` meanwhile.
++
++Auth is the Platform OAuth access token — the same session the CLI and Ekairos
++Desktop use. Sign in once with `ekairos login`; scripts can read the token via
++`ekairos token`.
++
++```ts
++import { PlatformApi } from "@ekairos/platform"
++
++const platform = new PlatformApi({
++  auth: { token: process.env.EKAIROS_PLATFORM_TOKEN! },
++  // platformUrl defaults to EKAIROS_PLATFORM_URL or https://platform.ekairos.dev
++})
++
++// Applications (projects)
++const apps = await platform.apps.list()
++const app = await platform.apps.get("esolbay")
++const { apiKey } = await platform.apps.createApiKey({ appId: "esolbay" }) // ekdk_...
++
++// Runtime environments (e.g. one per customer org)
++await platform.environments.register({
++  appId: "esolbay",
++  key: "disal",
++  title: "DISAL",
++  env: { orgId: "org_..." },
++})
++const environments = await platform.environments.list("esolbay")
++```
++
++Every environment `key` acts as the alias for domain operations:
++
++```powershell
++ekairos domain query "{ accounting_documents: { $: { limit: 5 } } }" --app=esolbay --env=disal
++```
++
++## Runtime env reporting (machine credential)
++
++`reportRuntimeEnv` is the machine half: a client domain reports the runtime env it
++was constructed with, authenticated by the project's own `ekdk_` key — no user
++token. Fire-and-forget with a 10-minute dedup TTL; never throws, never blocks.
++`@ekairos/domain` calls this automatically on every `runtime.db()` resolution
++(see its `platform-sync.ts`), so host applications normally only set
++`EKAIROS_PLATFORM_URL`, `EKAIROS_API_KEY`, and `EKAIROS_PLATFORM_ORG_ID`.
++
++```ts
++import { reportRuntimeEnv } from "@ekairos/platform"
++
++reportRuntimeEnv(
++  { apiKey: process.env.EKAIROS_API_KEY!, organizationId: "org_..." },
++  { orgId: "org_customer" },
++  { title: "Customer Name", source: "auth-provision" },
++)
++```
++
++Errors throw `PlatformApiError` with `status` and the raw response `body`.
++Secret-looking keys (`*apiKey`, `*secret`, `*token`) are stripped from environment
++payloads server-side; environments carry routing data (like `orgId`), never credentials.
+diff --git a/packages/platform/package.json b/packages/platform/package.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..e0f4e72b6392d314850f32b95560f8444b2a33b6
+--- /dev/null
++++ b/packages/platform/package.json
+@@ -0,0 +1,41 @@
++{
++  "name": "@ekairos/platform",
++  "version": "1.22.0",
++  "description": "Ekairos Platform SDK - typed client for the Ekairos Platform API: applications (projects), runtime environments, and API keys",
++  "type": "module",
++  "main": "dist/index.js",
++  "types": "dist/index.d.ts",
++  "files": [
++    "dist",
++    "README.md"
++  ],
++  "publishConfig": {
++    "access": "public"
++  },
++  "license": "MIT",
++  "repository": {
++    "type": "git",
++    "url": "git+https://github.com/e-kairos/ekairos.git",
++    "directory": "packages/platform"
++  },
++  "exports": {
++    ".": {
++      "types": "./dist/index.d.ts",
++      "import": "./dist/index.js",
++      "default": "./dist/index.js"
++    }
++  },
++  "scripts": {
++    "build": "tsc -p tsconfig.json",
++    "dev": "tsc -p tsconfig.json --watch",
++    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
++    "typecheck": "tsc --noEmit",
++    "test": "vitest run -c vitest.config.mts"
++  },
++  "devDependencies": {
++    "@ekairos/tsconfig": "workspace:*",
++    "@types/node": "^24.5.0",
++    "typescript": "^5.9.2",
++    "vitest": "^4.0.8"
++  }
++}
+diff --git a/packages/platform/src/index.ts b/packages/platform/src/index.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..30c23e171fad278d326bb07705a9d14c3d09739d
+--- /dev/null
++++ b/packages/platform/src/index.ts
+@@ -0,0 +1,356 @@
++const DEFAULT_PLATFORM_URL = "https://platform.ekairos.dev"
++
++export type PlatformAuth = {
++  /**
++   * Platform OAuth access token (obtain via `ekairos login`, then `ekairos token`),
++   * or a provider called before each request.
++   */
++  token: string | (() => string | Promise<string>)
++}
++
++export type PlatformApiConfig = {
++  auth: PlatformAuth
++  /** Defaults to EKAIROS_PLATFORM_URL or https://platform.ekairos.dev */
++  platformUrl?: string
++}
++
++export type PlatformEnvironment = {
++  recordId: string
++  environmentId: string
++  key: string
++  title: string
++  status: string | null
++  env: Record<string, unknown> | null
++  lastSeenAt: string | null
++  updatedAt: string | null
++}
++
++export type PlatformApplication = {
++  recordId: string
++  appId: string
++  title: string
++  status: string | null
++  baseUrl: string | null
++  domainPath: string | null
++  environments: PlatformEnvironment[]
++  updatedAt: string | null
++  project: string | null
++}
++
++export type RegisterApplicationInput = {
++  appId: string
++  title: string
++  projectId: string
++  workspaceId?: string
++  key?: string
++  baseUrl?: string
++  domainPath?: string
++  /** Signed domain API key (ekdk_...) to store for this application. */
++  apiKey?: string
++  recordId?: string
++}
++
++export type RegisterEnvironmentInput = {
++  appId: string
++  key: string
++  /** Runtime env payload forwarded on domain operations (e.g. { orgId: "org_..." }). */
++  env: Record<string, unknown>
++  title?: string
++  status?: string
++  recordId?: string
++}
++
++export type CreateApiKeyResult = {
++  apiKey: string
++  keyId: string
++  apiKeyId: string
++  environment?: string
++  env: { EKAIROS_API_KEY: string }
++}
++
++export class PlatformApiError extends Error {
++  readonly status: number
++  readonly body: unknown
++
++  constructor(message: string, status: number, body: unknown) {
++    super(message)
++    this.name = "PlatformApiError"
++    this.status = status
++    this.body = body
++  }
++}
++
++function resolvePlatformUrl(value?: string) {
++  const url =
++    String(value ?? "").trim() ||
++    String(
++      (globalThis as { process?: { env?: Record<string, string | undefined> } })
++        .process?.env?.EKAIROS_PLATFORM_URL ?? "",
++    ).trim() ||
++    DEFAULT_PLATFORM_URL
++  return url.replace(/\/+$/, "")
++}
++
++async function resolveToken(auth: PlatformAuth) {
++  const token =
++    typeof auth.token === "function" ? await auth.token() : auth.token
++  const trimmed = String(token ?? "").trim()
++  if (!trimmed) {
++    throw new PlatformApiError("platform_token_required", 401, null)
++  }
++  return trimmed
++}
++
++export class PlatformApi {
++  readonly platformUrl: string
++  private readonly auth: PlatformAuth
++
++  constructor(config: PlatformApiConfig) {
++    this.platformUrl = resolvePlatformUrl(config.platformUrl)
++    this.auth = config.auth
++  }
++
++  private async request<T>(input: {
++    path: string
++    method?: "GET" | "POST"
++    body?: unknown
++  }): Promise<T> {
++    const token = await resolveToken(this.auth)
++    const response = await fetch(`${this.platformUrl}${input.path}`, {
++      method: input.method ?? (input.body === undefined ? "GET" : "POST"),
++      headers: {
++        authorization: `Bearer ${token}`,
++        ...(input.body !== undefined
++          ? { "content-type": "application/json" }
++          : {}),
++      },
++      body: input.body === undefined ? undefined : JSON.stringify(input.body),
++    })
++
++    const text = await response.text()
++    let payload: unknown = null
++    try {
++      payload = text ? JSON.parse(text) : null
++    } catch {
++      payload = text
++    }
++
++    const ok =
++      response.ok &&
++      (payload === null ||
++        typeof payload !== "object" ||
++        (payload as { ok?: unknown }).ok !== false)
++    if (!ok) {
++      const error =
++        payload && typeof payload === "object"
++          ? String((payload as { error?: unknown }).error ?? "platform_request_failed")
++          : "platform_request_failed"
++      throw new PlatformApiError(error, response.status, payload)
++    }
++
++    return payload as T
++  }
++
++  /** Applications registered in the caller's organization ("projects" surface). */
++  readonly apps = {
++    list: async (): Promise<PlatformApplication[]> => {
++      const result = await this.request<{
++        ok: true
++        organization: string
++        applications: PlatformApplication[]
++      }>({ path: "/api/platform/applications/list" })
++      return Array.isArray(result.applications) ? result.applications : []
++    },
++
++    get: async (appId: string): Promise<PlatformApplication | null> => {
++      const target = String(appId ?? "").trim()
++      if (!target) throw new PlatformApiError("app_id_required", 400, null)
++      const applications = await this.apps.list()
++      return applications.find((app) => app.appId === target) ?? null
++    },
++
++    register: async (input: RegisterApplicationInput) => {
++      const result = await this.request<{
++        ok: true
++        application: {
++          recordId: string
++          appId: string
++          key: string
++          title: string
++          baseUrl: string
++          domainPath: string
++          apiKeyId: string
++        }
++      }>({ path: "/api/platform/applications/upsert", body: input })
++      return result.application
++    },
++
++    /**
++     * Generate a signed domain API key (ekdk_...). With appId the key is stored
++     * for the application; without it the key is only returned to the caller.
++     */
++    createApiKey: async (input: { appId?: string } = {}) => {
++      return await this.request<CreateApiKeyResult>({
++        path: "/api/platform/projects/api-key",
++        body: input,
++      })
++    },
++  }
++
++  /** Runtime environments of an application (e.g. one per customer org). */
++  readonly environments = {
++    list: async (appId: string): Promise<PlatformEnvironment[]> => {
++      const application = await this.apps.get(appId)
++      if (!application) {
++        throw new PlatformApiError("application_not_found", 404, null)
++      }
++      return application.environments
++    },
++
++    register: async (input: RegisterEnvironmentInput) => {
++      const result = await this.request<{
++        ok: true
++        environment: {
++          recordId: string
++          environmentId: string
++          key: string
++          title: string
++          env: Record<string, unknown>
++        }
++      }>({
++        path: "/api/platform/environments/upsert",
++        body: {
++          appId: input.appId,
++          key: input.key,
++          env: input.env,
++          ...(input.title ? { title: input.title } : {}),
++          ...(input.status ? { status: input.status } : {}),
++          ...(input.recordId ? { recordId: input.recordId } : {}),
++        },
++      })
++      return result.environment
++    },
++  }
++}
++
++export function init(config: PlatformApiConfig) {
++  return new PlatformApi(config)
++}
++
++// ---------------------------------------------------------------------------
++// Runtime env reporting (machine credential)
++//
++// A client domain reports the runtime env it was constructed with so the
++// platform can materialize a workspace environment under the registered
++// application. Auth is the project's signed domain API key (ekdk_...), not a
++// user token — safe to call from the host application's server runtime.
++// ---------------------------------------------------------------------------
++
++export type RuntimeEnvReportConfig = {
++  /** Project domain credential (ekdk_...), the same key that protects /api/domain. */
++  apiKey: string
++  /** Defaults to EKAIROS_PLATFORM_URL or https://platform.ekairos.dev */
++  platformUrl?: string
++  /** Platform organization that owns the application (x-ekairos-organization-id). */
++  organizationId?: string | null
++  /** Public origin of the reporting deployment; informational. */
++  baseUrl?: string | null
++  /** Domain route path of the reporting deployment (default /api/domain). */
++  domainPath?: string
++}
++
++export type RuntimeEnvReportOptions = {
++  source?: string
++  title?: string
++}
++
++const REPORT_TTL_MS = 10 * 60 * 1000
++const REPORT_TIMEOUT_MS = 4000
++const reportedAt = new Map<string, number>()
++
++function stableStringify(value: unknown): string {
++  if (value === null || typeof value !== "object") {
++    return JSON.stringify(value) ?? "null"
++  }
++  if (Array.isArray(value)) {
++    return `[${value.map((item) => stableStringify(item)).join(",")}]`
++  }
++  const entries = Object.entries(value as Record<string, unknown>)
++    .filter(([, item]) => typeof item !== "function" && item !== undefined)
++    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
++    .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
++  return `{${entries.join(",")}}`
++}
++
++function sanitizeReportEnv(env: Record<string, unknown>) {
++  const output: Record<string, unknown> = {}
++  for (const [key, value] of Object.entries(env ?? {})) {
++    if (value === undefined || typeof value === "function") continue
++    if (value === null || ["string", "number", "boolean"].includes(typeof value)) {
++      output[key] = value
++      continue
++    }
++    try {
++      output[key] = JSON.parse(JSON.stringify(value))
++    } catch {
++      // non-serializable env members are dropped from the report
++    }
++  }
++  return output
++}
++
++/**
++ * Report a runtime env to the platform. Fire-and-forget: schedules a
++ * deduplicated request (10 min TTL per env fingerprint) and returns
++ * immediately. Never throws and never blocks the host application.
++ */
++export function reportRuntimeEnv(
++  config: RuntimeEnvReportConfig,
++  env: Record<string, unknown>,
++  options?: RuntimeEnvReportOptions,
++): void {
++  try {
++    const platformUrl = resolvePlatformUrl(config.platformUrl)
++    const apiKey = String(config.apiKey ?? "").trim()
++    if (!apiKey) return
++
++    const sanitized = sanitizeReportEnv(env)
++    const fingerprint = `${platformUrl}|${stableStringify(sanitized)}`
++    const now = Date.now()
++    const last = reportedAt.get(fingerprint)
++    if (last && now - last < REPORT_TTL_MS) return
++    reportedAt.set(fingerprint, now)
++
++    const headers: Record<string, string> = {
++      "content-type": "application/json",
++      authorization: `Bearer ${apiKey}`,
++    }
++    const organizationId = String(config.organizationId ?? "").trim()
++    if (organizationId) {
++      headers["x-ekairos-organization-id"] = organizationId
++    }
++
++    void fetch(`${platformUrl}/api/platform/domain/env-report`, {
++      method: "POST",
++      headers,
++      body: JSON.stringify({
++        env: sanitized,
++        baseUrl: config.baseUrl ?? null,
++        domainPath: String(config.domainPath ?? "").trim() || "/api/domain",
++        source: options?.source ?? "runtime",
++        ...(options?.title ? { title: options.title } : {}),
++        reportedAt: new Date(now).toISOString(),
++      }),
++      signal: AbortSignal.timeout(REPORT_TIMEOUT_MS),
++    })
++      .then((response) => {
++        if (!response.ok) reportedAt.delete(fingerprint)
++      })
++      .catch(() => {
++        // allow a retry on the next report
++        reportedAt.delete(fingerprint)
++      })
++  } catch {
++    // reporting must never interfere with the host application
++  }
++}
+diff --git a/packages/platform/tsconfig.json b/packages/platform/tsconfig.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..2507652e1282ee054feb93796f6b14f99fa76436
+--- /dev/null
++++ b/packages/platform/tsconfig.json
+@@ -0,0 +1,16 @@
++{
++  "extends": "@ekairos/tsconfig/base.json",
++  "compilerOptions": {
++    "outDir": "dist",
++    "rootDir": "src",
++    "lib": ["ES2020", "DOM"],
++    "module": "ES2020",
++    "moduleResolution": "Bundler",
++    "sourceMap": false,
++    "declarationMap": false,
++    "inlineSourceMap": false,
++    "inlineSources": false
++  },
++  "include": ["src"],
++  "exclude": ["node_modules", "**/*.test.ts", "**/tests/**"]
++}
+diff --git a/packages/tasks/src/actions.ts b/packages/tasks/src/actions.ts
+index 97aa536098d5965baa092dbe7fc5cf804f574489..8898feaabbba11ccc62310c51327e68ef6b95384 100644
+--- a/packages/tasks/src/actions.ts
++++ b/packages/tasks/src/actions.ts
+@@ -13,71 +13,71 @@ import {
+ } from "./service.js"
+ 
+ export async function openTaskExecute({
+-  runtime,
++  domain,
+   input,
+ }: {
+-  runtime: TasksRuntime
++  domain: TasksRuntime
+   input: TaskOpenActionInput
+ }): Promise<ServiceResult<TaskRecord>> {
+-  return await new TaskService(runtime).openRaw(input)
++  return await new TaskService(domain).openRaw(input)
+ }
+ 
+ export async function decideTaskExecute({
+-  runtime,
++  domain,
+   input,
+ }: {
+-  runtime: TasksRuntime
++  domain: TasksRuntime
+   input: TaskDecideActionInput
+ }): Promise<ServiceResult<TaskRecord>> {
+-  return await new TaskService(runtime).decide(input)
++  return await new TaskService(domain).decide(input)
+ }
+ 
+ export async function cancelTaskExecute({
+-  runtime,
++  domain,
+   input,
+ }: {
+-  runtime: TasksRuntime
++  domain: TasksRuntime
+   input: TaskCancelActionInput
+ }): Promise<ServiceResult<TaskRecord>> {
+-  return await new TaskService(runtime).cancel(input)
++  return await new TaskService(domain).cancel(input)
+ }
+ 
+ export async function failTaskExecute({
+-  runtime,
++  domain,
+   input,
+ }: {
+-  runtime: TasksRuntime
++  domain: TasksRuntime
+   input: TaskFailActionInput
+ }): Promise<ServiceResult<TaskRecord>> {
+-  return await new TaskService(runtime).fail(input)
++  return await new TaskService(domain).fail(input)
+ }
+ 
+ export async function startTaskExecute({
+-  runtime,
++  domain,
+   input,
+ }: {
+-  runtime: TasksRuntime
++  domain: TasksRuntime
+   input: TaskStartActionInput
+ }): Promise<ServiceResult<TaskRecord>> {
+-  return await new TaskService(runtime).start(input)
++  return await new TaskService(domain).start(input)
+ }
+ 
+ export async function getTaskExecute({
+-  runtime,
++  domain,
+   input,
+ }: {
+-  runtime: TasksRuntime
++  domain: TasksRuntime
+   input: TaskGetActionInput
+ }): Promise<ServiceResult<TaskRecord>> {
+-  return await new TaskService(runtime).getRaw(input)
++  return await new TaskService(domain).getRaw(input)
+ }
+ 
+ export async function awaitOutcomeExecute({
+-  runtime,
++  domain,
+   input,
+ }: {
+-  runtime: TasksRuntime
++  domain: TasksRuntime
+   input: TaskAwaitOutcomeActionInput
+ }): Promise<ServiceResult<unknown>> {
+-  return await new TaskService(runtime).awaitOutcome(input)
++  return await new TaskService(domain).awaitOutcome(input)
+ }
+diff --git a/packages/tasks/src/domain.ts b/packages/tasks/src/domain.ts
+index 1390eb599edd74e54ada3f42d9f7592459837d37..2d5b3dc8871ecdbef3a10ad0c50ac41339e3cae7 100644
+--- a/packages/tasks/src/domain.ts
++++ b/packages/tasks/src/domain.ts
+@@ -1,5 +1,11 @@
+ import { i } from "@instantdb/core"
+-import { defineAction, domain } from "@ekairos/domain"
++import {
++  DOMAIN_ACTION_FULL_INPUT_TYPE,
++  DOMAIN_ACTION_OWNER_TYPE,
++  DOMAIN_ACTION_RUNTIME_TYPE,
++  defineAction,
++  domain,
++} from "@ekairos/domain"
+ import { z } from "zod"
+ 
+ import {
+@@ -147,52 +153,40 @@ export const tasksSchemaDomain = domain("tasks")
+ 
+ const taskActions = {
+   createTask: defineAction({
+-    name: "tasks.createTask",
+     input: openTaskInputSchema,
+     output: taskServiceResultSchema,
+     execute: openTaskExecute,
+   }),
+   getTask: defineAction({
+-    name: "tasks.getTask",
+     input: getTaskInputSchema,
+     output: taskServiceResultSchema,
+     execute: getTaskExecute,
+   }),
+   awaitOutcome: defineAction({
+-    name: "tasks.awaitOutcome",
+     input: awaitOutcomeInputSchema,
+     output: taskOutcomeResultSchema,
+     execute: awaitOutcomeExecute,
+   }),
+   startTask: defineAction({
+-    name: "tasks.startTask",
+     input: startTaskInputSchema,
+     output: taskServiceResultSchema,
+     execute: startTaskExecute,
+   }),
+   completeTask: defineAction({
+-    name: "tasks.completeTask",
+     input: decideTaskInputSchema,
+     output: taskServiceResultSchema,
+     execute: decideTaskExecute,
+   }),
+   cancelTask: defineAction({
+-    name: "tasks.cancelTask",
+     input: cancelTaskInputSchema,
+     output: taskServiceResultSchema,
+     execute: cancelTaskExecute,
+   }),
+   failTask: defineAction({
+-    name: "tasks.failTask",
+     input: failTaskInputSchema,
+     output: taskServiceResultSchema,
+     execute: failTaskExecute,
+   }),
+ } as const
+ 
+-type TasksDomainPublic = typeof tasksSchemaDomain & {
+-  readonly actions: typeof taskActions
+-}
+-
+-export const tasksDomain: TasksDomainPublic = tasksSchemaDomain
+-  .withActions(taskActions) as unknown as TasksDomainPublic
++export const tasksDomain = tasksSchemaDomain.withActions(taskActions)
+diff --git a/packages/tasks/src/tests/task.actions.test.ts b/packages/tasks/src/tests/task.actions.test.ts
+index 593f08ef261a219d709aec216c22037c732cf1e3..2f3d4beebbe1175b2de3ec51cb55aaec88390bad 100644
+--- a/packages/tasks/src/tests/task.actions.test.ts
++++ b/packages/tasks/src/tests/task.actions.test.ts
+@@ -25,7 +25,7 @@ async function executeAction(
+ 
+ describe("tasks domain actions", () => {
+   it("exposes the canonical task action API", () => {
+-    expect(Object.values(tasksDomain.actions).map((action) => action.name)).toEqual([
++    expect(Object.values(tasksDomain.actions).map((action) => action.id)).toEqual([
+       "tasks.createTask",
+       "tasks.getTask",
+       "tasks.awaitOutcome",
+*** End Git Diff
+*** End ECU Patch

@@ -24,25 +24,10 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./context": {
-      "types": "./dist/context.d.ts",
-      "import": "./dist/context.js",
-      "default": "./dist/context.js"
-    },
-    "./runtime": {
-      "types": "./dist/runtime.d.ts",
-      "import": "./dist/runtime.js",
-      "default": "./dist/runtime.js"
-    }
-  },
-  "typesVersions": {
-    "*": {
-      "context": [
-        "dist/context.d.ts"
-      ],
-      "runtime": [
-        "dist/runtime.d.ts"
-      ]
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "import": "./dist/internal.js",
+      "default": "./dist/internal.js"
     }
   },
   "scripts": {
@@ -51,12 +36,14 @@
     "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true}); fs.rmSync('.tsbuildinfo',{force:true})\"",
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc --noEmit -p tsconfig.typecheck.json",
-    "test": "vitest run -c vitest.config.mts"
+    "test": "vitest run -c vitest.config.mts",
+    "test:workflow": "vitest run -c vitest.workflow.config.mts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.52",
     "@ekairos/domain": "workspace:*",
     "@ekairos/events": "workspace:*",
+    "@ekairos/sandbox": "workspace:*",
     "@instantdb/admin": "0.22.158",
     "@instantdb/core": "0.22.142",
     "ai": "^5.0.95",

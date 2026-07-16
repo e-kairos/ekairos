@@ -1,90 +1,52 @@
-import { tool } from "ai"
+import { defineAction, type DomainActionDefinition } from "@ekairos/domain"
 import { z } from "zod"
+
 import { persistDatasetStep } from "./completeDataset.steps.js"
 
-interface CompleteDatasetToolParams {
-    datasetId: string
-    sandboxId: string
-    runtime: any
-    outputPath?: string
-}
+export const completeDatasetInputSchema = z.object({
+  datasetId: z.string(),
+  sandboxId: z.string(),
+  outputPath: z.string().optional(),
+  summary: z
+    .string()
+    .describe("Summary of the completed dataset including record count and structure"),
+})
 
-export function createCompleteDatasetTool({ datasetId, sandboxId, runtime, outputPath }: CompleteDatasetToolParams) {
-    return tool({
-        description: "Validate and complete the dataset from output.jsonl. The result includes the JSONL outputPath and storagePath used for completion.",
-        inputSchema: z.object({
-            summary: z.string().describe("Summary of the completed dataset including record count and structure"),
-        }),
-        execute: async ({ summary }: { summary: string }) => {
-            console.log(`[Dataset ${datasetId}] ========================================`)
-            console.log(`[Dataset ${datasetId}] Tool: completeDataset`)
-            console.log(`[Dataset ${datasetId}] Summary: ${summary}`)
-            console.log(`[Dataset ${datasetId}] ========================================`)
+export const completeDatasetOutputSchema = z
+  .object({
+    success: z.boolean(),
+    status: z.string().optional(),
+    rowSource: z.string(),
+    outputPath: z.string().nullable(),
+    storagePath: z.string().nullable(),
+    summary: z.string().optional(),
+    error: z.string().optional(),
+    message: z.string().optional(),
+  })
+  .passthrough()
 
-            return await persistDatasetStep({
-                runtime,
-                datasetId,
-                sandboxId,
-                summary,
-                outputPath,
-            })
-        },
+export const completeDataset: DomainActionDefinition<
+  typeof completeDatasetInputSchema,
+  typeof completeDatasetOutputSchema
+> = defineAction({
+  description:
+    "Validate and complete the dataset from output.jsonl. The result includes the JSONL outputPath and storagePath used for completion.",
+  input: completeDatasetInputSchema,
+  output: completeDatasetOutputSchema,
+  execute: async ({ input, runtime }) => {
+    const { datasetId, sandboxId, summary, outputPath } = input
+
+    console.log(`[Dataset ${datasetId}] ========================================`)
+    console.log(`[Dataset ${datasetId}] Action: completeDataset`)
+    console.log(`[Dataset ${datasetId}] Summary: ${summary}`)
+    console.log(`[Dataset ${datasetId}] ========================================`)
+
+    return await persistDatasetStep({
+      runtime,
+      datasetId,
+      sandboxId,
+      summary,
+      outputPath,
     })
-}
-
-export function didCompleteDatasetSucceed(event: { content?: { parts?: any[] } }): boolean {
-    const parts = Array.isArray(event?.content?.parts) ? event.content.parts : []
-
-    return parts.some((part) => {
-        if (
-            part?.type === "action" &&
-            ["completeDataset", "completeObject", "replaceRows"].includes(part?.content?.actionName)
-        ) {
-            const output = part.content.output
-            return part.content.status === "completed" && output?.success === true && output?.status === "completed"
-        }
-
-        if (
-            part?.type === "tool-completeDataset" ||
-            part?.type === "tool-completeObject" ||
-            part?.type === "tool-replaceRows"
-        ) {
-            const output = part.output ?? part.result
-            return part.state === "output-available" && output?.success === true && output?.status === "completed"
-        }
-
-        return false
-    })
-}
-
-export function getDatasetFatalFailure(event: { content?: { parts?: any[] } }): string | null {
-    const parts = Array.isArray(event?.content?.parts) ? event.content.parts : []
-
-    for (const part of parts) {
-        let actionName: string | undefined
-        let output: any
-
-        if (part?.type === "action") {
-            actionName = part.content?.actionName
-            output = part.content?.output
-        } else if (typeof part?.type === "string" && part.type.startsWith("tool-")) {
-            actionName = part.type.slice("tool-".length)
-            output = part.output ?? part.result
-        }
-
-        if (!output || output.fatal !== true) {
-            continue
-        }
-
-        const message =
-            typeof output.error === "string" && output.error.trim()
-                ? output.error.trim()
-                : typeof output.message === "string" && output.message.trim()
-                    ? output.message.trim()
-                    : "Dataset action failed fatally"
-
-        return actionName ? `${actionName}: ${message}` : message
-    }
-
-    return null
-}
+  },
+})

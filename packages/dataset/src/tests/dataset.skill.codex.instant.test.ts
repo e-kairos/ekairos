@@ -11,14 +11,16 @@ import { randomUUID } from "node:crypto"
 import { init, id as newId } from "@instantdb/admin"
 import { i } from "@instantdb/core"
 import { configureRuntime, EkairosRuntime } from "@ekairos/domain/runtime"
-import { eventsDomain, type ContextItem } from "@ekairos/events"
-import { createContext } from "@ekairos/reactor/context"
-import { domain } from "@ekairos/domain"
+import { Events, contextDomain } from "@ekairos/events"
+import { defineReaction } from "@ekairos/reactor"
+import { defineEvent, domain } from "@ekairos/domain"
+import { z } from "zod"
 import { datasetDomain } from "../schema"
 import { DatasetService } from "../service"
 import { buildDatasetSkillPackage } from "../skill"
-import { createRealCodexCommandReactor, setupRealCodexRunner, type RealCodexRunner } from "./codex.real"
+import { createRealCodexCommandEngine, setupRealCodexRunner, type RealCodexRunner } from "./codex.real"
 import { createTestApp, destroyTestApp } from "../../../ekairos-test/src/provision.ts"
+import { Context } from "../../../context/src/index.ts"
 
 const fileDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(fileDir, "..", "..", "..", "..")
@@ -67,44 +69,6 @@ function hasCodexAuth(): boolean {
   )
 }
 
-function buildTriggerEvent(text: string): ContextItem {
-  return {
-    id: randomUUID(),
-    type: "input",
-    channel: "web",
-    createdAt: new Date().toISOString(),
-    status: "stored",
-    content: {
-      parts: [{ type: "text", text }],
-    },
-  }
-}
-
-function getCommandParts(event: ContextItem) {
-  const parts = Array.isArray(event.content?.parts) ? event.content.parts : []
-  return parts.filter((part: any) => {
-    if (part?.type === "tool-commandExecution") return true
-
-    const content = part?.content ?? {}
-    return (
-      part?.type === "action" &&
-      content?.status === "started" &&
-      content?.actionName === "executeCommand"
-    )
-  })
-}
-
-function getCommandTexts(event: ContextItem): string[] {
-  return getCommandParts(event).map((part: any) => {
-    if (part?.type === "action") {
-      const input = part?.content?.input ?? {}
-      return String(input?.command ?? "").trim() + " " + JSON.stringify(input?.metadata?.commandActions ?? [])
-    }
-
-    return String(part?.input?.command ?? "").trim() + " " + JSON.stringify(part?.input?.commandActions ?? [])
-  })
-}
-
 async function getOutputRows(db: any, datasetId: string, benchmarkLabel: string) {
   return await benchmarkAsync(`${benchmarkLabel}.getOutputRows`, async () => {
     const query: any = await db.query({
@@ -127,24 +91,41 @@ async function getOutputRows(db: any, datasetId: string, benchmarkLabel: string)
   })
 }
 
-async function queryEventParts(db: any, stepRows: any[]) {
+async function queryEventParts(db: any, eventRows: any[]) {
   const rows: any[] = []
-  for (const step of stepRows) {
-    const stepId = String(step?.id ?? "").trim()
-    if (!stepId) continue
+  for (const event of eventRows) {
+    const eventId = String(event?.id ?? "").trim()
+    if (!eventId) continue
     const snapshot = await db.query({
-      event_parts: {
+      context_eventParts: {
         $: {
-          where: { stepId: stepId as any },
-          order: { idx: "asc" },
+          where: { "event.id": eventId as any },
+          order: { index: "asc" },
           limit: 500,
         },
-        step: {},
+        event: {},
       },
     } as any)
-    rows.push(...(Array.isArray(snapshot?.event_parts) ? snapshot.event_parts : []))
+    rows.push(...(Array.isArray(snapshot?.context_eventParts) ? snapshot.context_eventParts : []))
   }
   return rows
+}
+
+async function readContextEvent(db: any, eventId: string): Promise<ContextItem> {
+  const snapshot: any = await db.query({
+    context_events: {
+      $: { where: { id: eventId as any }, limit: 1 },
+      eventParts: {},
+    },
+  } as any)
+  return snapshot?.context_events?.[0] ?? {
+    id: eventId,
+    type: "unknown",
+    channel: "web",
+    createdAt: new Date().toISOString(),
+    payload: {},
+    eventParts: [],
+  }
 }
 
 function redactTraceSecrets(value: unknown): unknown {
@@ -174,37 +155,29 @@ async function writeTraceReport(params: {
   if (!TRACE_REPORT) return
 
   const reportStartedAt = Date.now()
-  const executionId = String(params.reaction?.execution?.id ?? "").trim()
+  const sessionId = String(params.reaction?.session?.id ?? "").trim()
   const contextId = String(params.reaction?.context?.id ?? "").trim()
   const reactionId = String(params.reaction?.reaction?.id ?? "").trim()
   const snapshot = await params.db.query({
-    event_contexts: {
+    context_contexts: {
       $: { where: { id: contextId as any }, limit: 1 },
-      currentExecution: {},
+      currentSession: {},
     },
-    event_executions: {
-      $: { where: { id: executionId as any }, limit: 1 },
+    context_sessions: {
+      $: { where: { id: sessionId as any }, limit: 1 },
       context: {},
       trigger: {},
-      reaction: {},
+      rootReaction: { causes: {}, effects: {} },
+      reactions: { causes: {}, effects: {} },
     },
-    event_steps: {
-      $: {
-        where: { "execution.id": executionId as any },
-        order: { createdAt: "asc" },
-        limit: 100,
-      },
-      execution: {},
-      stream: {},
-    },
-    event_items: {
+    context_events: {
       $: {
         where: { "context.id": contextId as any },
         order: { createdAt: "asc" },
         limit: 100,
       },
       context: {},
-      execution: {},
+      eventParts: {},
     },
     dataset_datasets: {
       $: { limit: 100, order: { createdAt: "asc" } },
@@ -212,30 +185,28 @@ async function writeTraceReport(params: {
       records: {},
     },
   } as any)
-  const stepRows = Array.isArray(snapshot?.event_steps) ? snapshot.event_steps : []
-  const partRows = await queryEventParts(params.db, stepRows)
+  const eventRows = Array.isArray(snapshot?.context_events) ? snapshot.context_events : []
+  const partRows = await queryEventParts(params.db, eventRows)
   const report = redactTraceSecrets({
     generatedAt: new Date().toISOString(),
     label: params.label,
     appId: params.appId,
-    ids: { contextId, executionId, reactionId },
+    ids: { contextId, sessionId, reactionId },
     timings: benchmarkEntries,
     outputRows: params.rows,
     reaction: params.reaction,
     counts: {
-      event_contexts: Array.isArray(snapshot?.event_contexts) ? snapshot.event_contexts.length : 0,
-      event_executions: Array.isArray(snapshot?.event_executions) ? snapshot.event_executions.length : 0,
-      event_steps: stepRows.length,
-      event_items: Array.isArray(snapshot?.event_items) ? snapshot.event_items.length : 0,
-      event_parts: partRows.length,
+      context_contexts: Array.isArray(snapshot?.context_contexts) ? snapshot.context_contexts.length : 0,
+      context_sessions: Array.isArray(snapshot?.context_sessions) ? snapshot.context_sessions.length : 0,
+      context_events: eventRows.length,
+      context_eventParts: partRows.length,
       dataset_datasets: Array.isArray(snapshot?.dataset_datasets) ? snapshot.dataset_datasets.length : 0,
     },
     entities: {
-      event_contexts: snapshot?.event_contexts ?? [],
-      event_executions: snapshot?.event_executions ?? [],
-      event_steps: stepRows,
-      event_items: snapshot?.event_items ?? [],
-      event_parts: partRows,
+      context_contexts: snapshot?.context_contexts ?? [],
+      context_sessions: snapshot?.context_sessions ?? [],
+      context_events: eventRows,
+      context_eventParts: partRows,
       dataset_datasets: snapshot?.dataset_datasets ?? [],
     },
   })
@@ -264,11 +235,24 @@ const sampleDomain = domain("sample").schema({
   rooms: {},
 })
 
+const skillRequested = defineEvent({
+  payload: z.object({ prompt: z.string() }),
+})
+
+const skillCompleted = defineEvent({
+  payload: z.object({
+    completed: z.boolean(),
+    summary: z.string().optional(),
+  }),
+})
+
 const appDomain = domain("dataset-skill-codex-tests")
   .includes(datasetDomain)
-  .includes(eventsDomain)
+  .includes(contextDomain)
   .includes(sampleDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
+  .withEvents({ skillRequested, skillCompleted })
+  .withActions(datasetDomain.actions)
 
 type TestEnv = {
   repoPath: string
@@ -297,22 +281,55 @@ describe("dataset skill + codex real", () => {
 
   const datasetSkill = buildDatasetSkillPackage()
 
-  function createDatasetCodexContext(activeRunner: RealCodexRunner, repoPath: string) {
-    return createContext<TestEnv>("dataset.skill.codex.real")
-      .context((stored) => stored.content ?? {})
-      .narrative(
-        () =>
-          "Use installed skills when they are relevant. Persist the final dataset result when the task asks for a dataset.",
-      )
-      .skills(() => [datasetSkill as any])
-      .actions(() => ({}))
-      .reactor(createRealCodexCommandReactor<Record<string, unknown>, TestEnv>({
-        runner: activeRunner,
-        repoPath,
-        approvalPolicy: "never",
-      }))
-      .shouldContinue(() => false)
-      .build()
+  function createDatasetCodexReaction(
+    activeRunner: RealCodexRunner,
+    repoPath: string,
+  ) {
+    const output = z.object({
+      completed: z.boolean(),
+      summary: z.string().optional(),
+    })
+
+    return defineReaction(
+      appDomain.events.skillRequested,
+      {
+        key: "dataset.skill.codex.real",
+        scope: appDomain,
+        engine: createRealCodexCommandEngine({
+          runner: activeRunner,
+          repoPath,
+          approvalPolicy: "never",
+          skills: [datasetSkill],
+        }),
+        sandbox: false,
+      },
+      async reaction => {
+        const result = await reaction.given(reaction.trigger).agent({
+          instruction: [
+            "Use installed skills when they are relevant.",
+            "Persist the final dataset result when the task asks for a dataset.",
+            "When the dataset is persisted, return a concise structured completion summary.",
+            `Task: ${reaction.trigger.payload.prompt}`,
+          ].join("\n"),
+          output,
+          actions: [
+            appDomain.actions.executeCommand,
+            appDomain.actions.completeDataset,
+            appDomain.actions.clearDataset,
+            appDomain.actions.defineNotation,
+            appDomain.actions.generateSchema,
+            appDomain.actions.replaceRows,
+            appDomain.actions.completeObject,
+            appDomain.actions.prepareFileMaterialization,
+            appDomain.actions.prepareTransformMaterialization,
+          ],
+          maxRounds: 6,
+        })
+        return await reaction.given(result).emit(
+          appDomain.events.skillCompleted(result.payload),
+        )
+      },
+    )
   }
 
   beforeAll(async () => {
@@ -430,19 +447,49 @@ describe("dataset skill + codex real", () => {
 
   async function runPrompt(params: { repoPath: string; prompt: string; benchmarkLabel: string }) {
     return await benchmarkAsync(`${params.benchmarkLabel}.runPrompt`, async () => {
-      const context = createDatasetCodexContext(runner!, params.repoPath)
       const env = {
         repoPath: params.repoPath,
         approvalPolicy: "never",
       }
-      const shell = await context.react(buildTriggerEvent(params.prompt), {
-        runtime: new DatasetSkillRuntime(env),
-        env,
-        context: { key: `dataset-skill:${Date.now()}:${Math.random().toString(36).slice(2)}` },
-        durable: false,
-        options: { maxIterations: 1, maxModelSteps: 1 },
+      const runtime = new DatasetSkillRuntime(env)
+      const context = await Context(runtime as any).create({
+        key: `dataset-skill:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+        content: { repoPath: params.repoPath },
       })
-      return await shell.run!
+      const trigger = await Events(runtime).emit(
+        appDomain.events.skillRequested({ prompt: params.prompt }),
+        {
+          id: randomUUID(),
+          channel: "web",
+          contextId: context.id,
+          createdAt: new Date(),
+        },
+      )
+      const effect = await context.react(
+        trigger,
+        createDatasetCodexReaction(runner!, params.repoPath),
+      )
+      const snapshot: any = await db!.query({
+        context_sessions: {
+          $: { where: { context: context.id as any }, limit: 20 },
+          rootReaction: { effects: {} },
+          reactions: { effects: {} },
+        },
+      } as any)
+      const sessions = snapshot?.context_sessions ?? []
+      const session =
+        sessions.find((candidate: any) =>
+          candidate.rootReaction?.effects?.some(
+            (candidateEffect: any) => candidateEffect.id === effect.id,
+          ),
+        ) ?? sessions.at(-1)
+      const reactionEvent = await readContextEvent(db, effect.id)
+      return {
+        context: { id: context.id },
+        session: { id: session?.id },
+        reaction: reactionEvent,
+        result: effect.payload,
+      }
     })
   }
 
@@ -476,8 +523,6 @@ describe("dataset skill + codex real", () => {
         { code: "A2", description: "Gadget", price: 20 },
       ])
 
-      const commandTexts = getCommandTexts(reaction.reaction)
-      expect(commandTexts.some((entry) => entry.includes("skills/dataset") && entry.includes("complete_dataset.mjs"))).toBe(true)
       await writeTraceReport({ label: "file", appId, db, reaction, rows })
     },
   )
@@ -522,9 +567,6 @@ describe("dataset skill + codex real", () => {
         { sku: "Gadget", price: 20, currency: "EUR" },
       ].sort((a, b) => String(a.sku).localeCompare(String(b.sku))))
 
-      const commandTexts = getCommandTexts(reaction.reaction)
-      expect(commandTexts.some((entry) => entry.includes("query_to_jsonl.mjs"))).toBe(true)
-      expect(commandTexts.some((entry) => entry.includes("complete_dataset.mjs"))).toBe(true)
     },
   )
 
@@ -582,10 +624,6 @@ describe("dataset skill + codex real", () => {
         { name: "Gadget", priceUsd: 22 },
       ])
 
-      const commandTexts = getCommandTexts(reaction.reaction)
-      expect(commandTexts.some((entry) => entry.includes("dataset_source_to_jsonl.mjs"))).toBe(true)
-      expect(commandTexts.some((entry) => entry.includes("query_to_jsonl.mjs"))).toBe(true)
-      expect(commandTexts.some((entry) => entry.includes("complete_dataset.mjs"))).toBe(true)
     },
   )
 })

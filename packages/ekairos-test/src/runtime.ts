@@ -1,4 +1,4 @@
-import type { DomainSchemaResult } from "@ekairos/domain";
+import type { MaterializedDomainLike } from "@ekairos/domain";
 import {
   configureRuntime,
   getRuntimeConfig,
@@ -8,33 +8,33 @@ import { createAppTestingDomain, ekairosTestDomain } from "./schema.js";
 
 export type ResolveEkairosRuntime<
   Env extends Record<string, unknown> = Record<string, unknown>,
-  Domain extends DomainSchemaResult = DomainSchemaResult,
+  Domain extends MaterializedDomainLike = MaterializedDomainLike,
   Runtime = unknown,
 > = (params: { env: Env; domain: Domain }) => Promise<Runtime> | Runtime;
 
 export type ComposeTestDomain = (params: {
-  appDomain: DomainSchemaResult;
-  testDomain: DomainSchemaResult;
+  appDomain: MaterializedDomainLike;
+  testDomain: MaterializedDomainLike;
   name?: string;
-}) => DomainSchemaResult;
+}) => MaterializedDomainLike;
 
 export type TestRuntimeParams<
   Env extends Record<string, unknown> = Record<string, unknown>,
 > = {
-  testDomain?: DomainSchemaResult;
+  testDomain?: MaterializedDomainLike;
   composedDomainName?: string;
-  resolveRuntime: ResolveEkairosRuntime<Env, DomainSchemaResult, unknown>;
-  shouldInject?: (params: { env: Env; domain: DomainSchemaResult }) => boolean;
+  resolveRuntime: ResolveEkairosRuntime<Env, MaterializedDomainLike, unknown>;
+  shouldInject?: (params: { env: Env; domain: MaterializedDomainLike }) => boolean;
   composeDomain?: ComposeTestDomain;
-  runtimeDomain?: DomainSchemaResult;
+  runtimeDomain?: MaterializedDomainLike;
 };
 
 function composeTestDomain(params: {
-  appDomain: DomainSchemaResult;
-  testDomain: DomainSchemaResult;
+  appDomain: MaterializedDomainLike;
+  testDomain: MaterializedDomainLike;
   name?: string;
   composeDomain?: ComposeTestDomain;
-}): DomainSchemaResult {
+}): MaterializedDomainLike {
   if (params.composeDomain) {
     return params.composeDomain({
       appDomain: params.appDomain,
@@ -52,7 +52,7 @@ function composeTestDomain(params: {
 
 export async function getEkairosRuntime<
   Env extends Record<string, unknown>,
-  Domain extends DomainSchemaResult,
+  Domain extends MaterializedDomainLike,
   Runtime,
 >(params: {
   env: Env;
@@ -73,12 +73,12 @@ export async function getEkairosTestRuntime<
   Runtime,
 >(params: {
   env: Env;
-  appDomain: DomainSchemaResult;
-  testDomain?: DomainSchemaResult;
+  appDomain: MaterializedDomainLike;
+  testDomain?: MaterializedDomainLike;
   composedDomainName?: string;
-  resolveRuntime: ResolveEkairosRuntime<Env, DomainSchemaResult, Runtime>;
+  resolveRuntime: ResolveEkairosRuntime<Env, MaterializedDomainLike, Runtime>;
   composeDomain?: ComposeTestDomain;
-}): Promise<{ runtime: Runtime; domain: DomainSchemaResult }> {
+}): Promise<{ runtime: Runtime; domain: MaterializedDomainLike }> {
   const domain = composeTestDomain({
     appDomain: params.appDomain,
     testDomain: params.testDomain ?? ekairosTestDomain,
@@ -101,7 +101,7 @@ export function configureTestRuntime<
   const testDomain = params.testDomain ?? ekairosTestDomain;
 
   const runtimeResolver: RuntimeResolver<Env> = async (env, domain) => {
-    const appDomain = domain as DomainSchemaResult | null | undefined;
+    const appDomain = domain as MaterializedDomainLike | null | undefined;
     if (!appDomain) {
       throw new Error(
         "configureTestRuntime requires runtime(domain, env) calls with an explicit domain."

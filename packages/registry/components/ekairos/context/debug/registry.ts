@@ -11,7 +11,7 @@ export type ContextDebugSnapshot = {
   contextId: string | null;
   contextStatus: string;
   sendStatus: string;
-  turnSubstateKey: string | null;
+  activeSessionId: string | null;
   events: ContextEventForUI[];
   updatedAtMs: number;
 };
@@ -51,7 +51,7 @@ class ContextDebugStore {
       contextId: context.contextId,
       contextStatus: context.contextStatus,
       sendStatus: context.sendStatus,
-      turnSubstateKey: context.turnSubstateKey,
+      activeSessionId: context.activeSessionId,
       events: Array.isArray(context.events) ? context.events : [],
       updatedAtMs: Date.now(),
     };
@@ -95,7 +95,7 @@ export function useRegisterContextDebug(instanceId: string, context: ContextValu
     context.contextId,
     context.contextStatus,
     context.sendStatus,
-    context.turnSubstateKey,
+    context.activeSessionId,
     context.events,
   ]);
 }

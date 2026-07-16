@@ -12,19 +12,19 @@ export const metadata = {
 const STORY = [
   {
     step: "context",
-    body: "A durable interaction starts as an event_context: narrative, skills, actions, model, reactor.",
+    body: "A durable interaction starts with pure Context content and its previous revision.",
   },
   {
-    step: "turns",
-    body: "User and assistant items accumulate as event_items — the conversation is state, not transport.",
+    step: "sessions",
+    body: "Each Reaction definition invocation is a Session with one trigger and root Reaction.",
   },
   {
-    step: "executions",
-    body: "Each reaction run is an event_execution with steps for reasoning, action calls, and progress.",
+    step: "events",
+    body: "Domain facts and operation results accumulate as context_events.",
   },
   {
     step: "parts",
-    body: "event_parts is the canonical replay surface. Everything the UI renders comes from here.",
+    body: "context_eventParts is the canonical streaming and replay surface.",
   },
 ] as const;
 

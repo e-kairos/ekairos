@@ -40,14 +40,6 @@ export default defineConfig({
         replacement: resolve(__dirname, "..", "..", "events", "src", "index.ts"),
       },
       {
-        find: "@ekairos/reactor/runtime",
-        replacement: resolve(__dirname, "..", "..", "reactor", "src", "runtime.ts"),
-      },
-      {
-        find: "@ekairos/reactor/context",
-        replacement: resolve(__dirname, "..", "..", "reactor", "src", "context.ts"),
-      },
-      {
         find: "@ekairos/reactor",
         replacement: resolve(__dirname, "..", "..", "reactor", "src", "index.ts"),
       },
@@ -60,7 +52,7 @@ export default defineConfig({
         replacement: resolve(__dirname, "..", "..", "sandbox", "src", "schema.ts"),
       },
       {
-        find: "@ekairos/sandbox",
+        find: /^@ekairos\/sandbox$/,
         replacement: resolve(__dirname, "..", "..", "sandbox", "src", "index.ts"),
       },
     ],

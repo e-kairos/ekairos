@@ -1,12 +1,14 @@
 {
   "name": "@ekairos/documents",
-  "version": "1.21.83-beta.0",
-  "description": "Pulzar Documents domain utilities",
-  "type": "commonjs",
+  "version": "1.22.0",
+  "description": "Ekairos Documents domain - files formalized into persistent, queryable documents",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "DOMAIN.md",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -20,30 +22,37 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "require": "./dist/index.js",
+      "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js",
+      "default": "./dist/schema.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run -c vitest.config.mts"
   },
   "dependencies": {
     "@ekairos/domain": "workspace:*",
-    "@instantdb/admin": "0.22.126",
-    "@instantdb/core": "0.22.126",
-    "formdata-node": "^6.0.3"
+    "@ekairos/reactor": "workspace:*",
+    "@instantdb/admin": "0.22.158",
+    "@instantdb/core": "0.22.142",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@ekairos/context": "workspace:*",
+    "@ekairos/events": "workspace:*",
     "@ekairos/tsconfig": "workspace:*",
     "@types/node": "^24.5.0",
-    "typescript": "^5.9.2"
+    "ai": "catalog:",
+    "dotenv": "^17.2.3",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.8"
   }
 }
-
-
-
-
-

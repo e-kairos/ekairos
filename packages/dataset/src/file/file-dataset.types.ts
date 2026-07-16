@@ -1,9 +1,9 @@
-import type { ContextReactor } from "@ekairos/reactor/context"
 import type { FilePreviewContext } from "./filepreview.types.js"
 
 export type SandboxState = {
   initialized: boolean
   filePath: string
+  contextPath?: string
   outputPath?: string
   scriptsDir?: string
   manifestPath?: string
@@ -15,6 +15,7 @@ export type FileParseContext = {
   instructions: string
   sandboxConfig: {
     filePath: string
+    contextPath?: string
     outputPath?: string
     scriptsDir?: string
     manifestPath?: string
@@ -34,7 +35,6 @@ export type FileParseContextParams = {
   sandboxId?: string
   datasetId?: string
   model?: string
-  reactor?: ContextReactor<any, any>
   sandboxState?: SandboxState
   filePreview?: FilePreviewContext
   schema?: any | null
@@ -46,7 +46,6 @@ export type FileParseContextParams = {
 
 export type FileParseRunOptions = {
   prompt?: string
-  durable?: boolean
   initialContent?: Record<string, any>
 }
 

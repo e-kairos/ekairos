@@ -81,7 +81,10 @@ export class RegistryRuntime<Extra extends Record<string, unknown> = {}> extends
   }
 
   protected async resolveDb(env: RegistryRuntimeEnv<Extra>) {
-    return await resolveRuntimeDb(env, appDomain);
+    return await resolveRuntimeDb(
+      env,
+      appDomain as unknown as DomainSchemaResult,
+    ) as DomainDbFor<typeof appDomain>;
   }
 }
 

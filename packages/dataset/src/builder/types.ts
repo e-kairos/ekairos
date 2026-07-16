@@ -1,55 +1,58 @@
 import type { InstaQLParams, ValidQuery } from "@instantdb/core"
-import type { DomainInstantSchema, DomainSchemaResult } from "@ekairos/domain"
+import type { DomainInstantSchema, MaterializedDomainLike } from "@ekairos/domain"
 import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
-import type { ContextIdentifier, StoredContextResource } from "@ekairos/events"
-import type { ContextReactor } from "@ekairos/reactor/context"
-import type { SandboxSession } from "@ekairos/sandbox"
+import type { AiReactionEngine, ReactionEngine } from "@ekairos/reactor"
 
 import { datasetDomain } from "../schema.js"
 import type { DatasetNotation } from "../notation.js"
 
-export type DatasetQueryResourceInput<D extends DomainSchemaResult = DomainSchemaResult> = {
+export type DatasetQuerySourceInput<
+  D extends MaterializedDomainLike = MaterializedDomainLike,
+> = {
   query: InstaQLParams<DomainInstantSchema<D>>
   title?: string
   explanation?: string
   domain: D
 }
 
-export type DatasetFileResourceInput = {
+export type DatasetFileSourceInput = {
   fileId: string
   description?: string
   filename?: string
   mediaType?: string
 }
 
-export type DatasetTextResourceInput = {
+export type DatasetTextSourceInput = {
   text: string
   mimeType?: string
   name?: string
   description?: string
 }
 
-export type DatasetExistingResourceInput = {
+export type DatasetExistingSourceInput = {
   datasetId: string
   description?: string
 }
 
-export type DatasetContextResourceInput = ContextIdentifier
+export type DatasetFileSource = { kind: "file" } & DatasetFileSourceInput
+export type DatasetTextSource = { kind: "text" } & DatasetTextSourceInput
+export type DatasetExistingSource = { kind: "dataset" } & DatasetExistingSourceInput
 
-export type DatasetFileResource = { kind: "file" } & DatasetFileResourceInput
-export type DatasetTextResource = { kind: "text" } & DatasetTextResourceInput
-export type DatasetExistingResource = { kind: "dataset" } & DatasetExistingResourceInput
-export type DatasetContextResource = { kind: "context" } & DatasetContextResourceInput
+export type DatasetSourceInput =
+  | DatasetFileSourceInput
+  | DatasetTextSourceInput
+  | DatasetExistingSourceInput
+  | DatasetFileSource
+  | DatasetTextSource
+  | DatasetExistingSource
 
-export type DatasetResourceInput =
-  | DatasetFileResourceInput
-  | DatasetTextResourceInput
-  | DatasetExistingResourceInput
-  | DatasetContextResourceInput
-  | DatasetFileResource
-  | DatasetTextResource
-  | DatasetExistingResource
-  | DatasetContextResource
+export type DatasetSourceDescriptor = {
+  key: string
+  kind: InternalDatasetSource["kind"]
+  name: string
+  description: string
+  [key: string]: unknown
+}
 
 export type DatasetSchemaInput = {
   title?: string
@@ -62,20 +65,18 @@ export type DatasetMode = "auto" | "schema"
 
 export type DatasetBuilderOptions = {
   datasetId?: string
-  durable?: boolean
+  parentSessionId?: string
 }
 
 export type DatasetBuildOptions = {
   datasetId?: string
-  durable?: boolean
 }
 
-export type InternalDatasetResource =
-  | DatasetFileResource
-  | DatasetTextResource
-  | DatasetExistingResource
-  | DatasetContextResource
-  | ({ kind: "query" } & DatasetQueryResourceInput)
+export type InternalDatasetSource =
+  | DatasetFileSource
+  | DatasetTextSource
+  | DatasetExistingSource
+  | ({ kind: "query" } & DatasetQuerySourceInput)
 
 export type DatasetReaderResult = {
   rows: any[]
@@ -101,6 +102,7 @@ export type DatasetBuildResult = {
 }
 
 export type DatasetRuntimeEnv = { orgId: string }
+export type DatasetReactionEngine = ReactionEngine<any> | AiReactionEngine
 export type AnyDatasetRuntime = EkairosRuntime<any, any, any>
 export type DatasetRuntimeHandle<Runtime extends AnyDatasetRuntime> = RuntimeForDomain<
   Runtime,
@@ -108,11 +110,11 @@ export type DatasetRuntimeHandle<Runtime extends AnyDatasetRuntime> = RuntimeFor
 >
 export type CompatibleQueryDomain<
   Runtime extends AnyDatasetRuntime,
-  D extends DomainSchemaResult,
+  D extends MaterializedDomainLike,
 > = RuntimeForDomain<Runtime, D> extends never ? never : D
 
-export type DatasetQueryResourceOptions<
-  D extends DomainSchemaResult,
+export type DatasetQuerySourceOptions<
+  D extends MaterializedDomainLike,
   Q extends ValidQuery<Q, DomainInstantSchema<D>>,
 > = {
   query: Q
@@ -123,18 +125,17 @@ export type DatasetQueryResourceOptions<
 export type DatasetBuilderState<Runtime extends AnyDatasetRuntime> = {
   runtime: Runtime
   env: Runtime["env"] & DatasetRuntimeEnv
-  resources: InternalDatasetResource[]
-  contextResources?: StoredContextResource[]
+  sources: InternalDatasetSource[]
+  sourceDescriptors?: DatasetSourceDescriptor[]
   title?: string
   sandboxId?: string
-  sandbox?: SandboxSession
   contextId?: string
   outputSchema?: DatasetSchemaInput
   output: DatasetOutput
   inferSchema: boolean
   instructions?: string
-  reactor?: ContextReactor<any, any>
-  durable?: boolean
+  engine?: DatasetReactionEngine
+  parentSessionId?: string
   first: boolean
 }
 
@@ -154,28 +155,27 @@ export type MaterializeRowsParams = {
 export type DatasetBuilder<Runtime extends AnyDatasetRuntime> = {
   readonly datasetId: string
 
-  fromFile(resource: DatasetFileResourceInput): DatasetBuilder<Runtime>
-  fromText(resource: DatasetTextResourceInput): DatasetBuilder<Runtime>
-  fromDataset(resource: DatasetExistingResourceInput): DatasetBuilder<Runtime>
-  fromContext(context: DatasetContextResourceInput): DatasetBuilder<Runtime>
-  from(...resources: DatasetResourceInput[]): DatasetBuilder<Runtime>
+  fromFile(resource: DatasetFileSourceInput): DatasetBuilder<Runtime>
+  fromText(resource: DatasetTextSourceInput): DatasetBuilder<Runtime>
+  fromDataset(resource: DatasetExistingSourceInput): DatasetBuilder<Runtime>
+  from(...sources: DatasetSourceInput[]): DatasetBuilder<Runtime>
   fromQuery<
-    D extends DomainSchemaResult,
+    D extends MaterializedDomainLike,
     Q extends ValidQuery<Q, DomainInstantSchema<D>>,
   >(
     domain: D & CompatibleQueryDomain<Runtime, D>,
-    resource: DatasetQueryResourceOptions<D, Q>,
+    resource: DatasetQuerySourceOptions<D, Q>,
   ): DatasetBuilder<Runtime>
 
   title(title: string): DatasetBuilder<Runtime>
-  sandbox(input: { sandboxId: string } | SandboxSession): DatasetBuilder<Runtime>
+  sandbox(sandboxId: string): DatasetBuilder<Runtime>
   schema(schema: DatasetSchemaInput): DatasetBuilder<Runtime>
   inferSchema(): DatasetBuilder<Runtime>
   auto(): DatasetBuilder<Runtime>
   asRows(): DatasetBuilder<Runtime>
   asObject(): DatasetBuilder<Runtime>
   instructions(instructions: string): DatasetBuilder<Runtime>
-  reactor(reactor: ContextReactor<any, any>): DatasetBuilder<Runtime>
+  engine(engine: DatasetReactionEngine): DatasetBuilder<Runtime>
   first(): DatasetBuilder<Runtime>
   build(options?: DatasetBuildOptions): Promise<DatasetBuildResult>
 }

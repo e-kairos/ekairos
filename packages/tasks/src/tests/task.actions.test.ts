@@ -25,7 +25,7 @@ async function executeAction(
 
 describe("tasks domain actions", () => {
   it("exposes the canonical task action API", () => {
-    expect(Object.values(tasksDomain.actions).map((action) => action.name)).toEqual([
+    expect(Object.values(tasksDomain.actions).map((action) => action.id)).toEqual([
       "tasks.createTask",
       "tasks.getTask",
       "tasks.awaitOutcome",

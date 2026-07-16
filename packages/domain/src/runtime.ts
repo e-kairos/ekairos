@@ -1,13 +1,16 @@
 import {
   configureDomainDocLoader,
-  getDomainActionBinding,
   getDomainActions,
   materializeDomain,
   type DomainActionSchema,
-  type DomainActionDefinition,
-  type DomainActionExecuteParams,
+  type DomainActionRegistration,
   type DomainDocLoader,
 } from "./index.js";
+import {
+  executeDomainAction,
+  getDomainActionBinding,
+} from "./internal.js";
+import { setRuntimeRootDomain } from "./domain-action.internal.js";
 export {
   EkairosRuntime,
   type RuntimeForDomain,
@@ -125,14 +128,11 @@ export type RuntimeDomainAction<
   InputSchema extends DomainActionSchema = DomainActionSchema,
   OutputSchema extends DomainActionSchema = DomainActionSchema,
   Runtime = unknown,
-> = DomainActionDefinition<InputSchema, OutputSchema, Runtime> & {
-  name: string;
-  domain?: RuntimeDomainSource | null;
-};
+> = DomainActionRegistration<InputSchema, OutputSchema, Runtime, any>;
 
-export type RuntimeDomainActionCollection =
-  | RuntimeDomainAction<any, any, any>[]
-  | Record<string, RuntimeDomainAction<any, any, any>>;
+export type RuntimeDomainActionCollection = Readonly<
+  Record<string, RuntimeDomainAction<any, any, any>>
+>;
 
 export type RuntimeDomainConfig = {
   // Root domain for the app (single domain).
@@ -141,8 +141,6 @@ export type RuntimeDomainConfig = {
   meta?: Record<string, unknown>;
   // Optional MCP auth configuration.
   mcp?: RuntimeMcpConfig;
-  // Optional explicit actions (in addition to domain.withActions(...)).
-  actions?: RuntimeDomainActionCollection;
 };
 
 export type RuntimeConfig<Env extends Record<string, unknown> = Record<string, unknown>> = {
@@ -357,6 +355,9 @@ function createActionRuntimeHandle<
     typeof candidate.use === "function" &&
     "env" in candidate
   ) {
+    if (params.rootDomain) {
+      setRuntimeRootDomain(candidate, params.rootDomain as object)
+    }
     return candidate
   }
 
@@ -385,65 +386,20 @@ function createActionRuntimeHandle<
       })
   }
 
+  if (typeof handle.meta !== "function" && params.rootDomain) {
+    handle.meta = () => ({
+      domain: params.rootDomain,
+      schema: resolveSchema(params.rootDomain),
+      context: resolveContext(params.rootDomain),
+      contextString: resolveContextString(params.rootDomain),
+    })
+  }
+
+  if (params.rootDomain) {
+    setRuntimeRootDomain(handle, params.rootDomain as object)
+  }
+
   return handle
-}
-
-function normalizeAction(
-  actionInput: RuntimeDomainAction<any, any, any>,
-  params: { key?: string; defaultDomain?: RuntimeDomainSource | null },
-): RuntimeDomainAction<any, any, any> {
-  const action = actionInput;
-
-  if (!action || typeof action !== "object" || typeof action.execute !== "function") {
-    throw new Error("invalid_runtime_action");
-  }
-
-  const bound = getDomainActionBinding(action);
-  const explicitName = typeof action.name === "string" ? action.name.trim() : "";
-  const derivedName = bound?.name ?? "";
-  const keyName = typeof params.key === "string" ? params.key.trim() : "";
-  const name = explicitName || derivedName || keyName;
-  if (!name) {
-    throw new Error("runtime_action_name_required");
-  }
-
-  const domainFromBinding = (bound?.domain ?? null) as RuntimeDomainSource | null;
-  const domain = domainFromBinding || action.domain || params.defaultDomain || null;
-
-  return {
-    ...action,
-    name,
-    ...(domain ? { domain } : {}),
-  };
-}
-
-function normalizeActionCollection(
-  input: RuntimeDomainActionCollection | undefined,
-  defaultDomain?: RuntimeDomainSource | null,
-): RuntimeDomainAction<any, any, any>[] {
-  if (!input) return [];
-  const out: RuntimeDomainAction<any, any, any>[] = [];
-  const seen = new Set<string>();
-
-  const push = (action: RuntimeDomainAction<any, any, any>) => {
-    if (seen.has(action.name)) {
-      throw new Error(`duplicate_runtime_action:${action.name}`);
-    }
-    seen.add(action.name);
-    out.push(action);
-  };
-
-  if (Array.isArray(input)) {
-    for (const actionInput of input) {
-      push(normalizeAction(actionInput as RuntimeDomainAction<any, any, any>, { defaultDomain }));
-    }
-    return out;
-  }
-
-  for (const [key, actionInput] of Object.entries(input)) {
-    push(normalizeAction(actionInput as RuntimeDomainAction<any, any, any>, { key, defaultDomain }));
-  }
-  return out;
 }
 
 function resolveRuntimeActionsFromConfig(config: RuntimeDomainConfig | null): RuntimeDomainAction<any, any, any>[] {
@@ -452,25 +408,18 @@ function resolveRuntimeActionsFromConfig(config: RuntimeDomainConfig | null): Ru
   const seen = new Set<string>();
 
   const push = (action: RuntimeDomainAction<any, any, any>) => {
-    if (seen.has(action.name)) {
-      throw new Error(`duplicate_runtime_action:${action.name}`);
+    const binding = getDomainActionBinding(action);
+    if (!binding) throw new Error("runtime_action_registration_required");
+    if (seen.has(binding.id)) {
+      throw new Error(`duplicate_runtime_action:${binding.id}`);
     }
-    seen.add(action.name);
+    seen.add(binding.id);
     out.push(action);
   };
 
   const domainActions = getDomainActions(config.domain);
   for (const action of domainActions) {
-    push(
-      normalizeAction(action as RuntimeDomainAction<any, any, any>, {
-        defaultDomain: config.domain ?? null,
-      }),
-    );
-  }
-
-  const explicit = normalizeActionCollection(config.actions, config.domain ?? null);
-  for (const action of explicit) {
-    push(action);
+    push(action as RuntimeDomainAction<any, any, any>);
   }
   return out;
 }
@@ -539,11 +488,11 @@ export function getRuntimeActions(): RuntimeDomainAction<any, any, any>[] {
   return resolveRuntimeActionsFromConfig(runtimeDomainConfig);
 }
 
-export function getRuntimeAction(name: string): RuntimeDomainAction<any, any, any> | null {
-  const normalized = String(name ?? "").trim();
+export function getRuntimeAction(id: string): RuntimeDomainAction<any, any, any> | null {
+  const normalized = String(id ?? "").trim();
   if (!normalized) return null;
   const actions = getRuntimeActions();
-  return actions.find((action) => action.name === normalized) ?? null;
+  return actions.find((action) => action.id === normalized) ?? null;
 }
 
 type ExecuteRuntimeActionParams<
@@ -557,7 +506,6 @@ type ExecuteRuntimeActionParams<
   runtime?: Runtime;
   input: Input;
   options?: RuntimeResolveOptions;
-  _stack?: string[];
 };
 
 export async function executeRuntimeAction<
@@ -578,20 +526,15 @@ export async function executeRuntimeAction<
     );
   }
 
-  const actionName = String(action.name || "").trim();
-  if (!actionName) {
-    throw new Error("runtime_action_name_required");
-  }
+  const binding = getDomainActionBinding(action);
+  if (!binding) throw new Error("runtime_action_registration_required");
 
-  const stack = Array.isArray(params._stack) ? params._stack : [];
-  if (stack.includes(actionName)) {
-    throw new Error(`runtime_action_cycle:${actionName}`);
-  }
-
-  const domain = action.domain ?? runtimeDomainConfig?.domain ?? null;
-  if (!params.runtime && !domain) {
-    throw new Error(`runtime_action_domain_required:${actionName}`);
-  }
+  const runtimeDomain = params.runtime && typeof params.runtime === "object"
+    && params.runtime !== null && typeof (params.runtime as any).meta === "function"
+    ? ((params.runtime as any).meta()?.domain as RuntimeDomainSource | null)
+    : null;
+  const domain = runtimeDomain ?? runtimeDomainConfig?.domain
+    ?? binding.ownerDomainObject as RuntimeDomainSource;
 
   const env =
     params.runtime && typeof params.runtime === "object" && params.runtime !== null && "env" in (params.runtime as any)
@@ -599,7 +542,7 @@ export async function executeRuntimeAction<
       : params.env;
 
   if (!env) {
-    throw new Error(`runtime_action_env_required:${actionName}`);
+    throw new Error(`runtime_action_env_required:${binding.id}`);
   }
 
   const resolvedRuntime = params.runtime
@@ -610,24 +553,12 @@ export async function executeRuntimeAction<
     env,
     rootDomain: (domain as RuntimeDomainSource | null) ?? null,
   });
-  const actionRuntime =
-    typeof rootRuntime.use === "function"
-      ? await rootRuntime.use(domain as any, params.options)
-      : rootRuntime;
-
-  const parsedInput = (action as any).input.parse(params.input);
-  const executeParams: DomainActionExecuteParams<any, typeof actionRuntime> = {
-    input: parsedInput,
-    runtime: actionRuntime,
-  };
-
-  const execute = action.execute;
-  if (typeof execute !== "function") {
-    throw new Error(`runtime_action_not_executable:${actionName}`);
-  }
-
-  const output = await execute(executeParams);
-  return (action as any).output.parse(output) as Output;
+  const execution = await executeDomainAction(
+    rootRuntime as any,
+    action as any,
+    params.input as any,
+  );
+  return execution.output as Output;
 }
 
 export async function resolveRuntime<

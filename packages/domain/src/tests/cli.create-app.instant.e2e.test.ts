@@ -183,7 +183,7 @@ describeCreateAppE2E("domain cli create-app", () => {
     const launchIo = createIo()
     const launchCode = await runCli(
       [
-        "supplyChain.order.launch",
+        "supplyChain.launchOrder",
         "{ reference: 'PO-E2E-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }",
         `--baseUrl=${baseUrl}`,
         "--admin",
@@ -196,7 +196,7 @@ describeCreateAppE2E("domain cli create-app", () => {
     expect(launchCode, JSON.stringify(launchIo.read())).toBe(0)
     const launchPayload = JSON.parse(launchIo.read().stdout)
     expect(launchPayload.ok).toBe(true)
-    expect(launchPayload.data.action).toBe("supplyChain.order.launch")
+    expect(launchPayload.data.action).toBe("supplyChain.launchOrder")
 
     // when: the CLI queries the generated nested procurement graph through the
     // server route.

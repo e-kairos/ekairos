@@ -45,7 +45,7 @@ export class MemoryStoryStore implements StoryStore {
         key: null,
         status: "open",
         createdAt: new Date(),
-        content: {} as any,
+        content: null,
       }
       this.contextsById.set(id, ctx)
       return ctx as any
@@ -61,7 +61,7 @@ export class MemoryStoryStore implements StoryStore {
       key: key ?? null,
       status: "open",
       createdAt: new Date(),
-      content: {} as any,
+      content: null,
     }
     this.contextsById.set(id, ctx)
     if (key) this.contextsByKey.set(key, id)
@@ -84,6 +84,7 @@ export class MemoryStoryStore implements StoryStore {
     const ctx = await this.getOrCreateContext<C>(contextIdentifier)
     const updated: ContextRow = {
       ...(ctx as any),
+      previousContent: ctx.content ?? undefined,
       content: content as any,
       updatedAt: new Date(),
     }

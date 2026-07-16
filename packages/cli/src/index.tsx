@@ -1,9 +1,5 @@
-import React from 'react';
-import { render } from 'ink';
 import meow from 'meow';
 import { fileURLToPath } from 'node:url';
-import { runCli as runDomainCli } from '@ekairos/domain/cli';
-import App from './app.js';
 import {
 	getPlatformAccessToken,
 	resolvePlatformUrl,
@@ -11,8 +7,7 @@ import {
 	signOutFromPlatform,
 } from './lib/platform-auth.js';
 import { runPlatformDomainCommand } from './lib/platform-domain-run.js';
-import { createSession, loadSession, processAsyncStep } from './lib/session.js';
-import { checkShadcnConfig, ensureEkairosRegistry, installComponent } from './lib/shadcn.js';
+import { readCliDefaults, writeCliDefaults } from './lib/defaults.js';
 
 const VALID_ACTIONS = new Set(['init-shadcn', 'update-all', 'install-essentials', 'exit']);
 const CLI_SKILL_PATH = fileURLToPath(new URL('../SKILL.md', import.meta.url));
@@ -25,9 +20,12 @@ const cli = meow(
 	  $ ekairos
 	  $ ekairos login
 	  $ ekairos whoami
+	  $ ekairos use --app=<appId> [--env=<key>]
+	  $ ekairos apps [--project=<key>] [--refresh]
+	  $ ekairos completion powershell|bash|zsh
 	  $ ekairos create-app --demo
 	  $ ekairos create-app <dir> --next --install --smoke --json
-	  $ ekairos domain query "<json5>" --baseUrl=<url> --admin
+	  $ ekairos domain <operation> [--app=<appId>] [--env=<key>]
 	  $ ekairos dataset <command> [options]
 
 	Skills
@@ -40,7 +38,7 @@ const cli = meow(
 		--input    JSON input for the session step
 		--action   Convenience flag for async actions (update-all, install-essentials, init-shadcn, exit)
 		--platform Platform URL override. Defaults to production.
-		--app      Platform application id for ekairos domain ...
+		--app      Platform application id for ekairos domain ... (required)
 		--env      Runtime environment key for ekairos domain ...
 		--env-data Runtime env override as a JSON object for ekairos domain ...
 		--data     JSON data for commands such as domain env register
@@ -52,10 +50,13 @@ const cli = meow(
 	  $ ekairos --async
 	  $ ekairos login
 	  $ ekairos whoami --json
+	  $ ekairos use --app=esolbay-platform --env=disal-development
+	  $ ekairos domain query "{ accounting_documents: { $: { limit: 5 } } }"
 	  $ ekairos create-app --demo
 	  $ ekairos create-app ./supply-chain --next --install --smoke --json
-	  $ ekairos domain query "{ procurement_order: { supplier: {} } }" --baseUrl=http://localhost:3000 --admin
+	  $ ekairos domain introspect --app=<appId>
 	  $ ekairos domain query "{ task_tasks: {} }" --app=<appId>
+	  $ ekairos domain env list --app=<appId>
 	  $ ekairos domain env register --app=<appId> --env=disal-demo --data='{"orgId":"org_..."}'
 	  $ ekairos domain query "{ task_tasks: {} }" --app=<appId> --env=disal-demo
 	  $ ekairos --session <uuid> --input '{"action": "update-all"}'
@@ -114,6 +115,19 @@ const cli = meow(
 				type: 'boolean',
 				default: false,
 			},
+			refresh: {
+				type: 'boolean',
+				default: false,
+			},
+			project: {
+				type: 'string',
+			},
+			line: {
+				type: 'string',
+			},
+			word: {
+				type: 'string',
+			},
 		},
 	},
 );
@@ -126,6 +140,9 @@ async function runAddCommand(componentTarget?: string) {
 		process.exit(1);
 	}
 
+	const { checkShadcnConfig, ensureEkairosRegistry, installComponent } = await import(
+		'./lib/shadcn.js'
+	);
 	const hasConfig = await checkShadcnConfig();
 	if (!hasConfig) {
 		console.error('components.json not found. Run "shadcn init" first.');
@@ -197,12 +214,80 @@ async function run() {
 		return;
 	}
 
+	if (command === 'complete') {
+		const { runCompleteCommand } = await import('./lib/completions.js');
+		await runCompleteCommand(rawArgv.slice(1));
+		return;
+	}
+
+	if (command === 'completion') {
+		const { completionScript } = await import('./lib/completions.js');
+		console.log(completionScript(commandArgs[0] ?? 'powershell'));
+		return;
+	}
+
+	if (command === 'apps') {
+		const { loadPlatformDirectory, refreshPlatformDirectory } = await import(
+			'./lib/platform-directory.js'
+		);
+		const directory = cli.flags.refresh
+			? await refreshPlatformDirectory(cli.flags.platform)
+			: await loadPlatformDirectory({ platformUrl: cli.flags.platform });
+		if (!directory) {
+			console.error('Not signed in or platform unreachable. Run: ekairos login');
+			process.exit(1);
+		}
+		const projectFilter = (cli.flags.project ?? '').trim();
+		const applications = directory.applications.filter(
+			(app) => !projectFilter || app.project === projectFilter,
+		);
+		if (cli.flags.json) {
+			console.log(JSON.stringify({ ok: true, applications }, null, 2));
+			return;
+		}
+		const byProject = new Map<string, typeof applications>();
+		for (const app of applications) {
+			const key = app.project ?? '(sin proyecto)';
+			byProject.set(key, [...(byProject.get(key) ?? []), app]);
+		}
+		for (const [project, apps] of byProject) {
+			console.log(`${project}`);
+			for (const app of apps) {
+				console.log(`  ${app.appId}  (${app.title})`);
+				for (const environment of app.environments) {
+					console.log(`    env: ${environment.key}`);
+				}
+			}
+		}
+		return;
+	}
+
+	if (command === 'use') {
+		const hasUpdates =
+			cli.flags.app !== undefined ||
+			cli.flags.env !== undefined ||
+			cli.flags.platform !== undefined;
+		if (hasUpdates) {
+			const { file, defaults } = await writeCliDefaults({
+				app: cli.flags.app,
+				env: cli.flags.env,
+				platform: cli.flags.platform,
+			});
+			console.log(JSON.stringify({ ok: true, file, defaults }, null, 2));
+			return;
+		}
+		const defaults = await readCliDefaults();
+		console.log(JSON.stringify({ ok: true, defaults }, null, 2));
+		return;
+	}
+
 	if (command === 'add') {
 		await runAddCommand(commandArgs[0]);
 		return;
 	}
 
 	if (command === 'create-app') {
+		const { runCli: runDomainCli } = await import('@ekairos/domain/cli');
 		const code = await runDomainCli(['create-app', ...rawArgv.slice(1)]);
 		process.exit(code);
 	}
@@ -212,19 +297,39 @@ async function run() {
 			console.error('Use `ekairos create-app ...` for app creation.');
 			process.exit(1);
 		}
-		if (cli.flags.platform || cli.flags.app) {
-			const code = await runPlatformDomainCommand(commandArgs, {
-				app: cli.flags.app,
-				env: cli.flags.env,
-				envData: cli.flags.envData,
-				data: cli.flags.data,
-				platformUrl: cli.flags.platform,
-				pretty: cli.flags.pretty || cli.flags.json,
-				title: cli.flags.title,
-			});
-			process.exit(code);
+		const defaults = await readCliDefaults();
+		const app = cli.flags.app || process.env.EKAIROS_APP || defaults.app;
+		const env = cli.flags.env ?? process.env.EKAIROS_ENV ?? defaults.env;
+		if (!app) {
+			console.error(
+				'ekairos domain runs platform-mediated and requires an application. Pass --app=<appId>, or set a default once with `ekairos use --app=<appId> --env=<key>`. Sign in first with `ekairos login`.',
+			);
+			process.exit(1);
 		}
-		const code = await runDomainCli(rawArgv.slice(1));
+
+		// Environments are explicit: data operations never run against an
+		// implicit target. introspect and env management are app-level.
+		const operation = commandArgs[0] ?? 'introspect';
+		const needsEnv = !['introspect', 'env'].includes(operation);
+		if (needsEnv && !env && !cli.flags.envData) {
+			console.error(
+				`ekairos domain ${operation} requires an explicit environment. Pass --env=<key>, or set a default once with \`ekairos use --env=<key>\`. Discover environments with: ekairos domain env list --app=${app}`,
+			);
+			process.exit(1);
+		}
+		if (process.stderr.isTTY) {
+			console.error(`→ app=${app}${env ? ` env=${env}` : ''}`);
+		}
+
+		const code = await runPlatformDomainCommand(commandArgs, {
+			app,
+			env,
+			envData: cli.flags.envData,
+			data: cli.flags.data,
+			platformUrl: cli.flags.platform || defaults.platform,
+			pretty: cli.flags.pretty || cli.flags.json,
+			title: cli.flags.title,
+		});
 		process.exit(code);
 	}
 
@@ -236,6 +341,9 @@ async function run() {
 
 	if (cli.flags.async || cli.flags.session) {
 		try {
+			const { createSession, loadSession, processAsyncStep } = await import(
+				'./lib/session.js'
+			);
 			let state;
 			let input = null;
 
@@ -287,7 +395,12 @@ async function run() {
 		}
 	} else {
 		// Interactive Mode
-		render(<App />);
+		const [{ default: React }, { render }, { default: App }] = await Promise.all([
+			import('react'),
+			import('ink'),
+			import('./app.js'),
+		]);
+		render(React.createElement(App));
 	}
 }
 

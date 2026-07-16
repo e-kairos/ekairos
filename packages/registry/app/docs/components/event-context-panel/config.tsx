@@ -11,25 +11,34 @@ const initialEvents = [
     type: "user.message",
     channel: "web",
     createdAt: "2026-05-22T12:00:00.000Z",
-    status: "stored",
-    content: {
-      parts: [{ type: "text", text: "Resume el estado del contexto para soporte." }],
-    },
+    payload: { message: "Resume el estado del contexto para soporte." },
+    links: {},
+    metadata: {},
+    eventParts: [{
+      id: "evt-user-01:0",
+      key: "evt-user-01:0",
+      index: 0,
+      type: "message",
+      content: { text: "Resume el estado del contexto para soporte." },
+      createdAt: "2026-05-22T12:00:00.000Z",
+    }],
   },
   {
     id: "evt-assistant-01",
     type: "assistant.message",
     channel: "web",
     createdAt: "2026-05-22T12:00:05.000Z",
-    status: "completed",
-    content: {
-      parts: [
-        {
-          type: "text",
-          text: "El contexto tiene una solicitud abierta, una accion pendiente y dos items durables en event_items.",
-        },
-      ],
-    },
+    payload: { answer: "El Context tiene dos Events durables y ninguna Session activa." },
+    links: {},
+    metadata: {},
+    eventParts: [{
+      id: "evt-assistant-01:0",
+      key: "evt-assistant-01:0",
+      index: 0,
+      type: "message",
+      content: { text: "El Context tiene dos Events durables y ninguna Session activa." },
+      createdAt: "2026-05-22T12:00:05.000Z",
+    }],
   },
 ];
 
@@ -38,16 +47,15 @@ function EventContextPanelDemo() {
     () => ({
       useQuery: () => ({
         data: {
-          event_contexts: [
+          context_contexts: [
             {
               id: "ctx_demo_01",
               key: "registry.events.preview",
               name: "Registry preview",
-              status: "open_idle",
               content: {},
-              currentExecution: null,
-              executions: [],
-              items: initialEvents,
+              currentSession: null,
+              sessions: [],
+              events: initialEvents,
             },
           ],
         },
@@ -98,7 +106,7 @@ export const eventContextPanelRegistryItem: RegistryItem = {
       name: "initialContextId",
       type: "string",
       default: "-",
-      description: "Existing event_contexts id used when the caller already has one.",
+      description: "Existing context_contexts id used when the caller already has one.",
     },
     {
       name: "onContextUpdate",

@@ -4,7 +4,7 @@ import type { TransformPromptContext } from "./transform-dataset.types.js"
 function buildRole(): string {
     let xml = create()
         .ele("Role")
-        .txt("You are a dataset transformer. Your goal is to read one or more input datasets/resources and produce a NEW dataset whose records conform exactly to the provided output schema.")
+        .txt("You are a dataset transformer. Read the declared sources and produce a new dataset whose records conform exactly to the output schema.")
         .up()
 
     return xml.end({ prettyPrint: true, headless: true })
@@ -13,7 +13,7 @@ function buildRole(): string {
 function buildGoal(): string {
     let xml = create()
         .ele("Goal")
-        .txt("Transform the input dataset(s) into a new dataset strictly matching the output schema. Use the lowest-cost direct completion tool that can produce the correct output. Use sandbox command execution only when commands are necessary to inspect, parse, aggregate, join, or compute over files/resources that cannot be handled directly from the visible context and previews.")
+        .txt("Transform the sources into a dataset strictly matching the output schema. Use direct completion when possible and sandbox execution only for necessary deterministic inspection or computation.")
         .up()
 
     return xml.end({ prettyPrint: true, headless: true })
@@ -24,26 +24,26 @@ function buildContextSection(context: TransformPromptContext): string {
         .ele("Context")
         .ele("DatasetId").txt(context.datasetId).up()
 
-    if (context.contextResources && context.contextResources.length > 0) {
-        let resourcesXml = create().ele("ContextResources")
-        for (const resource of context.contextResources) {
-            resourcesXml = resourcesXml
-                .ele("Resource")
-                .ele("Key").txt(String(resource.key)).up()
-                .ele("Type").txt(String(resource.type)).up()
-                .ele("Name").txt(String(resource.name)).up()
-                .ele("Description").txt(String(resource.description)).up()
-                .ele("DescriptorJson").txt(JSON.stringify(resource, null, 2)).up()
+    if (context.sources && context.sources.length > 0) {
+        let sourcesXml = create().ele("Sources")
+        for (const source of context.sources) {
+            sourcesXml = sourcesXml
+                .ele("Source")
+                .ele("Key").txt(String(source.key)).up()
+                .ele("Kind").txt(String(source.kind)).up()
+                .ele("Name").txt(String(source.name)).up()
+                .ele("Description").txt(String(source.description)).up()
+                .ele("DescriptorJson").txt(JSON.stringify(source, null, 2)).up()
                 .up()
         }
-        xml = xml.import(resourcesXml.first())
+        xml = xml.import(sourcesXml.first())
     }
 
     let sandboxXml = create().ele("Sandbox")
-    sandboxXml = sandboxXml.ele("ContextResourcesPath").txt("/tmp/ekairos/contexts/{contextId}/resources").up()
-    sandboxXml = sandboxXml.ele("ResourcesManifest").txt("/tmp/ekairos/contexts/{contextId}/resources/manifest.json").up()
+    sandboxXml = sandboxXml.ele("SourcesPath").txt("/tmp/ekairos/contexts/{contextId}/sources").up()
+    sandboxXml = sandboxXml.ele("SourcesManifest").txt("/tmp/ekairos/contexts/{contextId}/sources/manifest.json").up()
     sandboxXml = sandboxXml.ele("OutputPath").txt(context.sandboxConfig.outputPath).up()
-    sandboxXml = sandboxXml.ele("Note").txt("Context resources are materialized lazily only when executeCommand is called. Do not assume resource files exist unless you are using executeCommand. If executeCommand is used, read the manifest path from os.environ['EKAIROS_CONTEXT_RESOURCES_MANIFEST'] inside Python.").up()
+    sandboxXml = sandboxXml.ele("Note").txt("Sources are materialized only when executeCommand runs. Read os.environ['EKAIROS_DATASET_SOURCES_MANIFEST'] inside Python.").up()
     xml = xml.import(sandboxXml.first())
 
     if (context.inputPreviews && context.inputPreviews.length > 0) {
@@ -108,16 +108,16 @@ function buildOutputSchemaSection(context: TransformPromptContext): string {
 
 function buildInstructions(context: TransformPromptContext): string {
     const outputPath = context.sandboxConfig.outputPath
-    const multipleInputsNote = (context.contextResources?.length ?? context.inputDatasetIds.length) > 1
-        ? "You have multiple context resources available. You may need to read, join, filter, or combine data from them to produce the output."
+    const multipleInputsNote = (context.sources?.length ?? context.inputDatasetIds.length) > 1
+        ? "Multiple sources are available; join, filter, or combine them when required by the output definition."
         : ""
 
     let xml = create()
         .ele("Instructions")
         .ele("Workflow")
         .ele("Step", { number: "1", name: "Inspect Inputs" })
-        .ele("Action").txt(`Review ContextResources and any InputPreviews to understand current record structures, evidence, fields, shapes and edge cases. ${multipleInputsNote}`).up()
-        .ele("Note").txt("ContextResources DescriptorJson may include inline text, metadata, previewRows, or other visible evidence. Treat that visible content as already available context. Do not use executeCommand only to reread it.").up()
+        .ele("Action").txt(`Review Sources and InputPreviews to understand structures, evidence, fields and edge cases. ${multipleInputsNote}`).up()
+        .ele("Note").txt("DescriptorJson may include inline text or previews. Treat visible evidence as already available; do not execute a command only to reread it.").up()
         .up()
         .ele("Step", { number: "2", name: "Define the Output Dataset (PLAN FIRST)" })
         .ele("Action").txt("Call defineNotation with the formal definition of the OUTPUT dataset as a set derived from the input sets: e.g. D = \\pi_{fields}(\\sigma_{condition}(A \\bowtie B)) or set-builder with quantifiers, in LaTeX. Declare the input sets, bound variables and the predicates the output set satisfies.").up()
@@ -130,12 +130,12 @@ function buildInstructions(context: TransformPromptContext): string {
         .ele("Step", { number: "4", name: "Transform" })
         .ele("Action").txt("For single-object output, use completeObject with the final object. For row output, use replaceRows with the final rows. Use executeCommand only when command execution is necessary, not merely convenient.").up()
         .ele("Requirement").txt("Do not call completeObject until you have constructed the complete data object. completeObject requires data; a summary-only call is invalid and wastes a model iteration.").up()
-        .ele("Requirement").txt("Command execution is necessary only when the final output cannot be produced directly from the provided context, resource descriptors, or previews, and requires running code to inspect, parse, aggregate, join, or compute over files/resources.").up()
+        .ele("Requirement").txt("Command execution is necessary only when the output requires deterministic inspection, parsing, aggregation, joins, or computation over source files.").up()
         .ele("Requirement").txt("If the final output can be written directly from context already visible to you, do not use executeCommand. Do not use executeCommand just to format JSON, build an object, write output.jsonl, or make completion easier.").up()
-        .ele("Requirement").txt("Before using executeCommand, verify that direct completion is insufficient: you need file/resource contents not already visible in DescriptorJson or previews, deterministic computation over many rows, parsing/aggregation that is unreliable to do directly, or output too large/repetitive for direct completion. If none apply, command execution is not needed.").up()
-        .ele("Requirement").txt("When using executeCommand, provide commandDescription before the script runs. It must describe the inputs/resources used, operation performed, expected output, and why a command is the right tool.").up()
-        .ele("Requirement").txt("When executeCommand is used, context resources are materialized before the script runs at /tmp/ekairos/contexts/{contextId}/resources. The Python process receives EKAIROS_CONTEXT_RESOURCES_DIR and EKAIROS_CONTEXT_RESOURCES_MANIFEST environment variables. Read os.environ['EKAIROS_CONTEXT_RESOURCES_MANIFEST'] inside the script to discover exact files and metadata. Manifest entries expose files as resource['files'][index]['path'].").up()
-        .ele("Requirement").txt("If only some resources are needed for a command, pass resourceKeys with the specific ContextResources keys. Omit resourceKeys only when the script truly needs all resources.").up()
+        .ele("Requirement").txt("Before using executeCommand, verify that visible descriptors and previews are insufficient or deterministic computation is required.").up()
+        .ele("Requirement").txt("commandDescription must identify the sources, operation, expected output, and why execution is required.").up()
+        .ele("Requirement").txt("executeCommand materializes sources at /tmp/ekairos/contexts/{contextId}/sources and provides EKAIROS_DATASET_SOURCES_DIR plus EKAIROS_DATASET_SOURCES_MANIFEST.").up()
+        .ele("Requirement").txt("Pass sourceKeys when only a subset of sources is needed.").up()
         .ele("Requirement").txt(`If executeCommand is used, write file to: ${outputPath}`).up()
         .ele("Requirement").txt("Every data object MUST use the exact property names from OutputSchema required/properties keys. Do not translate, localize, rename, or infer alternative field names.").up()
         .ele("Requirement").txt("Do not print large data to stdout; only progress and summaries.").up()

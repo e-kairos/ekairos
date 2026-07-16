@@ -1,8 +1,8 @@
 import {
-  runContextReactionDirect,
-  type ContextDurableWorkflowPayload,
-} from "@ekairos/reactor/context";
-import { getWritable } from "workflow";
+  runReactionWorkflow,
+  type ReactionDefinition,
+  type ReactionWorkflowPayload,
+} from "@ekairos/reactor";
 import {
   storySmoke,
   storySmokeScripted,
@@ -49,41 +49,33 @@ function createStageTimer() {
 }
 
 export async function contextEngineDurableWorkflow(
-  payload: ContextDurableWorkflowPayload<SmokeEnv>,
+  payload: ReactionWorkflowPayload,
 ) {
   "use workflow";
 
-  const context =
-    payload.contextKey === "story.smoke.scripted"
+  const reactor =
+    payload.reactionKey === "story.smoke.scripted"
       ? storySmokeScripted
-      : payload.contextKey === "story.smoke.tool-error"
+      : payload.reactionKey === "story.smoke.tool-error"
         ? storySmokeToolError
-        : payload.contextKey === "story.smoke"
+        : payload.reactionKey === "story.smoke"
           ? storySmoke
           : null;
 
-  if (!context) {
-    throw new Error(`Unknown context key "${payload.contextKey}" for durable workflow`);
+  if (!reactor) {
+    throw new Error(`Unknown reaction key "${payload.reactionKey}" for durable workflow`);
   }
 
   const benchmark = createStageTimer();
-  const result = await runContextReactionDirect(context, payload.triggerEvent, {
-    runtime: payload.runtime,
-    context: payload.context ?? null,
-    durable: false,
-    __benchmark: benchmark,
-    options: {
-      ...(payload.options ?? {}),
-      writable: getWritable(),
-    },
-    __bootstrap: payload.bootstrap,
-  });
+  const catalog = [storySmoke, storySmokeScripted, storySmokeToolError] as unknown as
+    readonly ReactionDefinition[];
+  const result = await runReactionWorkflow(payload, catalog);
   // eslint-disable-next-line no-console
   console.log(
     `[context-workflow-benchmark] ${JSON.stringify({
       workflowRunId: String(getWorkflowMetadata()?.workflowRunId ?? ""),
-      contextKey: payload.contextKey,
-      executionId: payload.bootstrap.execution.id,
+      reactionKey: payload.reactionKey,
+      sessionId: payload.sessionId,
       ...benchmark.snapshot(),
     })}`,
   );

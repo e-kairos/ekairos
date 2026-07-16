@@ -1,136 +1,119 @@
-export type ContextStatus = "open_idle" | "open_streaming" | "closed";
-export type SendStatus = "idle" | "submitting" | "error";
+export type ContextStatus = "idle" | "running" | "failed"
+export type SendStatus = "idle" | "submitting" | "error"
+export type ReasoningLevel = "off" | "low" | "medium" | "high"
 
-export type ReasoningLevel = "off" | "low" | "medium" | "high";
+export const INPUT_TEXT_ITEM_TYPE = "user.message"
+export const ASSISTANT_MESSAGE_TYPE = "assistant.message"
 
-export const INPUT_TEXT_ITEM_TYPE = "user.message";
-export const ASSISTANT_MESSAGE_TYPE = "assistant.message";
+export type ContextEventPartForUI = {
+  id: string
+  key: string
+  index: number
+  type: string
+  content: unknown
+  metadata?: Record<string, unknown>
+  createdAt: string | Date
+  updatedAt?: string | Date
+}
 
 export type ContextEventForUI = {
-  id: string;
-  type: string;
-  channel: string;
-  createdAt: string | Date;
-  content: { parts: any[] };
-  status?: string;
-  emails?: unknown[];
-  whatsappMessages?: unknown[];
-  executionId?: string | null;
-  steps?: ContextStepForUI[];
-};
+  id: string
+  type: string
+  domain?: string
+  name?: string
+  channel?: string
+  createdAt: string | Date
+  payload: unknown
+  links: Record<string, string | string[]>
+  metadata: Record<string, unknown>
+  eventParts: ContextEventPartForUI[]
+}
 
-export type ContextStepForUI = {
-  stepId: string;
-  executionId: string | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-  status: string;
-  iteration: number | null;
-  parts: Array<Record<string, unknown>>;
-};
+export type ContextReactionForUI = {
+  id: string
+  type: string
+  status: "running" | "completed" | "failed"
+  position: number
+  depth: number
+  causeIds: string[]
+  effectIds: string[]
+  instruction?: string
+  error?: unknown
+  causes: ContextEventForUI[]
+  effects: ContextEventForUI[]
+  parent?: Pick<ContextReactionForUI, "id" | "type"> | null
+}
 
-export type ContextStepRuntime = ContextStepForUI & {
-  streamId: string | null;
-  streamClientId: string | null;
-  streamStartedAt: string | null;
-  streamFinishedAt: string | null;
-  streamAbortReason: string | null;
-  stream: ContextStepStreamInfo | null;
-  streamReader: ContextStepStreamReaderInfo | null;
-};
-
-export type ContextStepStreamInfo = {
-  id: string | null;
-  clientId: string | null;
-  done: boolean | null;
-  size: number | null;
-  machineId: string | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-  raw: Record<string, unknown> | null;
-};
-
-export type ContextStepStreamReaderInfo = {
-  status: string;
-  streamKey: string | null;
-  startedAt: string | null;
-  updatedAt: string | null;
-  completedAt: string | null;
-  attempts: number;
-  chunkCount: number;
-  byteOffset: number;
-  streamByteOffset: number;
-  lastChunkType: string | null;
-  lastSequence: number | null;
-  lastError: string | null;
-  reason: string | null;
-  rawChunkSampleOffset: number;
-  rawChunkSample: Array<Record<string, unknown>>;
-  rawLineSample: string[];
-};
+export type ContextSessionForUI = {
+  id: string
+  definition: string
+  status: "running" | "completed" | "failed"
+  sandboxId?: string
+  workflowRunId?: string
+  error?: unknown
+  createdAt: string | Date
+  updatedAt?: string | Date
+  trigger: ContextEventForUI | null
+  rootReaction: ContextReactionForUI | null
+  reactions: ContextReactionForUI[]
+  children: ContextSessionForUI[]
+}
 
 export type AppendArgs = {
-  parts: any[];
-  webSearch?: boolean;
-  reasoningLevel?: ReasoningLevel;
-};
+  parts: any[]
+  webSearch?: boolean
+  reasoningLevel?: ReasoningLevel
+}
 
 export type ContextFirstLevel = {
-  id: string;
-  key?: string | null;
-  name?: string | null;
-  status: ContextStatus;
-  content?: unknown;
-  currentExecution?: {
-    id: string;
-    status?: string | null;
-  } | null;
-};
+  id: string
+  key?: string | null
+  name?: string | null
+  content?: unknown
+  previous?: unknown
+  currentSession: ContextSessionForUI | null
+}
 
 export type ContextValue = {
-  apiUrl: string;
-  context: ContextFirstLevel | null;
-  contextId: string | null;
-  contextStatus: ContextStatus;
-  activeExecutionId: string | null;
-  turnSubstateKey: string | null;
-  events: ContextEventForUI[];
-  sendStatus: SendStatus;
-  sendError: string | null;
-  stop: () => void;
-  append: (args: AppendArgs) => Promise<void>;
-};
+  apiUrl: string
+  context: ContextFirstLevel | null
+  contextId: string | null
+  contextStatus: ContextStatus
+  activeSessionId: string | null
+  sessions: ContextSessionForUI[]
+  reactions: ContextReactionForUI[]
+  events: ContextEventForUI[]
+  sendStatus: SendStatus
+  sendError: string | null
+  stop: () => void
+  append: (args: AppendArgs) => Promise<void>
+}
 
 export type UseContextArgs = {
-  contextId: string | null;
-  contextKey?: string;
-};
+  contextId: string | null
+  contextKey?: string
+}
 
 export type UseContextState = {
-  context: any | null;
-  contextStatus: ContextStatus;
-  events: ContextEventForUI[];
-};
+  context: any | null
+}
 
 export type UseContextStateHook = (
   db: any,
-  args: UseContextArgs
-) => UseContextState;
+  args: UseContextArgs,
+) => UseContextState
 
 export type UseContextOptions = {
-  apiUrl: string;
-  initialContextId?: string;
-  contextKey?: string;
-  onContextUpdate?: (contextId: string) => void;
-  prepareAppendArgs?: (args: AppendArgs) => Promise<AppendArgs> | AppendArgs;
+  apiUrl: string
+  initialContextId?: string
+  contextKey?: string
+  onContextUpdate?: (contextId: string) => void
+  prepareAppendArgs?: (args: AppendArgs) => Promise<AppendArgs> | AppendArgs
   prepareRequestBody?: (params: {
-    messages: any[];
-    webSearch?: boolean;
-    reasoningLevel?: ReasoningLevel;
-    contextId?: string;
-  }) => Promise<Record<string, unknown>> | Record<string, unknown>;
-  enableResumableStreams?: boolean;
-  streamChunkDelayMs?: number;
-  onDataChunk?: (chunk: unknown) => void;
-  state?: UseContextStateHook;
-};
+    messages: any[]
+    webSearch?: boolean
+    reasoningLevel?: ReasoningLevel
+    contextId?: string
+  }) => Promise<Record<string, unknown>> | Record<string, unknown>
+  state?: UseContextStateHook
+}

@@ -4,10 +4,10 @@ import type {
   AnyDatasetRuntime,
   DatasetBuilderState,
   DatasetSchemaInput,
-  InternalDatasetResource,
+  InternalDatasetSource,
 } from "./types.js"
 
-async function readQueryResourceRowsStep(params: {
+async function readQuerySourceRowsStep(params: {
   runtime: any
   query: Record<string, any>
 }): Promise<{ rows: any[] }> {
@@ -17,9 +17,9 @@ async function readQueryResourceRowsStep(params: {
   return { rows: normalizeQueryRows(result) }
 }
 
-export async function materializeQueryResource<Runtime extends AnyDatasetRuntime>(
+export async function materializeQuerySource<Runtime extends AnyDatasetRuntime>(
   runtime: DatasetBuilderState<Runtime>["runtime"],
-  resource: Extract<InternalDatasetResource, { kind: "query" }>,
+  resource: Extract<InternalDatasetSource, { kind: "query" }>,
   params: {
     datasetId: string
     sandboxId?: string
@@ -30,7 +30,7 @@ export async function materializeQueryResource<Runtime extends AnyDatasetRuntime
     contextId: string
   },
 ) {
-  const { rows } = await readQueryResourceRowsStep({
+  const { rows } = await readQuerySourceRowsStep({
     runtime,
     query: resource.query as any,
   })

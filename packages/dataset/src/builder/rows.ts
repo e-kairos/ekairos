@@ -1,4 +1,4 @@
-import type { DomainSchemaResult } from "@ekairos/domain"
+import type { MaterializedDomainLike } from "@ekairos/domain"
 
 export function rowsToJsonl(rows: any[]): string {
   return rows
@@ -49,7 +49,7 @@ export function normalizeQueryRows(result: any): any[] {
   return rows
 }
 
-export function getDomainDescriptor(domain: DomainSchemaResult) {
+export function getDomainDescriptor(domain: MaterializedDomainLike) {
   const meta = (domain as any)?.meta ?? {}
   const context = typeof (domain as any)?.context === "function" ? (domain as any).context() : {}
   const name = String(meta?.name ?? context?.name ?? "domain")

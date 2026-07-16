@@ -24,6 +24,11 @@ const NAV_ITEMS = [
     match: (pathname: string) => pathname.startsWith("/registries"),
   },
   {
+    href: "/reactor/docs",
+    label: "Reactor",
+    match: (pathname: string) => pathname.startsWith("/reactor/docs"),
+  },
+  {
     href: "/registry",
     label: "Manifest",
     match: (pathname: string) =>

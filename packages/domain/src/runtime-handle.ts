@@ -15,8 +15,10 @@ import type {
   DomainLike,
   IncludedDomainNamesOf,
 } from "./index.js"
-import type { ActiveDomain, DomainSchemaResult } from "./index.js"
+import type { ActiveDomain, MaterializedDomainLike } from "./index.js"
 import { materializeDomain } from "./index.js"
+
+type AnyMaterializedDomain = MaterializedDomainLike
 
 type DomainNamesCompatible<
   RootDomain,
@@ -43,12 +45,12 @@ type SubdomainForRoot<
 
 export type RuntimeUseForDomain<
   Env,
-  RequiredDomain extends DomainLike,
+  RequiredDomain extends AnyMaterializedDomain,
 > = {
   use(
     subdomain: RequiredDomain,
     options?: RuntimeResolveOptions,
-  ): Promise<unknown>
+  ): Promise<ActiveDomain<RequiredDomain, Env>>
 }
 
 type RuntimeEnvOf<Runtime extends EkairosRuntime<any, any, any>> =
@@ -101,6 +103,10 @@ export type RuntimeLike<
   db(options?: RuntimeResolveOptions): Promise<DB>
   resolve(options?: RuntimeResolveOptions): Promise<DomainRuntime<D, DB>>
   meta(): RuntimeMeta<D>
+  use<SubD extends AnyMaterializedDomain>(
+    subdomain: SubdomainForRoot<D, SubD>,
+    options?: RuntimeResolveOptions,
+  ): Promise<ActiveDomain<SubD, Env>>
 }
 
 export abstract class EkairosRuntime<
@@ -168,10 +174,10 @@ export abstract class EkairosRuntime<
     }
   }
 
-  public async use<SubD extends DomainLike>(
+  public async use<SubD extends AnyMaterializedDomain>(
     subdomain: SubdomainForRoot<D, SubD>,
     options?: RuntimeResolveOptions,
-  ): Promise<unknown> {
+  ): Promise<ActiveDomain<SubD, Env>> {
     const rootDomain = this.getDomain() as any
     if (!rootDomain || typeof rootDomain.fromDB !== "function") {
       throw new Error("EkairosRuntime.use requires a root DomainSchemaResult.")
@@ -186,7 +192,7 @@ export abstract class EkairosRuntime<
         env: this.env,
         runtime: this,
       },
-    }) as unknown
+    }) as ActiveDomain<SubD, Env>
   }
 }
 
@@ -198,8 +204,8 @@ export type ExplicitRuntimeLike<
 
 export type RuntimeForDomain<
   Runtime extends EkairosRuntime<any, any, any>,
-  RequiredDomain extends DomainLike,
+  RequiredDomain extends AnyMaterializedDomain,
 > =
-  & Pick<Runtime, "db" | "resolve" | "meta">
+  & Pick<Runtime, "env" | "db" | "resolve" | "meta">
   & RuntimeUseForDomain<RuntimeEnvOf<Runtime>, RequiredDomain>
   & RuntimeDomainCompatibility<Runtime, RequiredDomain>

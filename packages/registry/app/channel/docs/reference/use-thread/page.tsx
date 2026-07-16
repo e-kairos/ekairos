@@ -25,7 +25,7 @@ export default function UseThreadReferencePage() {
         <p>
           Internally the hook composes three reactive queries: <InlineCode>agent_threads</InlineCode>{" "}
           by key (to resolve the <InlineCode>contextId</InlineCode>), the context with its{" "}
-          <InlineCode>event_items</InlineCode> and their linked{" "}
+          <InlineCode>context_events</InlineCode> and their linked{" "}
           <InlineCode>channelMessages</InlineCode>, and all{" "}
           <InlineCode>channel_messages</InlineCode> on the context ordered by{" "}
           <InlineCode>createdAt</InlineCode>. The channel domain links (

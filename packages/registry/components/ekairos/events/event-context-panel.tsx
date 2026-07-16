@@ -22,7 +22,6 @@ export type EventContextPanelProps = {
     reasoningLevel?: ReasoningLevel;
     contextId?: string;
   }) => Promise<Record<string, unknown>> | Record<string, unknown>;
-  streamChunkDelayMs?: number;
   className?: string;
   placeholder?: string;
   defaultPrompt?: string;
@@ -35,11 +34,20 @@ function cx(...values: Array<string | false | null | undefined>) {
 }
 
 function readEventText(event: ContextEventForUI) {
-  const parts = Array.isArray(event.content?.parts) ? event.content.parts : [];
-  const text = parts
-    .map((part: any) => {
-      if (typeof part?.text === "string") return part.text;
-      if (typeof part?.content === "string") return part.content;
+  const text = event.eventParts
+    .map((part) => {
+      if (typeof part.content === "string") return part.content;
+      if (!part.content || typeof part.content !== "object") return "";
+      const content = part.content as Record<string, unknown>;
+      if (typeof content.text === "string") return content.text;
+      if (Array.isArray(content.blocks)) {
+        return content.blocks
+          .map((block) => block && typeof block === "object" && typeof (block as any).text === "string"
+            ? (block as any).text
+            : "")
+          .filter(Boolean)
+          .join("\n");
+      }
       return "";
     })
     .filter(Boolean)
@@ -63,7 +71,6 @@ export function EventContextPanel({
   onContextUpdate,
   prepareAppendArgs,
   prepareRequestBody,
-  streamChunkDelayMs,
   className,
   placeholder = "Escribe el proximo mensaje del contexto...",
   defaultPrompt = "",
@@ -78,7 +85,6 @@ export function EventContextPanel({
     onContextUpdate,
     prepareAppendArgs,
     prepareRequestBody,
-    streamChunkDelayMs,
   });
 
   const messages = useMemo(
@@ -87,7 +93,6 @@ export function EventContextPanel({
         id: event.id,
         role: getRole(event),
         text: readEventText(event),
-        status: event.status,
       })),
     [context.events]
   );
@@ -147,7 +152,6 @@ export function EventContextPanel({
             >
               <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.12em] opacity-70">
                 {message.role}
-                {message.status ? ` / ${message.status}` : ""}
               </div>
               <p className="whitespace-pre-wrap">{message.text}</p>
             </article>

@@ -1,4 +1,9 @@
-import { defineAction } from "@ekairos/domain"
+import {
+  DOMAIN_ACTION_FULL_INPUT_TYPE,
+  DOMAIN_ACTION_OWNER_TYPE,
+  DOMAIN_ACTION_RUNTIME_TYPE,
+  defineAction,
+} from "@ekairos/domain"
 import { z } from "zod"
 
 import type { CommandResult } from "./commands.js"
@@ -60,10 +65,9 @@ const processStreamChunk =
   sandboxProcessStreamChunkSchema as z.ZodType<SandboxProcessStreamChunk>
 const processRunResult = sandboxProcessRunResultSchema as z.ZodType<SandboxProcessRunResult>
 
-function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withActions> {
+function createSandboxDomain() {
   return sandboxSchemaDomain.withActions({
     createSandbox: defineAction({
-      name: "sandbox.createSandbox",
       input: z.object({
         provider: z.enum(["vercel", "daytona", "sprites"]).optional(),
         runtime: z.string().optional(),
@@ -91,13 +95,11 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: createSandboxStep,
     }),
     stopSandbox: defineAction({
-      name: "sandbox.stopSandbox",
       input: z.object({ sandboxId: z.string() }),
       output: serviceVoidResult,
       execute: stopSandboxStep,
     }),
     runCommand: defineAction({
-      name: "sandbox.runCommand",
       input: z.object({
         sandboxId: z.string(),
         command: z.string(),
@@ -107,7 +109,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: runCommandStep,
     }),
     runCommandProcess: defineAction({
-      name: "sandbox.runCommandProcess",
       input: z.object({
         sandboxId: z.string(),
         command: z.string(),
@@ -122,7 +123,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: runCommandProcessStep,
     }),
     readProcessStream: defineAction({
-      name: "sandbox.readProcessStream",
       input: z.object({ processId: z.string() }),
       output: serviceResult(z.object({
         chunks: z.array(processStreamChunk),
@@ -131,7 +131,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: readProcessStreamStep,
     }),
     startObservedProcess: defineAction({
-      name: "sandbox.startObservedProcess",
       input: z.object({
         sandboxId: z.string(),
         command: z.string(),
@@ -147,7 +146,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: startObservedProcessStep,
     }),
     appendObservedProcessChunk: defineAction({
-      name: "sandbox.appendObservedProcessChunk",
       input: z.object({
         processId: z.string(),
         type: z.enum(["stdout", "stderr", "status", "exit", "error", "heartbeat", "metadata"]),
@@ -157,7 +155,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: appendObservedProcessChunkStep,
     }),
     finishObservedProcess: defineAction({
-      name: "sandbox.finishObservedProcess",
       input: z.object({
         processId: z.string(),
         status: z.enum(["exited", "failed", "killed", "lost"]).optional(),
@@ -169,7 +166,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: finishObservedProcessStep,
     }),
     writeFiles: defineAction({
-      name: "sandbox.writeFiles",
       input: z.object({
         sandboxId: z.string(),
         files: z.array(z.object({
@@ -181,7 +177,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: writeFilesStep,
     }),
     readFile: defineAction({
-      name: "sandbox.readFile",
       input: z.object({
         sandboxId: z.string(),
         path: z.string(),
@@ -190,7 +185,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: readFileStep,
     }),
     installCodexAuth: defineAction({
-      name: "sandbox.installCodexAuth",
       input: z.object({
         sandboxId: z.string(),
         codexHome: z.string().optional(),
@@ -206,13 +200,11 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: installCodexAuthStep,
     }),
     getSandbox: defineAction({
-      name: "sandbox.getSandbox",
       input: z.object({ sandboxId: z.string() }),
       output: serviceResult(z.record(z.string(), z.unknown())),
       execute: getSandboxStep,
     }),
     createCheckpoint: defineAction({
-      name: "sandbox.createCheckpoint",
       input: z.object({
         sandboxId: z.string(),
         comment: z.string().optional(),
@@ -221,7 +213,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: createCheckpointStep,
     }),
     getPortUrl: defineAction({
-      name: "sandbox.getPortUrl",
       input: z.object({
         sandboxId: z.string(),
         port: z.number(),
@@ -230,7 +221,6 @@ function createSandboxDomain(): ReturnType<typeof sandboxSchemaDomain.withAction
       execute: getPortUrlStep,
     }),
     createEkairosApp: defineAction({
-      name: "sandbox.createEkairosApp",
       input: z.object({
         sandboxId: z.string(),
         appDir: z.string(),

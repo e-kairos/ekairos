@@ -9,7 +9,6 @@ export type {
   SourceWatchStatusProps,
   SourceWatchStatusValue,
 } from "./ui/source-watch-status";
-export { ContextStepList } from "./ui/context-step-list";
 export { MessageArtifact } from "./ui/message-artifact";
 export type { MessageArtifactProps } from "./ui/message-artifact";
 export { MessageList } from "./ui/message-list";

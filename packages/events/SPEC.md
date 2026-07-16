@@ -1,123 +1,72 @@
-# Ekairos Context Specification
+# Ekairos Context Persistence Specification
 
-`@ekairos/events` defines a context-first durable execution model.
+## Canonical entities
 
-## Core entities
+- `context_contexts`
+- `context_sessions`
+- `context_events`
+- `context_reactions`
+- `context_eventParts`
 
-- `context`
-- `execution`
-- `step`
-- `part`
-- `item`
+No other entity is part of the Reaction execution model.
 
-## Persistence
+## Session contract
 
-Canonical persistence uses:
+A Session records one invocation of a Reaction definition:
 
-- `event_contexts`
-- `event_executions`
-- `event_steps`
-- `event_parts`
-- `event_items`
+- Context
+- trigger Event
+- root Reaction
+- optional parent Session
+- status, sandbox id, and Workflow run id
 
-### Durable React Contract
+A child Reaction invocation receives its own Session. It may share the parent
+Context or run against another explicitly supplied Context.
 
-When `react(...)` is called with `durable: true`, the call returns the persisted shell immediately
-and also exposes an optional workflow run handle.
+## Reaction contract
 
-Immediate shell:
+A Reaction is a causal edge with ordered causes and effects. Root Reactions
+represent the whole definition. Child Reactions represent `agent`, `action`,
+`dataset`, `workspace`, `shell`, `git`, `emit`, or a nested Reaction boundary.
 
-- `context`
-- `trigger`
-- `reaction`
-- `execution`
+Cause and effect ids are stored as ordered JSON for deterministic projection and
+also linked as real InstantDB relations for traversal.
 
-Durable handle:
+## Event contract
 
-- `run.runId`
-- `run.status`
-- `run.returnValue`
+Every observable result is an Event. Domain Events carry `domain`, `name`,
+typed payload, logical links, and physical link metadata. Technical Events use
+the `context.*` type namespace and carry operation metadata.
 
-`run.returnValue` resolves to the final `ContextReactResult` once the durable workflow completes.
-This handle is runtime/server state, not canonical persisted domain data.
+## Event Part contract
 
-### Canonical Output Contract
-
-`event_parts` is the canonical persisted representation of produced content.
-
-`event_items` still exists as the stable envelope for input/output history, but for output items:
-
-- `event_items.content.parts` is deprecated as a replay source
-- `event_parts` is the authoritative model for step inspection and model reconstruction
-
-### Event Part Semantics
-
-`event_parts.part` must follow a strict semantic contract.
-
-Top-level `part.type` values:
+`context_eventParts` is the canonical streaming and replay surface. Parts are
+ordered by `index`, linked to one Event, and use provider-neutral semantics:
 
 - `message`
 - `reasoning`
 - `source`
 - `action`
+- `engine`
 
-Message parts carry `content.text` and optionally `content.blocks`, where each block is one of:
+Provider-specific identifiers stay under Part metadata. An action uses separate
+started and completed/failed Parts with the same action call id.
 
-- `text`
-- `file`
-- `json`
-- `source-url`
-- `source-document`
+## Model projection
 
-Action execution is modeled explicitly and is provider agnostic:
+Each model request is compiled in this order:
 
-- `action` with `content.status: "started"` carries the requested invocation.
-- `action` with `content.status: "completed"` carries the settled output.
-- `action` with `content.status: "failed"` carries the failure details.
+1. stable Context content
+2. each Event selected by `given(...)`, in supplied order
+3. each Event's ordered Parts, including file projections
+4. the unresolved instruction
 
-External model/provider protocols may call these tools, function calls, actions, commands, or MCP
-calls. Those names are adapter concerns. Persistence stores the semantic Ekairos action contract.
+There is no implicit history query. Linked files receive a stable metadata
+header; supported text, image, and PDF content follows when available.
 
-### Metadata Rule
+## React subscription
 
-Provider/model/runtime-specific data must be encapsulated under `metadata`.
-
-Examples:
-
-- provider item ids
-- provider-executed flags
-- model response ids
-- transport-specific chunk references
-
-These values must not leak into first-class semantic fields like `type`, `toolName`, `toolCallId`,
-or the `content` entry shapes.
-
-### Replay Rule
-
-The replay pipeline must reconstruct model messages from canonical `event_parts` for output items.
-
-Required projection:
-
-- `message` / `reasoning` / `source` -> assistant or user content
-- `action.started` -> provider-specific assistant action/tool call
-- `action.completed` / `action.failed` -> provider-specific action/tool result
-
-This rule exists so multipart action outputs, including image artifacts, survive replay without depending
-on the deprecated `event_items.content.parts` mirror.
-
-Tracing uses:
-
-- `event_trace_events`
-- `event_trace_runs`
-- `event_trace_spans`
-
-## Status model
-
-- Context: `open_idle | open_streaming | closed`
-- Execution: `executing | completed | failed`
-- Step: `running | completed | failed`
-- Item: `stored | pending | completed`
-
-## Stream model
-
-The runtime currently exposes context stream helpers, but the durable truth remains the persisted entities above. Clients should treat context state as primary and stream output as live UX.
+Clients subscribe to Context, Sessions, Events, Reactions, and Event Parts.
+Optimistic input Events are reconciled by Event id. A Context is `running` while
+its current Session is running, `failed` when that Session failed, and otherwise
+`idle`.

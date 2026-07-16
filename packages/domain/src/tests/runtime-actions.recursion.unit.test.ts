@@ -25,19 +25,17 @@ describe("runtime action recursion guard", () => {
     let cycleDomain: any;
     cycleDomain = baseCycleDomain.withActions({
       actionA: defineDomainAction({
-        name: "cycle.a",
         input: z.object({ value: z.number() }),
         output: z.number(),
-        async execute({ runtime, input }) {
-            return runtime.actions.actionB(input);
+        async execute({ domain, input }) {
+            return domain.actions.actionB(input);
         },
       }),
       actionB: defineDomainAction({
-        name: "cycle.b",
         input: z.object({ value: z.number() }),
         output: z.number(),
-        async execute({ runtime, input }) {
-            return runtime.actions.actionA(input);
+        async execute({ domain, input }) {
+            return domain.actions.actionA(input);
         },
       }),
     });
@@ -54,6 +52,6 @@ describe("runtime action recursion guard", () => {
 
     // then: the runtime rejects the recursive action key instead of overflowing
     // or silently starting an unbounded action chain.
-    await expect(execution).rejects.toThrow("domain_action_cycle:actionA");
+    await expect(execution).rejects.toThrow("domain_action_cycle:cycle.actionA");
   });
 });

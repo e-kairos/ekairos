@@ -2,14 +2,14 @@ import { createOpenAI } from "@ai-sdk/openai"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
 import {
-  eventsDomain,
+  contextDomain,
 } from "@ekairos/events"
-import { createAiSdkReactor, type ContextReactor } from "@ekairos/reactor/context"
-import { SandboxService } from "@ekairos/sandbox"
+import { ai } from "@ekairos/reactor"
+import { SandboxService } from "@ekairos/sandbox/service"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { sandboxDomain } from "../../../sandbox/src/schema.ts"
 
-import { dataset } from "../../src/dataset.js"
+import { materializeDataset } from "../../src/dataset.js"
 import { datasetDomain } from "../../src/schema.js"
 
 type InstantAdminInit = typeof import("@instantdb/admin")["init"]
@@ -18,9 +18,10 @@ export const esolbayAwardDatasetReproDomain = domain(
   "dataset-esolbay-award-repro",
 )
   .includes(datasetDomain)
-  .includes(eventsDomain)
+  .includes(contextDomain)
   .includes(sandboxDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
+  .withActions(datasetDomain.actions)
 
 export type EsolbayAwardDatasetReproEnv = {
   orgId: string
@@ -201,16 +202,6 @@ async function createAwardAddBidItemsModelStep() {
   return getAzureProvider().responses(resolveModelId() as any)
 }
 
-function createAwardAddBidItemsReactor<
-  Context,
-  Env extends Record<string, unknown>,
->(): ContextReactor<Context, Env> {
-  return createAiSdkReactor<Context, Env, any, any, { enabled: true }>({
-    resolveConfig: () => ({ enabled: true }),
-    selectModel: () => createAwardAddBidItemsModelStep,
-  }) as unknown as ContextReactor<Context, Env>
-}
-
 export async function createEsolbayAwardDatasetSandboxStep(params: {
   runtime: EsolbayAwardDatasetReproRuntime
   orgId: string
@@ -261,13 +252,12 @@ export async function esolbayAwardDatasetReproWorkflow(
   })
 
   try {
-    const result = await dataset(input.runtime as any, {
+    const result = await materializeDataset(input.runtime as any, {
       datasetId: input.datasetId,
-      durable: true,
     })
-      .sandbox({ sandboxId: sandbox.sandboxId })
+      .sandbox(sandbox.sandboxId)
       .from({ kind: "file", fileId: input.fileId })
-      .reactor(createAwardAddBidItemsReactor())
+      .engine(ai({ model: createAwardAddBidItemsModelStep }))
       .instructions(input.instructions)
       .schema(input.outputSchema as any)
       .asRows()

@@ -53,7 +53,7 @@ describe("create-app scaffold generation", () => {
     expect(result.ok).toBe(true);
     expect(result.template).toBe("empty");
     expect(result.nextSteps.join("\n")).toContain("src/domain.ts");
-    expect(result.nextSteps.join("\n")).not.toContain("supplyChain.order.launch");
+    expect(result.nextSteps.join("\n")).not.toContain("supplyChain.launchOrder");
     expect(result.installed).toBe(false);
     expect(result.adminTokenWritten).toBe(false);
     expect(result.envFile).toBeNull();
@@ -114,7 +114,7 @@ describe("create-app scaffold generation", () => {
 
     expect(result.ok).toBe(true);
     expect(result.template).toBe("supply-chain");
-    expect(result.nextSteps.join("\n")).toContain("supplyChain.order.launch");
+    expect(result.nextSteps.join("\n")).toContain("supplyChain.launchOrder");
     expect(domainFile).toContain('domain("supplyChain")');
     expect(domainFile).toContain("launchOrder");
     expect(pageFile).toContain("DomainShowcase");
@@ -152,15 +152,24 @@ describe("create-app scaffold generation", () => {
     expect(result.nextSteps.join("\n")).toContain("src/agent.ts");
     expect(generatedPackageJson.dependencies["@ekairos/domain"]).toBe("1.22.82-beta.development.0");
     expect(generatedPackageJson.dependencies["@ekairos/events"]).toBe("1.22.82-beta.development.0");
+    expect(generatedPackageJson.dependencies["@ekairos/context"]).toBe("1.22.82-beta.development.0");
+    expect(generatedPackageJson.dependencies["@ekairos/reactor"]).toBe("1.22.82-beta.development.0");
     expect(generatedPackageJson.dependencies["@vercel/oidc"]).toBe("3.4.1");
     expect(generatedPackageJson.pnpm?.overrides?.["@ekairos/domain"]).toBe("1.22.82-beta.development.0");
     expect(generatedPackageJson.pnpm?.overrides?.["@instantdb/admin"]).toBe("1.0.39");
     expect(generatedPackageJson.pnpm?.overrides?.["@instantdb/core"]).toBe("1.0.39");
     expect(componentsJson).toContain("https://registry.ekairos.dev/r/{name}.json");
-    expect(schemaFile).toContain('@ekairos/events/schema');
-    expect(agentFile).toContain("createScriptedReactor");
+    expect(schemaFile).toContain('import { agentDomain } from "./src/agent"');
+    expect(schemaFile).toContain("agentDomain.toInstantSchema()");
+    expect(agentFile).toContain("defineReaction");
+    expect(agentFile).toContain("ReactionEngine");
+    expect(agentFile).toContain("reaction.given(reaction.trigger).agent");
+    expect(agentFile).toContain("reaction.given(result).emit");
+    expect(agentFile).toContain("contextDomain");
+    expect(agentFile).not.toContain(".compute(");
+    expect(agentFile).not.toContain(".effect(");
     expect(agentFile).toContain("AGENT_TEMPLATE_OK");
-    expect(routeFile).toContain("agentContext.react");
+    expect(routeFile).toContain("context.react(triggerEvent, agentReaction)");
     expect(routeFile).toContain('from "@/runtime"');
     expect(workbenchFile).toContain("/api/agent/react");
   });

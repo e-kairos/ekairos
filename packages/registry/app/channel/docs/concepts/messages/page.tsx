@@ -151,7 +151,7 @@ export default function ChannelMessagesConceptPage() {
             },
             {
               name: "context",
-              type: "link → event_contexts",
+              type: "link → context_contexts",
               description: (
                 <>
                   <InlineCode>contextId</InlineCode> on the type. Attaches the message to the agent
@@ -161,7 +161,7 @@ export default function ChannelMessagesConceptPage() {
             },
             {
               name: "item",
-              type: "link → event_items",
+              type: "link → context_events",
               description: (
                 <>
                   <InlineCode>itemId</InlineCode> on the type. Optionally pairs the message with the
@@ -198,18 +198,18 @@ export default function ChannelMessagesConceptPage() {
         </p>
         <Code title="@ekairos/channel/schema — links">{`channel_messagesContext: {
   forward: { on: "channel_messages", has: "one", label: "context" },
-  reverse: { on: "event_contexts", has: "many", label: "channelMessages" },
+  reverse: { on: "context_contexts", has: "many", label: "channelMessages" },
 },
 channel_messagesItem: {
   forward: { on: "channel_messages", has: "one", label: "item" },
-  reverse: { on: "event_items", has: "many", label: "channelMessages" },
+  reverse: { on: "context_events", has: "many", label: "channelMessages" },
 },`}</Code>
         <p>
           The <InlineCode>context</InlineCode> link is the load-bearing one: it is what makes{" "}
           <InlineCode>&#123; channel_messages: &#123; $: &#123; where: &#123; &quot;context.id&quot;:
           contextId &#125; &#125; &#125; &#125;</InlineCode> return the whole multichannel
           conversation. The <InlineCode>item</InlineCode> link is finer-grained — it ties a specific
-          message to the specific <InlineCode>event_items</InlineCode> row it corresponds to, so an
+          message to the specific <InlineCode>context_events</InlineCode> row it corresponds to, so an
           agent reaction and the whatsapp text that delivered it can be navigated in both directions.
         </p>
       </Section>

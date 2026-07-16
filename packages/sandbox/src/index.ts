@@ -31,7 +31,6 @@ export {
 } from "./public.js"
 export { Sandbox } from "./sandbox.js"
 export type {
-  SandboxActions,
   SerializedSandbox,
   SerializedSandboxState,
 } from "./sandbox.js"

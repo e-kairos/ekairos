@@ -8,7 +8,7 @@ type AnyDb = {
 
 /**
  * ChannelMessageStore over InstantDB: persists canonical channel_messages on
- * the channel domain and links them to the agent context (and item, when
+ * the channel domain and links them to the Context and Event, when
  * known). Internal module: apps get it wired by createChannels.
  */
 export class InstantChannelMessageStore implements ChannelMessageStore {
@@ -19,7 +19,7 @@ export class InstantChannelMessageStore implements ChannelMessageStore {
   }
 
   async saveChannelMessage(message: ChannelMessage): Promise<ChannelMessage> {
-    const { id, contextId, itemId, ...fields } = message;
+    const { id, contextId, eventId, ...fields } = message;
     let chunk = this.#db.tx.channel_messages[id].update({
       ...fields,
       createdAt: new Date(message.createdAt),
@@ -28,8 +28,8 @@ export class InstantChannelMessageStore implements ChannelMessageStore {
     if (contextId) {
       chunk = chunk.link({ context: contextId });
     }
-    if (itemId) {
-      chunk = chunk.link({ item: itemId });
+    if (eventId) {
+      chunk = chunk.link({ event: eventId });
     }
     await this.#db.transact([chunk]);
     return message;
@@ -42,14 +42,14 @@ export class InstantChannelMessageStore implements ChannelMessageStore {
           where: { "context.id": params.contextId },
           order: { createdAt: "asc" },
         },
-        item: {},
+        event: {},
       },
     });
     const rows = Array.isArray(result?.channel_messages) ? result.channel_messages : [];
     return rows.map((row: any) => ({
       ...row,
       contextId: params.contextId,
-      itemId: Array.isArray(row.item) ? row.item?.[0]?.id : row.item?.id,
+      eventId: Array.isArray(row.event) ? row.event?.[0]?.id : row.event?.id,
     }));
   }
 }

@@ -109,7 +109,7 @@ DISCORD_PUBLIC_KEY=...`}</Code>
           webhook handler in <InlineCode>channels.webhooks</InlineCode> and nothing else changes:
         </p>
         <Code title="lib/channels.ts">{`export const channels = await createChannels({
-  db,
+  runtime,
   userName: "ekairos",
   platforms: {
     slack: {

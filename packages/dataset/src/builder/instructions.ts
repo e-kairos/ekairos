@@ -2,22 +2,22 @@ import type { DatasetSchemaInput } from "./types.js"
 
 export function buildFileDefaultInstructions(schema?: DatasetSchemaInput) {
   if (schema) {
-    return "Create a dataset from the resource file and ensure each output row matches the provided dataset schema exactly."
+    return "Create a dataset from the source file and ensure each output row matches the provided dataset schema exactly."
   }
-  return "Create a dataset representing the resource content as structured rows."
+  return "Create a dataset representing the source content as structured rows."
 }
 
-export function buildRawResourceInstructions(resourceKind: "file" | "text") {
-  if (resourceKind === "text") {
+export function buildRawSourceInstructions(sourceKind: "file" | "text") {
+  if (sourceKind === "text") {
     return "Create a dataset representing the raw text content as structured rows without applying business transformations."
   }
   return "Create a dataset representing the raw file content as structured rows without applying business transformations."
 }
 
-export function buildTransformInstructions(resourceCount: number, userInstructions?: string, schema?: DatasetSchemaInput) {
+export function buildTransformInstructions(sourceCount: number, userInstructions?: string, schema?: DatasetSchemaInput) {
   const explicit = String(userInstructions ?? "").trim()
   if (explicit) return explicit
-  if (resourceCount > 1) {
+  if (sourceCount > 1) {
     if (schema) {
       return "Combine the input datasets into a new dataset that matches the provided output schema exactly."
     }

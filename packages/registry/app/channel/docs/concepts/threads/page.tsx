@@ -15,7 +15,7 @@ export default function ChannelThreadsConceptPage() {
         <>
           A thread is the unit your application talks to; a context is the unit everything else
           hangs off. The thin indirection between them — <InlineCode>agent_threads</InlineCode>{" "}
-          pointing at <InlineCode>event_contexts</InlineCode> — is what lets one conversation span
+          pointing at <InlineCode>context_contexts</InlineCode> — is what lets one conversation span
           web, slack and whatsapp without your code ever merging anything.
         </>
       }
@@ -36,7 +36,7 @@ export default function ChannelThreadsConceptPage() {
 // the one link that matters
 agent_threadsContext: {
   forward: { on: "agent_threads", has: "one", label: "context" },
-  reverse: { on: "event_contexts", has: "one", label: "thread" },
+  reverse: { on: "context_contexts", has: "one", label: "thread" },
 },`}</Code>
         <p>
           A thread owns no items, no messages, no executions — it owns a{" "}
@@ -81,20 +81,20 @@ agent_threadsContext: {
                   |
                   | context (one-to-one)
                   v
-            event_contexts                    <- @ekairos/events
+            context_contexts                    <- @ekairos/events
             the durable conversation
                   |
         +---------+-----------------+
         | items (many)              | channelMessages (many)
         v                           v
-   event_items                channel_messages    <- @ekairos/channel
+   context_events                channel_messages    <- @ekairos/channel
    the agent timeline:        the canonical wire:
    - user input items         - inbound  (whatsapp, slack, ...)
    - assistant reactions      - outbound (replies, broadcasts)
    - executions/steps/parts   - status, externalId, raw payload`}</Code>
         <p>
           Each domain composes the one below it: <InlineCode>agentDomain</InlineCode> includes{" "}
-          <InlineCode>channelDomain</InlineCode>, which includes <InlineCode>eventsDomain</InlineCode>.
+          <InlineCode>channelDomain</InlineCode>, which includes <InlineCode>contextDomain</InlineCode>.
           Pushing the agent schema gives you the whole stack in one InstantDB app — which is exactly
           why a single query can walk all of it.
         </p>
@@ -103,7 +103,7 @@ agent_threadsContext: {
       <Section title="Items and channel messages share the context">
         <p>
           The two collections answer different questions about the same conversation.{" "}
-          <InlineCode>event_items</InlineCode> is the <strong>agent&apos;s timeline</strong>: what
+          <InlineCode>context_events</InlineCode> is the <strong>agent&apos;s timeline</strong>: what
           triggered a reaction, what the reactor produced, with full execution provenance
           (executions, steps, parts). <InlineCode>channel_messages</InlineCode> is the{" "}
           <strong>wire record</strong>: what actually crossed each channel, in which direction, with

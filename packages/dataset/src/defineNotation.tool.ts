@@ -1,7 +1,7 @@
-import { tool } from "ai"
+import { defineAction, type DomainActionDefinition } from "@ekairos/domain"
 import { z } from "zod"
+import { getDatasetRuntimeDb } from "./dataset/steps.js"
 import { DatasetService } from "./service.js"
-import { datasetDomain } from "./schema.js"
 import {
   reviseDatasetNotation,
   type DatasetNotation,
@@ -10,12 +10,7 @@ import {
   type NotationCheck,
 } from "./notation.js"
 
-interface DefineNotationToolParams {
-  datasetId: string
-  runtime: any
-}
-
-const symbolSchema = z.object({
+export const notationSymbolSchema = z.object({
   name: z.string().describe("Plain identifier, e.g. 'D', 'Orders', 'w'"),
   latex: z
     .string()
@@ -25,7 +20,7 @@ const symbolSchema = z.object({
   description: z.string().describe("What this symbol denotes in the data"),
 })
 
-const predicateSchema = z.object({
+export const notationPredicateSchema = z.object({
   id: z.string().describe("Stable id, e.g. 'p1', 'cardinality'"),
   description: z.string().describe("The claim in plain language"),
   latex: z
@@ -54,11 +49,6 @@ const predicateSchema = z.object({
     ),
 })
 
-async function getDatasetService(runtime: any): Promise<DatasetService> {
-  const scoped = await runtime.use(datasetDomain)
-  return new DatasetService(scoped.db as any)
-}
-
 /**
  * defineNotation — author or REFINE the formal DEFINITION of the dataset.
  *
@@ -70,16 +60,48 @@ async function getDatasetService(runtime: any): Promise<DatasetService> {
  * materialization realizes it) and, finalized, the RESULT (it describes what
  * you produced).
  *
- * Call it FIRST with the initial definition derived from the resources, and
+ * Call it FIRST with the initial definition derived from the sources, and
  * AGAIN whenever the analysis discovers new sets, variables, constraints or
  * corrections — every call keeps the prior version in history. Mark the last
  * call with final=true so the definition describes the produced dataset.
  * Predicates may be formal/semantic (trusted); the few that are arithmetic
  * MAY carry optional advisory evidence.
  */
-export function createDefineNotationTool({ datasetId, runtime }: DefineNotationToolParams) {
-  return tool({
-    description: [
+export const defineNotationInputSchema = z.object({
+  datasetId: z.string(),
+  latex: z
+    .string()
+    .describe(
+      "Main definition of the dataset as a set, in LaTeX. Example: 'D = \\\\{(w,r,t) \\\\mid t = \\\\sum_{o \\\\in Orders} o.amount,\\\\; o.status = paid\\\\}'",
+    ),
+  symbols: z.array(notationSymbolSchema).describe("Symbols bound by the definition"),
+  predicates: z
+    .array(notationPredicateSchema)
+    .describe("Claims the set satisfies; attach a checkJson only when arithmetic"),
+  reason: z
+    .string()
+    .describe("What this revision states or what discovery triggered it (or 'initial definition')"),
+  final: z
+    .boolean()
+    .optional()
+    .describe("true when this definition describes the dataset you are about to complete (the RESULT)"),
+})
+
+export const defineNotationOutputSchema = z
+  .object({
+    success: z.boolean(),
+    version: z.number().optional(),
+    status: z.string().optional(),
+    warning: z.string().optional(),
+    error: z.string().optional(),
+  })
+  .passthrough()
+
+export const defineNotation: DomainActionDefinition<
+  typeof defineNotationInputSchema,
+  typeof defineNotationOutputSchema
+> = defineAction({
+  description: [
       "Author or refine the formal DEFINITION of the dataset: the dataset as a",
       "set in LaTeX (set-builder, relational algebra, quantified or even",
       "semantic predicates) plus the symbols it binds. This definition and the",
@@ -93,27 +115,13 @@ export function createDefineNotationTool({ datasetId, runtime }: DefineNotationT
       "call. For the few predicates that are arithmetic you MAY attach a",
       "checkJson for optional advisory evidence (non-blocking, never a verdict).",
     ].join(" "),
-    inputSchema: z.object({
-      latex: z
-        .string()
-        .describe(
-          "Main definition of the dataset as a set, in LaTeX. Example: 'D = \\\\{(w,r,t) \\\\mid t = \\\\sum_{o \\\\in Orders} o.amount,\\\\; o.status = paid\\\\}'",
-        ),
-      symbols: z.array(symbolSchema).describe("Symbols bound by the definition"),
-      predicates: z
-        .array(predicateSchema)
-        .describe("Claims the set satisfies; attach a checkJson only when arithmetic"),
-      reason: z
-        .string()
-        .describe("What this revision states or what discovery triggered it (or 'initial definition')"),
-      final: z
-        .boolean()
-        .optional()
-        .describe("true when this definition describes the dataset you are about to complete (the RESULT)"),
-    }),
-    execute: async ({ latex, symbols, predicates, reason, final }) => {
+  input: defineNotationInputSchema,
+  output: defineNotationOutputSchema,
+  execute: async ({ input, runtime }) => {
+      const { datasetId, latex, symbols, predicates, reason, final } = input
       try {
-        const service = await getDatasetService(runtime)
+        const db = await getDatasetRuntimeDb(runtime)
+        const service = new DatasetService(db)
         const existing = await service.getDatasetById(datasetId)
         const previous = (existing.ok ? existing.data?.notation : null) as
           | DatasetNotation
@@ -177,6 +185,5 @@ export function createDefineNotationTool({ datasetId, runtime }: DefineNotationT
           error: error instanceof Error ? error.message : String(error),
         }
       }
-    },
-  })
-}
+  },
+})

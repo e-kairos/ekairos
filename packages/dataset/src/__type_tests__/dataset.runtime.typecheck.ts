@@ -5,7 +5,7 @@ import {
 } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
 
-import { dataset } from "../dataset"
+import { materializeDataset } from "../dataset"
 import { datasetDomain } from "../schema"
 
 type Env = Record<string, unknown> & {
@@ -56,11 +56,12 @@ const includedName: IncludedDomainNamesOf<typeof appDomain> = "dataset"
 // then: the builder is accepted and every later dataset read/write can use
 // runtime.use(datasetDomain) without falling back to an env-global resolver.
 compatibleRuntime.use(datasetDomain)
-dataset(compatibleRuntime).fromDataset({ datasetId: "resource_dataset_1" })
-dataset(compatibleRuntime).fromContext({ id: "context_1" })
+materializeDataset(compatibleRuntime).fromDataset({ datasetId: "resource_dataset_1" })
+// @ts-expect-error Context identity is not a Dataset source; pass explicit files, rows, datasets, or queries.
+materializeDataset(compatibleRuntime).fromContext({ id: "context_1" })
 
 // given: a runtime whose root domain has no datasetDomain schema.
 // when: callers try to create a dataset builder from that runtime.
 // then: TypeScript rejects it before any dataset operation can run.
 // @ts-expect-error runtime root domain must include datasetDomain
-dataset(unrelatedRuntime)
+materializeDataset(unrelatedRuntime)

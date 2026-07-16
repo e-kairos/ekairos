@@ -27,10 +27,10 @@ describe("runtime action included subdomain scoping", () => {
         description: "Normalize title",
         input: z.object({ title: z.string() }),
         output: z.object({ title: z.string(), runtimeCall: z.number() }),
-        execute: async ({ input, runtime }) => {
+        execute: async ({ input, domain }) => {
             return {
             title: String(input.title).trim(),
-            runtimeCall: runtime.db.runtimeCall,
+            runtimeCall: domain.db.runtimeCall,
           };
         },
       }),
@@ -42,8 +42,8 @@ describe("runtime action included subdomain scoping", () => {
           orgId: z.string(),
           runtimeCall: z.number(),
         }),
-        execute: async ({ input, runtime }) => {
-            const normalized = await runtime.actions.normalizeTitle({ title: input.title });
+        execute: async ({ input, runtime, domain }) => {
+            const normalized = await domain.actions.normalizeTitle({ title: input.title });
           return {
             title: normalized.title,
             orgId: runtime.env.orgId,
@@ -55,7 +55,11 @@ describe("runtime action included subdomain scoping", () => {
 
     const appDomain = domain("app")
       .includes(tasksDomain)
-      .schema({ entities: {}, links: {}, rooms: {} });
+      .schema({ entities: {}, links: {}, rooms: {} })
+      .withActions({
+        normalizeTitle: tasksDomain.actions.normalizeTitle,
+        createTask: tasksDomain.actions.createTask,
+      });
 
     const runtime = new DomainRuntime(
       { orgId: "org_123", actorId: "user_1" },

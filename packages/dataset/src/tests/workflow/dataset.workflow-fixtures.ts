@@ -1,14 +1,13 @@
 import { i } from "@instantdb/core"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
-import type { ContextReactor } from "@ekairos/reactor/context"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { getStepMetadata, getWorkflowMetadata } from "workflow"
 
-import { dataset } from "../../index.ts"
-import { resolveDatasetAgentDurable } from "../../builder/materialize.ts"
-import { getDatasetOutputPath, getDatasetResourcesDir } from "../../datasetFiles.ts"
+import { materializeDataset } from "../../dataset.ts"
+import { getDatasetOutputPath, getDatasetSourcesDir } from "../../datasetFiles.ts"
 import { datasetDomain } from "../../schema.ts"
+import { actionStep, deterministicReactionEngine } from "../_reactionEngine.ts"
 
 const queryDomain = domain("dataset-workflow-query").schema({
   entities: {
@@ -25,6 +24,7 @@ const appDomain = domain("dataset-workflow-test-app")
   .includes(datasetDomain)
   .includes(queryDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
+  .withActions(datasetDomain.actions)
 
 type DatasetWorkflowRuntimeEnv = {
   orgId: string
@@ -166,6 +166,20 @@ function getEntityRows(store: DatasetWorkflowStore, entity: string) {
   return rows
 }
 
+function whereValueMatches(actual: unknown, linkedId: unknown, expected: unknown) {
+  if (
+    expected &&
+    typeof expected === "object" &&
+    "$in" in expected &&
+    Array.isArray((expected as { $in?: unknown[] }).$in)
+  ) {
+    return (expected as { $in: unknown[] }).$in.some(
+      candidate => candidate === actual || candidate === linkedId,
+    )
+  }
+  return actual === expected || linkedId === expected
+}
+
 function whereMatches(row: Record<string, any>, where: Record<string, any>) {
   for (const [key, expected] of Object.entries(where ?? {})) {
     if (key.includes(".")) {
@@ -174,11 +188,11 @@ function whereMatches(row: Record<string, any>, where: Record<string, any>) {
       for (const part of parts) {
         current = current?.[part]
       }
-      if (current !== expected) return false
+      if (!whereValueMatches(current, current?.id, expected)) return false
       continue
     }
     const actual = row[key]
-    if (actual !== expected && actual?.id !== expected && row[`${key}Id`] !== expected) {
+    if (!whereValueMatches(actual, actual?.id ?? row[`${key}Id`], expected)) {
       return false
     }
   }
@@ -380,149 +394,73 @@ export type DatasetDirectObjectWorkflowResult = {
   readRows: any[]
 }
 
-export async function workflowFileDatasetReactor(params: any) {
-  const datasetId = String(params.context?.content?.datasetId ?? "")
-  const pythonCode = [
-    "import csv, glob, json",
-    "from pathlib import Path",
-    "workspace = Path(__file__).resolve().parents[1]",
-    "manifest = json.loads((workspace / 'manifest.json').read_text(encoding='utf-8'))",
-    `resources_dir = ${JSON.stringify(getDatasetResourcesDir(datasetId))}`,
-    "output_path = str(Path(manifest['outputDir']) / 'output.jsonl')",
-    "Path(output_path).parent.mkdir(parents=True, exist_ok=True)",
-    "resource_path = glob.glob(resources_dir + '/*')[0]",
-    "with open(resource_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
-    "  reader = csv.DictReader(src)",
-    "  for row in reader:",
-    "    out.write(json.dumps({'type': 'row', 'data': {'code': row['code'], 'qty': int(row['qty'])}}) + '\\n')",
-    "print('workflow file parsed')",
-  ].join("\n")
+function workflowFileDatasetEngine(datasetId: string) {
+  return deterministicReactionEngine({
+    steps: [
+      actionStep("executeCommand", {
+        commandDescription: "Parse the workflow CSV file and write dataset rows to output.jsonl.",
+        scriptName: "parse_workflow_file",
+        pythonCode: [
+        "import csv, glob, json",
+        "from pathlib import Path",
+        "workspace = Path(__file__).resolve().parents[1]",
+        "manifest = json.loads((workspace / 'manifest.json').read_text(encoding='utf-8'))",
+        `resources_dir = ${JSON.stringify(getDatasetSourcesDir(datasetId))}`,
+        "output_path = str(Path(manifest['outputDir']) / 'output.jsonl')",
+        "Path(output_path).parent.mkdir(parents=True, exist_ok=True)",
+        "resource_path = glob.glob(resources_dir + '/*')[0]",
+        "with open(resource_path, 'r', encoding='utf-8') as src, open(output_path, 'w', encoding='utf-8') as out:",
+        "  reader = csv.DictReader(src)",
+        "  for row in reader:",
+        "    out.write(json.dumps({'type': 'row', 'data': {'code': row['code'], 'qty': int(row['qty'])}}) + '\\n')",
+          "print('workflow file parsed')",
+        ].join("\n"),
+      }),
+      actionStep("completeDataset", { summary: "workflow file complete" }),
+    ],
+  })
+}
 
-  if (params.iteration === 0) {
-    return {
-      assistantEvent: {
-        content: {
-          parts: [
-            {
-              type: "tool-executeCommand",
-              toolCallId: "parse-workflow-file",
-              input: {
-                scriptName: "parse_workflow_file",
-                pythonCode,
-              },
-            },
-          ],
-        },
+function workflowDirectObjectEngine() {
+  return deterministicReactionEngine({
+    steps: [actionStep("completeObject", {
+      data: {
+        status: "passed",
+        score: 91,
+        justification: "Evidence satisfies the technical criterion.",
       },
-      actionRequests: [
-        {
-          actionRef: "parse-workflow-file",
-          actionName: "executeCommand",
-          input: {
-            scriptName: "parse_workflow_file",
-            pythonCode,
-          },
-        },
+      summary: "direct object completed",
+    })],
+  })
+}
+
+function workflowDirectRowsEngine() {
+  return deterministicReactionEngine({
+    steps: [actionStep("replaceRows", {
+      rows: [
+        { sku: "A1", eligible: true },
+        { sku: "B2", eligible: false },
       ],
-      messagesForModel: [],
-    }
-  }
-
-  return {
-    assistantEvent: {
-      content: {
-        parts: [
-          {
-            type: "tool-completeDataset",
-            toolCallId: "complete-workflow-file",
-            input: { summary: "workflow file complete" },
-          },
-        ],
-      },
-    },
-    actionRequests: [
-      {
-        actionRef: "complete-workflow-file",
-        actionName: "completeDataset",
-        input: { summary: "workflow file complete" },
-      },
-    ],
-    messagesForModel: [],
-  }
+      summary: "direct rows completed",
+    })],
+  })
 }
 
-export async function workflowDirectObjectReactor() {
-  return {
-    assistantEvent: {
-      content: {
-        parts: [
-          {
-            type: "tool-completeObject",
-            toolCallId: "complete-direct-object",
-            input: {
-              data: {
-                status: "passed",
-                score: 91,
-                justification: "Evidence satisfies the technical criterion.",
-              },
-              summary: "direct object completed",
-            },
-          },
-        ],
-      },
-    },
-    actionRequests: [
-      {
-        actionRef: "complete-direct-object",
-        actionName: "completeObject",
-        input: {
-          data: {
-            status: "passed",
-            score: 91,
-            justification: "Evidence satisfies the technical criterion.",
-          },
-          summary: "direct object completed",
-        },
-      },
-    ],
-    messagesForModel: [],
-  }
-}
+async function ensureWorkflowSandboxStep(params: {
+  runtime: DatasetWorkflowTestRuntime
+  sandboxId: string
+}) {
+  "use step"
 
-export async function workflowDirectRowsReactor() {
-  return {
-    assistantEvent: {
-      content: {
-        parts: [
-          {
-            type: "tool-replaceRows",
-            toolCallId: "replace-direct-rows",
-            input: {
-              rows: [
-                { sku: "A1", eligible: true },
-                { sku: "B2", eligible: false },
-              ],
-              summary: "direct rows completed",
-            },
-          },
-        ],
-      },
-    },
-    actionRequests: [
-      {
-        actionRef: "replace-direct-rows",
-        actionName: "replaceRows",
-        input: {
-          rows: [
-            { sku: "A1", eligible: true },
-            { sku: "B2", eligible: false },
-          ],
-          summary: "direct rows completed",
-        },
-      },
-    ],
-    messagesForModel: [],
-  }
+  const db = await (params.runtime as any).db()
+  await db.transact([
+    db.tx.sandbox_sandboxes[params.sandboxId].update({
+      provider: "local",
+      status: "running",
+      createdAt: Date.now(),
+      params: { workspaceRoot: "/workspace" },
+    }),
+  ])
 }
 
 export async function datasetQueryBuilderWorkflow(
@@ -530,7 +468,7 @@ export async function datasetQueryBuilderWorkflow(
 ): Promise<DatasetBuilderWorkflowResult> {
   "use workflow";
 
-  const result = await dataset(input.runtime)
+  const result = await materializeDataset(input.runtime)
     .fromQuery(queryDomain, {
       query: {
         query_items: {},
@@ -566,13 +504,13 @@ export async function datasetFileBuilderWorkflow(
   input: DatasetFileBuilderWorkflowInput,
 ): Promise<DatasetFileBuilderWorkflowResult> {
   "use workflow";
-  const result = await dataset(input.runtime, {
+  await ensureWorkflowSandboxStep({ runtime: input.runtime, sandboxId: input.sandboxId })
+  const result = await materializeDataset(input.runtime, {
     datasetId: input.datasetId,
-    durable: true,
   })
-    .sandbox({ sandboxId: input.sandboxId })
+    .sandbox(input.sandboxId)
     .fromFile({ fileId: input.fileId })
-    .reactor(workflowFileDatasetReactor as ContextReactor<any, any>)
+    .engine(workflowFileDatasetEngine(input.datasetId))
     .schema({
       title: "WorkflowFileRow",
       description: "One row from a workflow file resource.",
@@ -599,11 +537,13 @@ export async function datasetDirectObjectWorkflow(
 ): Promise<DatasetDirectObjectWorkflowResult> {
   "use workflow";
 
-  const result = await dataset(input.runtime, {
+  const sandboxId = `${input.datasetId}-sandbox`
+  await ensureWorkflowSandboxStep({ runtime: input.runtime, sandboxId })
+
+  const result = await materializeDataset(input.runtime, {
     datasetId: input.datasetId,
-    durable: true,
   })
-    .sandbox({ sandboxId: `${input.datasetId}-sandbox` })
+    .sandbox(sandboxId)
     .from({
       kind: "text",
       name: "criterion.json",
@@ -631,7 +571,7 @@ export async function datasetDirectObjectWorkflow(
         },
       },
     })
-    .reactor(workflowDirectObjectReactor as ContextReactor<any, any>)
+    .engine(workflowDirectObjectEngine())
     .asObject()
     .build()
 
@@ -649,11 +589,13 @@ export async function datasetDirectRowsWorkflow(
 ): Promise<DatasetBuilderWorkflowResult> {
   "use workflow";
 
-  const result = await dataset(input.runtime, {
+  const sandboxId = `${input.datasetId}-sandbox`
+  await ensureWorkflowSandboxStep({ runtime: input.runtime, sandboxId })
+
+  const result = await materializeDataset(input.runtime, {
     datasetId: input.datasetId,
-    durable: true,
   })
-    .sandbox({ sandboxId: `${input.datasetId}-sandbox` })
+    .sandbox(sandboxId)
     .from({
       kind: "text",
       name: "items.json",
@@ -680,7 +622,7 @@ export async function datasetDirectRowsWorkflow(
         },
       },
     })
-    .reactor(workflowDirectRowsReactor as ContextReactor<any, any>)
+    .engine(workflowDirectRowsEngine())
     .build()
 
   const readResult = await result.reader.read({ cursor: 0, limit: 10 })
@@ -697,11 +639,14 @@ export async function datasetDirectRowsAsResourceWorkflow(
   "use workflow";
 
   const sourceDatasetId = `${input.datasetId}_source`
-  await dataset(input.runtime, {
+  const sourceSandboxId = `${sourceDatasetId}-sandbox`
+  const targetSandboxId = `${input.datasetId}-sandbox`
+  await ensureWorkflowSandboxStep({ runtime: input.runtime, sandboxId: sourceSandboxId })
+  await ensureWorkflowSandboxStep({ runtime: input.runtime, sandboxId: targetSandboxId })
+  await materializeDataset(input.runtime, {
     datasetId: sourceDatasetId,
-    durable: true,
   })
-    .sandbox({ sandboxId: `${sourceDatasetId}-sandbox` })
+    .sandbox(sourceSandboxId)
     .from({
       kind: "text",
       name: "items.json",
@@ -728,14 +673,13 @@ export async function datasetDirectRowsAsResourceWorkflow(
         },
       },
     })
-    .reactor(workflowDirectRowsReactor as ContextReactor<any, any>)
+    .engine(workflowDirectRowsEngine())
     .build()
 
-  const result = await dataset(input.runtime, {
+  const result = await materializeDataset(input.runtime, {
     datasetId: input.datasetId,
-    durable: true,
   })
-    .sandbox({ sandboxId: `${input.datasetId}-sandbox` })
+    .sandbox(targetSandboxId)
     .fromDataset({ datasetId: sourceDatasetId, description: "direct source rows" })
     .instructions("Copy direct source rows.")
     .schema({
@@ -751,7 +695,7 @@ export async function datasetDirectRowsAsResourceWorkflow(
         },
       },
     })
-    .reactor(workflowDirectRowsReactor as ContextReactor<any, any>)
+    .engine(workflowDirectRowsEngine())
     .build()
 
   const readResult = await result.reader.read({ cursor: 0, limit: 10 })
@@ -761,10 +705,4 @@ export async function datasetDirectRowsAsResourceWorkflow(
     previewRows: result.previewRows,
     readRows: readResult.rows,
   }
-}
-
-export async function datasetAgentDurableResolutionWorkflow(): Promise<boolean> {
-  "use workflow";
-
-  return await resolveDatasetAgentDurable(true)
 }

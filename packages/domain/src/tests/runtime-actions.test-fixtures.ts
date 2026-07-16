@@ -57,7 +57,6 @@ export function createManagementDomain() {
   let appDomain: any;
   appDomain = baseDomain.withActions({
     normalizeTitle: defineDomainAction({
-      name: "management.task.normalizeTitle",
       description: "Normalize task titles.",
       input: z.object({ title: z.string() }),
       output: z.object({
@@ -65,16 +64,15 @@ export function createManagementDomain() {
         status: z.literal("draft"),
         runtimeCall: z.number(),
       }),
-      execute: async ({ input, runtime }) => {
+      execute: async ({ input, domain }) => {
         return {
           title: String(input.title).trim(),
           status: "draft" as const,
-          runtimeCall: runtime.db.runtimeCall,
+          runtimeCall: domain.db.runtimeCall,
         };
       },
     }),
     createTask: defineDomainAction({
-      name: "management.task.create",
       description: "Create a draft task.",
       input: z.object({ title: z.string() }),
       output: z.object({
@@ -84,13 +82,13 @@ export function createManagementDomain() {
         parentRuntimeCall: z.number(),
         nestedRuntimeCall: z.number(),
       }),
-      execute: async ({ input, runtime }) => {
-        const normalized = await runtime.actions.normalizeTitle({ title: input.title });
+      execute: async ({ input, runtime, domain }) => {
+        const normalized = await domain.actions.normalizeTitle({ title: input.title });
         return {
           title: normalized.title,
           status: normalized.status,
           orgId: runtime.env.orgId,
-          parentRuntimeCall: runtime.db.runtimeCall,
+          parentRuntimeCall: domain.db.runtimeCall,
           nestedRuntimeCall: normalized.runtimeCall,
         };
       },

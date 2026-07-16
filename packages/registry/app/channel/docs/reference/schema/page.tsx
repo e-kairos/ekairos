@@ -24,11 +24,11 @@ export default function SchemaReferencePage() {
       <Section title="channelDomain">
         <Code title="@ekairos/channel/schema">{`import { channelDomain } from "@ekairos/channel/schema";
 
-// domain("channel").includes(eventsDomain).withSchema({ entities, links, rooms })`}</Code>
+// domain("channel").includes(contextDomain).withSchema({ entities, links, rooms })`}</Code>
         <p>
           The domain is named <InlineCode>channel</InlineCode> and composes{" "}
-          <InlineCode>eventsDomain</InlineCode>, so it carries{" "}
-          <InlineCode>event_contexts</InlineCode> and <InlineCode>event_items</InlineCode> with it —
+          <InlineCode>contextDomain</InlineCode>, so it carries{" "}
+          <InlineCode>context_contexts</InlineCode> and <InlineCode>context_events</InlineCode> with it —
           that is what the links below attach to.
         </p>
       </Section>
@@ -254,17 +254,17 @@ export default function SchemaReferencePage() {
         <p>Two links attach canonical messages to the events domain.</p>
         <Code title="links">{`channel_messagesContext: {
   forward: { on: "channel_messages", has: "one", label: "context" },
-  reverse: { on: "event_contexts", has: "many", label: "channelMessages" },
+  reverse: { on: "context_contexts", has: "many", label: "channelMessages" },
 },
 channel_messagesItem: {
   forward: { on: "channel_messages", has: "one", label: "item" },
-  reverse: { on: "event_items", has: "many", label: "channelMessages" },
+  reverse: { on: "context_events", has: "many", label: "channelMessages" },
 },`}</Code>
         <PropsTable
           rows={[
             {
               name: "channel_messagesContext",
-              type: "channel_messages.context ⇄ event_contexts.channelMessages",
+              type: "channel_messages.context ⇄ context_contexts.channelMessages",
               description: (
                 <>
                   Each message belongs to <strong>one</strong> context; a context has{" "}
@@ -275,7 +275,7 @@ channel_messagesItem: {
             },
             {
               name: "channel_messagesItem",
-              type: "channel_messages.item ⇄ event_items.channelMessages",
+              type: "channel_messages.item ⇄ context_events.channelMessages",
               description: (
                 <>
                   Optionally anchors a message to <strong>one</strong> context item (the event that
@@ -290,7 +290,7 @@ channel_messagesItem: {
 
       <Section title="Composition">
         <p>
-          <InlineCode>channelDomain</InlineCode> includes <InlineCode>eventsDomain</InlineCode>; the
+          <InlineCode>channelDomain</InlineCode> includes <InlineCode>contextDomain</InlineCode>; the
           agent domain in turn includes <InlineCode>channelDomain</InlineCode>. Pushing the agent
           domain therefore gives you the whole stack — events, channel, and agent entities — in one
           InstantDB app.

@@ -1,15 +1,15 @@
 ---
 title: Canvas
-description: A React Flow-based canvas component for building interactive node-based interfaces.
+description: An Excalidraw-based canvas component for building sketch-style interactive interfaces.
 path: elements/components/canvas
 ---
 
-The `Canvas` component provides a React Flow-based canvas for building interactive node-based interfaces. It comes pre-configured with sensible defaults for AI applications, including panning, zooming, and selection behaviors.
+The `Canvas` component provides an Excalidraw-based canvas for building sketch-style interactive interfaces. It comes pre-configured with sensible defaults for AI applications, including view mode, zen mode, and a minimal UI surface.
 
 <Callout>
-  The Canvas component is designed to be used with the [Node](/components/node)
-  and [Edge](/components/edge) components. See the
-  [Workflow](/examples/workflow) demo for a full example.
+  The Canvas component receives Excalidraw elements directly. ReactFlow-specific
+  primitives such as [Node](/components/node) and [Edge](/components/edge)
+  remain available as separate workflow components.
 </Callout>
 
 ## Installation
@@ -18,15 +18,13 @@ The `Canvas` component provides a React Flow-based canvas for building interacti
 
 ## Features
 
-- Pre-configured React Flow canvas with AI-optimized defaults
-- Pan on scroll enabled for intuitive navigation
-- Selection on drag for multi-node operations
+- Pre-configured Excalidraw canvas with AI-optimized defaults
+- Accepts Excalidraw elements directly
+- Restores element defaults before rendering
+- View mode and zen mode enabled by default
+- Minimal menu/sidebar/footer defaults
 - Customizable background color using CSS variables
-- Delete key support (Backspace and Delete keys)
-- Auto-fit view to show all nodes
-- Disabled double-click zoom for better UX
-- Disabled pan on drag to prevent accidental canvas movement
-- Fully compatible with React Flow props and API
+- Customizable Excalidraw UIOptions and appState
 
 ## Props
 
@@ -38,10 +36,18 @@ The `Canvas` component provides a React Flow-based canvas for building interacti
       description: "Child components like Background, Controls, or MiniMap.",
       type: "ReactNode",
     },
+    elements: {
+      description: "Excalidraw elements to render in the scene.",
+      type: "unknown[]",
+    },
+    appState: {
+      description: "Optional Excalidraw appState overrides.",
+      type: "Record<string, unknown>",
+    },
     "...props": {
       description:
-        "Any other React Flow props like nodes, edges, nodeTypes, edgeTypes, onNodesChange, etc.",
-      type: "ReactFlowProps",
+        "Any other supported Excalidraw props such as theme, UIOptions, viewModeEnabled, zenModeEnabled, and gridModeEnabled.",
+      type: "Excalidraw props",
     },
   }}
 />

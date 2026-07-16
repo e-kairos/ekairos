@@ -1,27 +1,22 @@
 import { NextResponse } from "next/server";
 import { config as dotenvConfig } from "dotenv";
 import { resolve } from "node:path";
-import { storySmoke, storySmokeScripted, storySmokeToolError } from "../../../../../src/lib/story-smoke.story";
-import type { ContextItem } from "@ekairos/events";
+import {
+  storySmoke,
+  storySmokeDomain,
+  storySmokeScripted,
+  storySmokeToolError,
+  type SmokeContext,
+} from "../../../../../src/lib/story-smoke.story";
+import { Context, Events } from "@ekairos/context";
 import { createStorySmokeRuntime } from "../../../../../src/ekairos";
+import { contextEngineDurableWorkflow } from "../../../../../src/lib/context-engine.workflow";
 
 // Ensure env is available in dev (turbopack) even if the bootstrap module isn't evaluated.
 dotenvConfig({ path: resolve(process.cwd(), ".env.local"), quiet: true });
 dotenvConfig({ path: resolve(process.cwd(), ".env"), quiet: true });
 dotenvConfig({ path: resolve(process.cwd(), "../../../.env.local"), quiet: true });
 dotenvConfig({ path: resolve(process.cwd(), "../../../.env"), quiet: true });
-
-function buildTriggerEvent(): ContextItem {
-  return {
-    id: crypto.randomUUID(),
-    type: "input",
-    channel: "web",
-    createdAt: new Date().toISOString(),
-    content: {
-      parts: [{ type: "text", text: "ping" }],
-    },
-  };
-}
 
 export async function POST(request: Request) {
   try {
@@ -34,30 +29,37 @@ export async function POST(request: Request) {
           ? "scripted"
           : "success";
 
-    const context =
+    const reaction =
       mode === "tool-error"
         ? storySmokeToolError
         : mode === "scripted"
           ? storySmokeScripted
           : storySmoke;
-
-    const result = await context.react(buildTriggerEvent(), {
-      runtime: createStorySmokeRuntime({ mode }),
-      context: null,
-      durable: true,
-      options: {
-        maxIterations: 1,
-        maxModelSteps: 1,
-      },
+    const runtime = createStorySmokeRuntime({ mode });
+    const context = await Context(runtime).create<SmokeContext>({
+      key: `story-smoke:${mode}:${crypto.randomUUID()}`,
+      content: { lastMessage: "ping" },
     });
+    const triggerEvent = await Events(runtime).emit(
+      storySmokeDomain.events.requested({ message: "ping", mode }),
+      {
+        id: crypto.randomUUID(),
+        channel: "web",
+        contextId: context.id,
+        createdAt: new Date(),
+      },
+    );
+    const effect = await context.react(triggerEvent, reaction, {
+      workflow: contextEngineDurableWorkflow,
+    });
+    const refreshed = await context.refresh();
 
     return NextResponse.json({
       ok: true,
       data: {
-        context: result.context,
-        trigger: result.trigger,
-        reaction: result.reaction,
-        execution: result.execution,
+        context: refreshed.context,
+        trigger: triggerEvent,
+        effect,
       },
     });
   } catch (error) {

@@ -3,7 +3,6 @@ export {
   ContextActivityIndicator,
   ContextHistory,
   ContextNewButton,
-  ContextStepList,
   MessageArtifact,
   MessageList,
   MessageParts,
@@ -31,7 +30,6 @@ export { useContext } from "@ekairos/events/react";
 export type {
   AppendArgs,
   ContextEventForUI,
-  ContextStepForUI,
   ContextStatus,
   ContextValue,
   ReasoningLevel,

@@ -37,7 +37,7 @@ export default function ChannelOverviewPage() {
       </Section>
 
       <Section title="How it fits the Ekairos domains">
-        <Code title="domain composition">{`agent_threads ──one── event_contexts ──many── event_items
+        <Code title="domain composition">{`agent_threads ──one── context_contexts ──many── context_events
                                    │                  │
                                    └─many─ channel_messages ─one┘
                                           (web · email · whatsapp · slack · ...)`}</Code>

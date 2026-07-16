@@ -49,6 +49,12 @@
       "require": "./dist/sandbox.js",
       "default": "./dist/sandbox.js"
     },
+    "./service": {
+      "types": "./dist/service.d.ts",
+      "import": "./dist/service.js",
+      "require": "./dist/service.js",
+      "default": "./dist/service.js"
+    },
     "./session": {
       "types": "./dist/session.d.ts",
       "import": "./dist/session.js",
@@ -93,7 +99,6 @@
     "@daytonaio/sdk": "^0.134.0",
     "@ekairos/domain": "workspace:*",
     "@ekairos/events": "workspace:*",
-    "@ekairos/reactor": "workspace:*",
     "@instantdb/admin": "0.22.158",
     "@instantdb/core": "0.22.158",
     "@rivet-dev/agent-os-sandbox": "0.1.1",

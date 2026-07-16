@@ -1,0 +1,33 @@
+{
+  "name": "@ekairos/lab-smoke",
+  "version": "1.22.0",
+  "private": true,
+  "description": "Ekairos Lab smoke tests",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "smoke:codex": "tsx src/codex-cli-smoke.ts"
+  },
+  "dependencies": {
+    "@ekairos/context": "workspace:*",
+    "@ekairos/domain": "workspace:*",
+    "@ekairos/events": "workspace:*",
+    "@ekairos/lab": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
+    "@ekairos/sandbox": "workspace:*",
+    "@ekairos/testing": "workspace:*",
+    "@instantdb/admin": "0.22.158",
+    "dotenv": "^17.2.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@ekairos/tsconfig": "workspace:*",
+    "@types/node": "^24.5.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.8"
+  }
+}

@@ -1,105 +1,63 @@
-import {
-  OUTPUT_ITEM_TYPE,
-  type ContextItem,
-} from "@ekairos/events"
 import type {
-  ContextReactionResult,
-  ContextReactor,
-  ContextReactorParams,
-} from "@ekairos/reactor/context"
-import type { ContextEnvironment } from "@ekairos/reactor/runtime"
-
-type AnyRecord = Record<string, unknown>
-
-function asString(value: unknown): string {
-  if (typeof value === "string") return value
-  if (value === null || value === undefined) return ""
-  return String(value)
-}
-
-function asRecord(value: unknown): AnyRecord {
-  if (!value || typeof value !== "object") return {}
-  return value as AnyRecord
-}
+  ReactionEngine,
+  ReactionEngineActions,
+  ReactionEngineInput,
+} from "@ekairos/reactor"
 
 export type ClaudeTurnResult = {
   text: string
-  metadata?: Record<string, unknown>
 }
 
-export type ClaudeExecuteTurnParams = {
-  /** stored context content */
-  context: AnyRecord
-  /** engine-expanded conversation items */
-  events: ContextItem[]
-  triggerEvent: ContextItem
-  /** narrative/system prompt resolved by the context */
-  systemPrompt: string
-  contextId: string
-  executionId: string
-  stepId: string
-  iteration: number
-  writable?: WritableStream<unknown>
-  contextStepStream?: WritableStream<string>
-}
-
-export type CreateClaudeReactorOptions<
-  Context,
-  Env extends ContextEnvironment = ContextEnvironment,
-> = {
-  executeTurn: (params: ClaudeExecuteTurnParams) => Promise<ClaudeTurnResult>
-}
-
-/**
- * Claude reactor for the @ekairos/events context engine.
- *
- * Integrators provide `executeTurn` (Claude API, Claude Agent SDK, or the
- * local Claude Code CLI in headless print mode) and Context keeps
- * durability, persistence and step lifecycle.
- */
-export function createClaudeReactor<
-  Context,
-  Env extends ContextEnvironment = ContextEnvironment,
+export type ClaudeExecuteTurn<
+  TContext = unknown,
+> = <
+  TOutput,
+  TActions extends ReactionEngineActions,
 >(
-  options: CreateClaudeReactorOptions<Context, Env>,
-): ContextReactor<Context, Env> {
-  return async (
-    params: ContextReactorParams<Context, Env>,
-  ): Promise<ContextReactionResult> => {
-    const context = asRecord(params.context.content)
-    const turn = await options.executeTurn({
-      context,
-      events: params.events,
-      triggerEvent: params.triggerEvent,
-      systemPrompt: asString(params.systemPrompt),
-      contextId: params.contextId,
-      executionId: params.executionId,
-      stepId: params.stepId,
-      iteration: params.iteration,
-      writable: params.writable,
-      contextStepStream: params.contextStepStream,
-    })
+  input: ReactionEngineInput<TContext, TOutput, TActions>,
+) => Promise<ClaudeTurnResult>
 
-    const assistantEvent: ContextItem = {
-      id: params.eventId,
-      type: OUTPUT_ITEM_TYPE,
-      channel: "web",
-      createdAt: new Date().toISOString(),
-      status: "completed",
-      content: {
-        parts: [{ type: "text", text: asString(turn.text).trim() }],
-      },
+export type ClaudeEngineOptions<TContext = unknown> = {
+  executeTurn: ClaudeExecuteTurn<TContext>
+}
+
+function parseStructuredOutput(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed) return undefined
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+    if (fenced?.[1]) return JSON.parse(fenced[1].trim())
+    throw new Error("claude_engine_output_json_required")
+  }
+}
+
+export class ClaudeEngine<TContext = unknown>
+  implements ReactionEngine<TContext> {
+  readonly executeTurn: ClaudeExecuteTurn<TContext>
+
+  constructor(options: ClaudeEngineOptions<TContext>) {
+    this.executeTurn = options.executeTurn
+  }
+
+  async agent<TOutput, TActions extends ReactionEngineActions>(
+    input: ReactionEngineInput<TContext, TOutput, TActions>,
+  ) {
+    if (Object.keys(input.actions).length > 0) {
+      throw new Error("claude_engine_actions_not_supported")
     }
 
+    const turn = await this.executeTurn(input)
     return {
-      assistantEvent,
-      actionRequests: [],
-      messagesForModel: [],
-      llm: {
-        provider: "anthropic",
-        model: "claude",
-        rawProviderMetadata: turn.metadata,
-      },
+      output: input.output ? parseStructuredOutput(turn.text) : turn.text as TOutput,
+      metadata: { provider: "claude" },
     }
   }
+}
+
+export function claudeEngine<TContext = unknown>(
+  options: ClaudeEngineOptions<TContext>,
+): ClaudeEngine<TContext> {
+  return new ClaudeEngine(options)
 }

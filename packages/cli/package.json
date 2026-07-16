@@ -37,6 +37,7 @@
   ],
   "dependencies": {
     "@ekairos/dataset": "workspace:*",
+    "@ekairos/platform": "workspace:*",
     "@ekairos/domain": "workspace:*",
     "@instantdb/admin": "0.22.126",
     "chalk": "^5.3.0",

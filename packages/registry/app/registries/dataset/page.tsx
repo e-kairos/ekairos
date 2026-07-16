@@ -12,13 +12,13 @@ export const metadata = {
 const PIPELINE = [
   {
     stage: "source",
-    title: "Domain query, file, or text",
-    body: "fromQuery snapshots live domain state; from / fromText pull files and raw input into the same build.",
+    title: "Causal Point or explicit source",
+    body: "Reaction code starts from given(point); adapters can supply a typed query, file, prior Dataset, rows, or text.",
   },
   {
     stage: "materialize",
     title: "Rows or a single object",
-    body: "asRows for tabular work, first for one structured result. Sandbox-backed reactors handle the heavy parsing.",
+    body: "Rows are durable and ordered. Model-driven parsing runs in a linked child Reaction with an explicit engine and sandbox.",
   },
   {
     stage: "durable",
@@ -48,7 +48,7 @@ const PLANNED = [
   {
     name: "dataset-transform-panel",
     label: "DatasetTransformPanel",
-    body: "Transform runs linked to sandbox execution and events, observable end to end.",
+    body: "Child Reactions linked to the parent Dataset Point, observable end to end.",
   },
 ] as const;
 
@@ -182,7 +182,7 @@ export default function DatasetRegistryPage() {
 
         <div className="mt-10 flex flex-wrap items-center justify-between gap-6 border-t border-[#211d12]/15 pt-8">
           <p className="max-w-2xl text-xl font-semibold leading-tight md:text-2xl">
-            Materialization is already a runtime. This registry makes it visible.
+            Dataset is already causal and durable. This registry makes it visible.
           </p>
           <Link
             href={registry.domain.href}

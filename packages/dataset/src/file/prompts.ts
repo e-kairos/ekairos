@@ -30,7 +30,12 @@ function buildResourceInfo(context: FileParseContext): any {
         .ele("FileId").txt(context.fileId).up()
         .ele("DatasetId").txt(context.datasetId).up()
         .ele("FilePath").txt(context.sandboxConfig.filePath).up()
-        .up()
+
+    if (context.sandboxConfig.contextPath) {
+        xml = xml.ele("ContextPath").txt(context.sandboxConfig.contextPath).up()
+    }
+
+    xml = xml.up()
 
     return xml
 }
@@ -373,6 +378,7 @@ function buildInstructions(context: FileParseContext): string {
         .up()
         .up()
         .ele("Rules")
+        .ele("Rule").txt("When FileResource includes ContextPath, read or parse that workspace file directly for long contextual data; do not copy large mappings from the prompt into generated scripts").up()
         .ele("Rule").txt("The formal definition (defineNotation) and the materialization (schema + code + rows) are co-equal faces of the dataset: author the definition first as the PLAN, refine it on every discovery, finalize it as the RESULT before completion").up()
         .ele("Rule").txt("Schema defines ONE DATA RECORD structure (not array, not header)").up()
         .ele("Rule").txt("Schema property names are authoritative. Never translate or rename keys such as itemName, quantity, or unit into the input language").up()

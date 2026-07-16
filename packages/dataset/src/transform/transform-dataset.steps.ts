@@ -1,6 +1,6 @@
 import {
   getDatasetOutputPath,
-  getDatasetResourcesDir,
+  getDatasetSourcesDir,
   getDatasetStandardDirs,
 } from "../datasetFiles.js"
 import { datasetReadOutputJsonlStep } from "../dataset/steps.js"
@@ -44,7 +44,7 @@ export async function ensureTransformInputsInSandboxStep(params: {
   const inputPaths: Array<{ datasetId: string; path: string }> = []
 
   for (const inputDatasetId of params.inputDatasetIds) {
-    const inputPath = `${getDatasetResourcesDir(params.datasetId)}/resource_${inputDatasetId}.jsonl`
+    const inputPath = `${getDatasetSourcesDir(params.datasetId)}/resource_${inputDatasetId}.jsonl`
 
     const input = await datasetReadOutputJsonlStep({
       runtime: params.runtime,

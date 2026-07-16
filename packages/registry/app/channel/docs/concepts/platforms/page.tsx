@@ -28,12 +28,13 @@ export default function ChannelPlatformsConceptPage() {
           valid — your editor keeps autocomplete for the known ones without closing the door on
           custom kinds.
         </p>
-        <Code title="@ekairos/channel — ChannelKind">{`export const WEB_CHANNEL = "web";
-export const EMAIL_CHANNEL = "email";
-export const WHATSAPP_CHANNEL = "whatsapp";
+        <Code title="@ekairos/channel — ChannelKind">{`import type { Channel } from "@ekairos/events";
 
-/** Open union: known channels get literal types, custom channels are allowed. */
-export type ChannelKind = "web" | "email" | "whatsapp" | (string & {});`}</Code>
+export const WEB_CHANNEL = "web" satisfies Channel;
+export const EMAIL_CHANNEL = "email" satisfies Channel;
+export const WHATSAPP_CHANNEL = "whatsapp" satisfies Channel;
+
+export type ChannelKind = Channel;`}</Code>
         <p>
           The same openness applies to the platform config: <InlineCode>slack</InlineCode>,{" "}
           <InlineCode>teams</InlineCode>, <InlineCode>gchat</InlineCode>,{" "}
@@ -52,11 +53,22 @@ export type ChannelKind = "web" | "email" | "whatsapp" | (string & {});`}</Code>
           runtime untouched. The channel package does not re-model every platform&apos;s auth; it
           forwards your config to the code that actually speaks the protocol.
         </p>
-        <Code title="lib/channels.ts">{`import { createChannels } from "@ekairos/channel/platforms";
-import { db } from "@/lib/db"; // InstantDB admin client
+        <Code title="lib/channels.ts">{`import { Context } from "@ekairos/context";
+import { bindReaction, createChannels } from "@ekairos/channel/platforms";
+import { runtime } from "@/lib/runtime";
+import { support, answerInbound } from "@/lib/support-domain";
+
+const react = bindReaction({
+  runtime,
+  reaction: answerInbound,
+  event: (inbound) => support.events.messageReceived({
+    text: inbound.message.text ?? "",
+  }).link({ message: inbound.message.id }),
+  replyText: (effect) => effect.payload.reply,
+});
 
 export const channels = await createChannels({
-  db,
+  runtime,
   userName: "ekairos",
   platforms: {
     slack: {
@@ -67,13 +79,12 @@ export const channels = await createChannels({
     discord: { botToken: process.env.DISCORD_BOT_TOKEN! },
   },
   resolveContextId: async ({ channel, threadKey }) => {
-    const thread = await ensureThread({ key: \`\${channel}:\${threadKey}\` });
-    return thread.contextId;
+    const context = await Context(runtime).create({
+      key: \`\${channel}:\${threadKey}\`,
+    });
+    return context.id;
   },
-  react: async (inbound) => {
-    const reaction = await reactOnThread(inbound.contextId, inbound.message);
-    return reaction.text;
-  },
+  react,
 });`}</Code>
         <p>
           A platform you do not configure simply does not exist at runtime: no webhook handler is
@@ -132,7 +143,7 @@ POST /api/channels/slack -> channel_messages row    -> your react(inbound) -> po
         <p>
           That stability is what makes <InlineCode>resolveContextId</InlineCode> a pure mapping:
           given <InlineCode>&#123; channel, threadKey &#125;</InlineCode>, return the agent context
-          this conversation belongs to. The idiomatic implementation keys an agent thread as{" "}
+          this conversation belongs to. The idiomatic implementation keys a context as{" "}
           <InlineCode>{"`${channel}:${threadKey}`"}</InlineCode> and returns its context id —
           getting you one durable, multichannel context per platform conversation with no lookup
           tables of your own.
@@ -150,8 +161,11 @@ POST /api/channels/slack -> channel_messages row    -> your react(inbound) -> po
           The contract is deliberately small: your application knows <strong>platforms</strong>{" "}
           (config keys), <strong>canonical messages</strong> (the entity), and{" "}
           <strong>two functions</strong> (<InlineCode>resolveContextId</InlineCode>,{" "}
-          <InlineCode>react</InlineCode>). If the delivery internals are ever replaced, none of your
-          code changes — the schema, the webhooks and the two callbacks are the whole surface.
+          <InlineCode>react</InlineCode>). <InlineCode>bindReaction</InlineCode> supplies the modern
+          reaction callback by emitting the mapped event and calling{" "}
+          <InlineCode>context.react(event, definition)</InlineCode>. If the delivery internals
+          are ever replaced, none of your code changes — the schema, the webhooks and the two
+          callbacks are the whole surface.
         </Callout>
       </Section>
 

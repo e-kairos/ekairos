@@ -12,8 +12,12 @@
     "inlineSources": false,
     "paths": {
       "@ekairos/domain": ["../domain/dist/index.d.ts"],
+      "@ekairos/domain/internal": ["../domain/dist/internal.d.ts"],
       "@ekairos/domain/runtime": ["../domain/dist/runtime.d.ts"],
-      "@ekairos/openai-reactor": ["../reactors/openai-reactor/dist/index.d.ts"]
+      "@ekairos/openai-reactor": ["../reactors/openai-reactor/dist/index.d.ts"],
+      "@ekairos/reactor": ["../reactor/dist/index.d.ts"],
+      "@ekairos/sandbox": ["../sandbox/dist/index.d.ts"],
+      "@ekairos/sandbox/*": ["../sandbox/dist/*"]
     }
   },
   "include": ["src"],

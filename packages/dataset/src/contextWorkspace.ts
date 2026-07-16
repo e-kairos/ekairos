@@ -26,14 +26,14 @@ export type PreparedContextWorkspaceFile = {
   sourcePartIndex?: number
 }
 
-export type PreparedContextExecutionWorkspace = {
+export type PreparedContextSessionWorkspace = {
   contextId: string
-  executionId: string
+  sessionId: string
   sandboxId: string
   root: string
   contextRoot: string
   eventsDir: string
-  resourcesDir: string
+  sourcesDir: string
   outputDir: string
   scriptsDir: string
   tmpDir: string
@@ -103,15 +103,15 @@ export function getContextWorkspaceBase(): string {
   return trimTrailingSlash(CONTEXT_WORKSPACE_BASE)
 }
 
-export function getContextExecutionWorkspaceRoot(params: {
+export function getContextSessionWorkspaceRoot(params: {
   contextId: string
-  executionId: string
+  sessionId: string
   root?: string
 }): string {
   if (params.root) return trimTrailingSlash(params.root)
   const contextId = sanitizePathSegment(params.contextId, "context")
-  const executionId = sanitizePathSegment(params.executionId, "execution")
-  return `${getContextWorkspaceBase()}/${contextId}/executions/${executionId}`
+  const sessionId = sanitizePathSegment(params.sessionId, "session")
+  return `${getContextWorkspaceBase()}/${contextId}/sessions/${sessionId}`
 }
 
 export function getContextWorkspaceRoot(params: {
@@ -130,27 +130,27 @@ export function getContextEventsDir(params: {
   return `${getContextWorkspaceRoot(params)}/events`
 }
 
-export function getContextResourcesDir(params: {
+export function getContextSourcesDir(params: {
   contextId: string
   root?: string
 }): string {
-  return `${getContextWorkspaceRoot(params)}/resources`
+  return `${getContextWorkspaceRoot(params)}/sources`
 }
 
-export function getContextExecutionWorkspaceDirs(params: {
+export function getContextSessionWorkspaceDirs(params: {
   contextId: string
-  executionId: string
+  sessionId: string
   root?: string
 }) {
-  const root = getContextExecutionWorkspaceRoot(params)
+  const root = getContextSessionWorkspaceRoot(params)
   const contextRoot = getContextWorkspaceRoot(params)
   const eventsDir = getContextEventsDir(params)
-  const resourcesDir = getContextResourcesDir(params)
+  const sourcesDir = getContextSourcesDir(params)
   return {
     root,
     contextRoot,
     eventsDir,
-    resourcesDir,
+    sourcesDir,
     outputDir: `${root}/output`,
     scriptsDir: `${root}/scripts`,
     tmpDir: `${root}/tmp`,
@@ -158,16 +158,16 @@ export function getContextExecutionWorkspaceDirs(params: {
   }
 }
 
-export function getContextExecutionWorkspaceStandardDirs(params: {
+export function getContextSessionWorkspaceStandardDirs(params: {
   contextId: string
-  executionId: string
+  sessionId: string
   root?: string
 }): string[] {
-  const dirs = getContextExecutionWorkspaceDirs(params)
+  const dirs = getContextSessionWorkspaceDirs(params)
   return [
     dirs.contextRoot,
     dirs.eventsDir,
-    dirs.resourcesDir,
+    dirs.sourcesDir,
     dirs.root,
     dirs.outputDir,
     dirs.scriptsDir,
@@ -198,17 +198,17 @@ export function extractContextWorkspaceFilesFromEventItems(
   return files
 }
 
-export async function prepareContextExecutionWorkspaceStep(params: {
+export async function prepareContextSessionWorkspaceStep(params: {
   runtime: any
   sandboxId: string
   contextId: string
-  executionId: string
+  sessionId: string
   files: ContextWorkspaceFileInput[]
   root?: string
-}): Promise<PreparedContextExecutionWorkspace> {
+}): Promise<PreparedContextSessionWorkspace> {
   "use step"
 
-  const dirs = getContextExecutionWorkspaceDirs(params)
+  const dirs = getContextSessionWorkspaceDirs(params)
   const filePartDirs = Array.from(
     new Set(
       params.files.map((fileInput) =>
@@ -225,7 +225,7 @@ export async function prepareContextExecutionWorkspaceStep(params: {
     runtime: params.runtime,
     sandboxId: params.sandboxId,
     cmd: "mkdir",
-    args: ["-p", ...getContextExecutionWorkspaceStandardDirs(params), ...filePartDirs],
+    args: ["-p", ...getContextSessionWorkspaceStandardDirs(params), ...filePartDirs],
   })
 
   const preparedFiles: PreparedContextWorkspaceFile[] = []
@@ -289,9 +289,9 @@ export async function prepareContextExecutionWorkspaceStep(params: {
     })
   }
 
-  const manifest: PreparedContextExecutionWorkspace = {
+  const manifest: PreparedContextSessionWorkspace = {
     contextId: params.contextId,
-    executionId: params.executionId,
+    sessionId: params.sessionId,
     sandboxId: params.sandboxId,
     ...dirs,
     files: preparedFiles,

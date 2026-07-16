@@ -49,6 +49,9 @@ export default async function DocsIndexPage() {
           <a className="toc-link" href="#context-integration">
             Context Integration
           </a>
+          <Link className="toc-link" href="/reaction">
+            Reaction template
+          </Link>
         </nav>
       </aside>
 
@@ -105,17 +108,18 @@ export default async function DocsIndexPage() {
             <span className="pill">Ekairos</span>
           </div>
           <p className="section-desc">
-            The component catalog ships with a context snapshot API and the `useContext`
-            client hook so UI can hydrate from persisted state and stay synced while streams run.
+            The component catalog ships with the current event context hook. It hydrates
+            persisted events and steps and follows resumable `$streams` while a step is running.
           </p>
           <pre className="cmd">
-{`import { useContext } from "@ekairos/events/react";
+{`import { init } from "@instantdb/react";
+import { useContext } from "@ekairos/events/react";
 
-const { data, isLoading, error, refresh } = useContext({
-  contextKey: "context-support-001",
-  orgId: "org_local",
-  ensure: true,
-  refreshMs: 1500,
+const db = init({ appId, schema });
+const context = useContext(db, {
+  apiUrl: "/api/context/reaction-template",
+  contextKey: "reaction-template",
+  enableResumableStreams: true,
 });`}
           </pre>
         </section>

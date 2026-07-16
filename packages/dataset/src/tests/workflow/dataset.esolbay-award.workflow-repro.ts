@@ -1,13 +1,12 @@
 import { createOpenAI } from "@ai-sdk/openai"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
-import { eventsDomain } from "@ekairos/events"
-import { createAiSdkReactor, type ContextReactor } from "@ekairos/reactor/context"
-import { SandboxService } from "@ekairos/sandbox"
+import { contextDomain } from "@ekairos/events/schema"
+import { ai } from "@ekairos/reactor"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { sandboxDomain } from "../../../../sandbox/src/schema.ts"
 
-import { dataset } from "../../dataset.js"
+import { materializeDataset } from "../../dataset.js"
 import { datasetDomain } from "../../schema.js"
 
 type InstantAdminInit = typeof import("@instantdb/admin")["init"]
@@ -16,9 +15,10 @@ export const esolbayAwardDatasetWorkflowReproDomain = domain(
   "dataset-esolbay-award-workflow-repro",
 )
   .includes(datasetDomain)
-  .includes(eventsDomain)
+  .includes(contextDomain)
   .includes(sandboxDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
+  .withActions(datasetDomain.actions)
 
 export type EsolbayAwardDatasetWorkflowReproEnv = {
   orgId: string
@@ -198,16 +198,6 @@ async function createAwardAddBidItemsModelStep() {
   return getAzureProvider().responses(resolveModelId() as any)
 }
 
-function createAwardAddBidItemsReactor<
-  Context,
-  Env extends Record<string, unknown>,
->(): ContextReactor<Context, Env> {
-  return createAiSdkReactor<Context, Env, any, any, { enabled: true }>({
-    resolveConfig: () => ({ enabled: true }),
-    selectModel: () => createAwardAddBidItemsModelStep,
-  }) as unknown as ContextReactor<Context, Env>
-}
-
 export async function createEsolbayAwardDatasetSandboxStep(params: {
   runtime: EsolbayAwardDatasetWorkflowReproRuntime
   orgId: string
@@ -216,6 +206,7 @@ export async function createEsolbayAwardDatasetSandboxStep(params: {
 }): Promise<{ sandboxId: string }> {
   "use step"
 
+  const { SandboxService } = await import("@ekairos/sandbox/service")
   const service = new SandboxService((await params.runtime.db()) as any)
   const created = await service.createSandbox({
     provider: "vercel",
@@ -239,6 +230,7 @@ export async function stopEsolbayAwardDatasetSandboxStep(params: {
 }): Promise<void> {
   "use step"
 
+  const { SandboxService } = await import("@ekairos/sandbox/service")
   const service = new SandboxService((await params.runtime.db()) as any)
   const stopped = await service.stopSandbox(params.sandboxId)
   if (!stopped.ok) throw new Error(stopped.error)
@@ -258,13 +250,12 @@ export async function esolbayAwardDatasetOperationWorkflow(
   })
 
   try {
-    const result = await dataset(input.runtime as any, {
+    const result = await materializeDataset(input.runtime as any, {
       datasetId: input.datasetId,
-      durable: true,
     })
-      .sandbox({ sandboxId: sandbox.sandboxId })
+      .sandbox(sandbox.sandboxId)
       .from({ kind: "file", fileId: input.fileId })
-      .reactor(createAwardAddBidItemsReactor())
+      .engine(ai({ model: createAwardAddBidItemsModelStep }))
       .instructions(input.instructions)
       .schema(input.outputSchema as any)
       .asRows()

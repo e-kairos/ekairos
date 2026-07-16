@@ -1,66 +1,78 @@
-import {
-  INPUT_ITEM_TYPE,
-  WEB_CHANNEL,
-} from "./context.events.js"
+import type { ContextPartEnvelope, ContextInlineContent } from "./context.parts.js"
+import { contextPartEnvelopeSchema } from "./context.parts.js"
+import type { ContextRuntimeServiceHandle } from "./context.runtime.js"
+import { getContextRuntimeServices } from "./context.runtime.js"
 import type {
-  Channel,
-  ItemType,
-} from "./context.contract.js"
+  ContextEvent,
+  ContextEventPart,
+  SaveContextEventInput,
+} from "./context.store.js"
 import {
-  contextPartEnvelopeSchema,
-  type ContextInlineContent,
-  type ContextPartEnvelope,
-} from "./context.parts.js"
-import type { ContextItem } from "./context.store.js"
-import {
-  getContextRuntimeServices,
-  type ContextRuntimeServiceHandle,
-} from "./context.runtime.js"
+  emitDomainEvent,
+  type DomainEventDraftLike,
+  type DomainEventEnvelope,
+  type DomainEventPhysicalLink,
+} from "./domain-event.js"
 
-export type EventCreateInput = {
+export type EventCreateInput<Payload = unknown> = Readonly<{
   id?: string
-  type?: ItemType
-  channel?: Channel
+  type: string
+  domain?: string
+  name?: string
+  channel?: string
+  payload?: Payload
+  links?: Readonly<Record<string, string | readonly string[]>>
+  physicalLinks?: Readonly<Record<string, DomainEventPhysicalLink>>
+  metadata?: Readonly<Record<string, unknown>>
+  parts?: readonly ContextPartEnvelope[]
+  contextId?: string
   createdAt?: string | Date
-  status?: ContextItem["status"]
-  content?: Omit<ContextItem["content"], "parts"> & Record<string, unknown>
+}>
+
+/** The InstaQL selection nested below `context_events`. */
+export type EventQueryInput = Readonly<Record<string, unknown>>
+export type EventQueryResult<Event extends ContextEvent = ContextEvent> = readonly Event[]
+
+function normalizeDate(value: string | Date | undefined) {
+  const result = value instanceof Date ? value : value ? new Date(value) : new Date()
+  if (Number.isNaN(result.valueOf())) throw new Error("events_invalid_createdAt")
+  return result
 }
 
-export type EventBuilderStepInput = {
-  iteration?: number
+function normalizePart(row: any): ContextEventPart {
+  return Object.freeze({
+    id: String(row.id),
+    key: String(row.key),
+    index: Number(row.index),
+    type: String(row.type),
+    content: row.content,
+    ...(row.metadata == null ? {} : { metadata: Object.freeze({ ...row.metadata }) }),
+    createdAt: normalizeDate(row.createdAt),
+    ...(row.updatedAt == null ? {} : { updatedAt: normalizeDate(row.updatedAt) }),
+  })
 }
 
-type EventBuilderStep = {
-  iteration?: number
-  parts: ContextPartEnvelope[]
-}
-
-function createId() {
-  const cryptoApi = globalThis.crypto
-  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
-    return cryptoApi.randomUUID()
+function normalizeQueriedEvent(row: any): ContextEvent {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    throw new Error("events_query_returned_invalid_event")
   }
-
-  return "evt_" + Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
-
-function normalizeCreatedAt(value: EventCreateInput["createdAt"]) {
-  if (value instanceof Date) return value.toISOString()
-  if (typeof value === "string" && value.trim().length > 0) return value
-  return new Date().toISOString()
-}
-
-function normalizeEvent(input: EventCreateInput = {}): ContextItem {
-  return {
-    id: input.id ?? createId(),
-    type: input.type ?? INPUT_ITEM_TYPE,
-    channel: input.channel ?? WEB_CHANNEL,
-    createdAt: normalizeCreatedAt(input.createdAt),
-    status: input.status,
-    content: {
-      ...(input.content ?? {}),
-    },
-  }
+  return Object.freeze({
+    id: String(row.id),
+    type: String(row.type),
+    createdAt: normalizeDate(row.createdAt),
+    ...(typeof row.domain === "string" ? { domain: row.domain } : {}),
+    ...(typeof row.name === "string" ? { name: row.name } : {}),
+    ...(typeof row.channel === "string" ? { channel: row.channel } : {}),
+    payload: row.payload,
+    links: Object.freeze({ ...(row.links ?? {}) }),
+    physicalLinks: Object.freeze({ ...(row.physicalLinks ?? {}) }),
+    metadata: Object.freeze({ ...(row.metadata ?? {}) }),
+    eventParts: Object.freeze(
+      [...(row.eventParts ?? [])]
+        .sort((left, right) => Number(left.index) - Number(right.index))
+        .map(normalizePart),
+    ),
+  })
 }
 
 export class Part {
@@ -68,18 +80,10 @@ export class Part {
     return contextPartEnvelopeSchema.parse(part)
   }
 
-  static message(
-    input:
-      | string
-      | {
-          text?: string
-          blocks?: ContextInlineContent[]
-        },
-  ): ContextPartEnvelope {
-    const content = typeof input === "string" ? { text: input } : input
+  static message(input: string | { text?: string; blocks?: ContextInlineContent[] }) {
     return Part.new({
       type: "message",
-      content,
+      content: typeof input === "string" ? { text: input } : input,
     })
   }
 
@@ -89,92 +93,94 @@ export class Part {
     data?: string
     url?: string
     fileId?: string
-  }): ContextPartEnvelope {
-    return Part.message({
-      blocks: [
-        {
-          type: "file",
-          mediaType: input.mediaType,
-          filename: input.filename,
-          data: input.data,
-          url: input.url,
-          fileId: input.fileId,
-        },
-      ],
-    })
+  }) {
+    return Part.message({ blocks: [{ type: "file", ...input }] })
   }
 
-  static json(value: unknown): ContextPartEnvelope {
-    return Part.message({
-      blocks: [
-        {
-          type: "json",
-          value,
-        },
-      ],
-    })
+  static json(value: unknown) {
+    return Part.message({ blocks: [{ type: "json", value }] })
   }
 }
 
-export class EventBuilder {
-  private steps: EventBuilderStep[] = []
-  private currentStep: EventBuilderStep | null = null
+export class EventBuilder<Payload = unknown> {
+  private readonly parts: ContextPartEnvelope[] = []
 
   constructor(
     private readonly runtime: ContextRuntimeServiceHandle,
-    private readonly input: EventCreateInput = {},
+    private readonly input: EventCreateInput<Payload>,
   ) {}
 
-  simple(...parts: ContextPartEnvelope[]) {
-    this.steps = []
-    this.currentStep = null
-    this.step()
-    for (const part of parts) {
-      this.part(part)
-    }
-    return this
-  }
-
-  step(input: EventBuilderStepInput = {}) {
-    const next: EventBuilderStep = {
-      iteration: input.iteration,
-      parts: [],
-    }
-    this.steps.push(next)
-    this.currentStep = next
-    return this
-  }
-
   part(part: ContextPartEnvelope) {
-    if (!this.currentStep) {
-      this.step()
-    }
-    this.currentStep?.parts.push(Part.new(part))
+    this.parts.push(Part.new(part))
     return this
   }
 
-  async create(): Promise<ContextItem> {
-    const { store } = await getContextRuntimeServices(this.runtime)
-    const parts = this.steps.flatMap((step) => step.parts)
-    return await store.saveEvent(normalizeEvent({
+  async create() {
+    return await new EventsClient(this.runtime).create({
       ...this.input,
-      content: {
-        ...(this.input.content ?? {}),
-        ...(parts.length > 0 ? { parts } : {}),
-      },
-    }))
+      parts: [...(this.input.parts ?? []), ...this.parts],
+    })
   }
 }
 
 export class EventsClient {
   constructor(private readonly runtime: ContextRuntimeServiceHandle) {}
 
-  async create(input: EventCreateInput): Promise<ContextItem> {
+  async create<Payload>(input: EventCreateInput<Payload>): Promise<ContextEvent<Payload>> {
+    if (!input.type?.trim()) throw new Error("events_type_required")
     const { store } = await getContextRuntimeServices(this.runtime)
-    return await store.saveEvent(normalizeEvent(input))
+    const existing = input.id && input.createdAt === undefined
+      ? await store.getEvent(input.id)
+      : null
+    const event: SaveContextEventInput<Payload> = {
+      id: input.id ?? globalThis.crypto.randomUUID(),
+      type: input.type.trim(),
+      createdAt: existing?.createdAt ?? normalizeDate(input.createdAt),
+      ...(input.domain ? { domain: input.domain } : {}),
+      ...(input.name ? { name: input.name } : {}),
+      ...(input.channel ? { channel: input.channel } : {}),
+      payload: input.payload as Payload,
+      links: Object.freeze({ ...(input.links ?? {}) }),
+      physicalLinks: Object.freeze({ ...(input.physicalLinks ?? {}) }),
+      metadata: Object.freeze({ ...(input.metadata ?? {}) }),
+      eventParts: (input.parts ?? []).map((part, index) => ({
+        index,
+        type: part.type,
+        content: part.content,
+        ...(part.reactorMetadata
+          ? { metadata: part.reactorMetadata as Readonly<Record<string, unknown>> }
+          : {}),
+      })),
+    }
+    return await store.saveEvent(event, input.contextId ? { id: input.contextId } : undefined)
   }
 
-  builder(input: EventCreateInput = {}) {
+  async emit<Payload>(
+    draft: DomainEventDraftLike<Payload>,
+    envelope: DomainEventEnvelope = {},
+  ) {
+    return await emitDomainEvent(this.runtime, draft, envelope)
+  }
+
+  async query<Event extends ContextEvent = ContextEvent>(
+    input: EventQueryInput,
+  ): Promise<EventQueryResult<Event>> {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new Error("events_query_requires_object")
+    }
+    const { db } = await getContextRuntimeServices(this.runtime)
+    const query = {
+      ...input,
+      eventParts: (input as any).eventParts ?? { $: { order: { index: "asc" } } },
+    }
+    const result = await db.query({ context_events: query } as any)
+    return Object.freeze(
+      (Array.isArray(result?.context_events) ? result.context_events : [])
+        .map(normalizeQueriedEvent) as Event[],
+    )
+  }
+
+  builder<Payload>(input: EventCreateInput<Payload>) {
     return new EventBuilder(this.runtime, input)
   }
 }

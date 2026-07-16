@@ -29,7 +29,6 @@ export default function ContextAgent(props: AgentProps) {
     onContextUpdate,
     prepareAppendArgs,
     prepareRequestBody,
-    streamChunkDelayMs,
     actionComponents,
     classNames,
     emptyState,
@@ -48,7 +47,6 @@ export default function ContextAgent(props: AgentProps) {
     onContextUpdate,
     prepareAppendArgs,
     prepareRequestBody,
-    streamChunkDelayMs,
   });
 
   const listContext = useMemo(() => {
@@ -62,8 +60,7 @@ export default function ContextAgent(props: AgentProps) {
   const hasVisibleEvents = listContext.events.length > 0;
   const loading =
     context.sendStatus === "submitting" ||
-    context.contextStatus === "open_streaming" ||
-    listContext.events.some((event) => event.status === "pending");
+    context.contextStatus === "running";
   const hasError = Boolean(context.sendError);
   const showEmptyState =
     emptyState !== undefined &&

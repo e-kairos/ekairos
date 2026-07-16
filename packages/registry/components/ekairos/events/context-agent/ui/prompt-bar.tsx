@@ -293,7 +293,7 @@ const PromptBarInner = memo(function PromptBarInner({
   );
   const onClearAttachments = useCallback(() => setAttachments([]), []);
 
-  const isContextStreaming = context.context?.status === "open_streaming";
+  const isContextStreaming = context.contextStatus === "running";
   const isSubmitting = sendStatus === "submitting";
 
   const hasDoneAttachment = useMemo(

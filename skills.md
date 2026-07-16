@@ -14,7 +14,7 @@ Use `./skill.sh` to list, validate, bundle, and install skills.
 - Related packages:
   - `@ekairos/domain`
   - `@ekairos/events`
-  - `@ekairos/structure`
+  - `@ekairos/dataset`
 
 ### ekairos-domain-cli
 
@@ -34,7 +34,7 @@ Use `./skill.sh` to list, validate, bundle, and install skills.
   - `@ekairos/domain`
   - `@ekairos/ekairos`
   - `@ekairos/events`
-  - `@ekairos/structure`
+  - `@ekairos/dataset`
 
 ### esolbay-context-migration
 
@@ -56,7 +56,7 @@ Use `./skill.sh` to list, validate, bundle, and install skills.
 - Related packages:
   - `@ekairos/events`
   - `@ekairos/domain`
-  - `@ekairos/structure`
+  - `@ekairos/dataset`
   - `@ekairos/story`
 
 ## Distribution Commands

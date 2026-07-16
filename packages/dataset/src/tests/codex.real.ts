@@ -5,17 +5,11 @@ import { homedir, tmpdir } from "node:os"
 import { dirname, join, parse } from "node:path"
 import { createInterface, type Interface } from "node:readline"
 import {
-  OUTPUT_ITEM_TYPE,
-  type ContextItem,
-} from "@ekairos/events"
-import {
-  type ContextSkillPackage,
-  type ContextReactionResult,
-  type ContextReactor,
-  type ContextReactorParams,
-  actionsToActionSpecs,
-} from "@ekairos/reactor/context"
-import { createCodexReactor, type CodexConfig } from "@ekairos/openai-reactor"
+  type ReactionEngine,
+  type ReactionEngineActions,
+  type ReactionEngineInput,
+} from "@ekairos/reactor"
+import type { DatasetSkillPackage } from "../skill"
 
 type JsonRecord = Record<string, unknown>
 
@@ -41,7 +35,7 @@ export type RealCodexRunner = {
     repoPath: string
     providerContextId?: string
     approvalPolicy?: string
-    skills?: ContextSkillPackage[]
+    skills?: DatasetSkillPackage[]
     onEvent?: (event: JsonRecord) => Promise<void> | void
   }) => Promise<CodexRealTurnResult>
   dispose: () => Promise<void>
@@ -128,14 +122,6 @@ function writeTempCodexConfig(codexHome: string) {
   writeFileSync(join(codexHome, "config.toml"), `${content}\n`, "utf8")
 }
 
-function textFromTriggerEvent(event: ContextItem): string {
-  const parts = Array.isArray((event as any)?.content?.parts) ? (event as any).content.parts : []
-  return parts
-    .map((part: any) => (part?.type === "text" ? String(part.text ?? "") : ""))
-    .join("\n")
-    .trim()
-}
-
 function stripJsonFences(value: string): string {
   const trimmed = value.trim()
   if (!trimmed.startsWith("```")) return trimmed
@@ -143,16 +129,6 @@ function stripJsonFences(value: string): string {
     .replace(/^```(?:json)?/i, "")
     .replace(/```$/i, "")
     .trim()
-}
-
-function parseToolCallPayload(value: string): { tool?: string; input?: unknown } | null {
-  try {
-    const parsed = JSON.parse(stripJsonFences(value))
-    if (!parsed || typeof parsed !== "object") return null
-    return parsed as { tool?: string; input?: unknown }
-  } catch {
-    return null
-  }
 }
 
 export async function setupRealCodexRunner(params?: {
@@ -231,7 +207,7 @@ export async function setupRealCodexRunner(params?: {
     copyFileSync(inputPath, join(codexHome, fileName))
   }
 
-  const installSkills = (skills: ContextSkillPackage[] | undefined) => {
+  const installSkills = (skills: DatasetSkillPackage[] | undefined) => {
     for (const skill of skills ?? []) {
       const skillName = asString(skill.name).trim()
       if (!skillName) continue
@@ -471,128 +447,33 @@ export async function setupRealCodexRunner(params?: {
   }
 }
 
-export function createCodexJsonToolReactor<Context, Env extends { repoPath: string; approvalPolicy?: string }>(
+export function createRealCodexCommandEngine(
   params: {
     runner: RealCodexRunner
     repoPath: string
     approvalPolicy?: string
+    skills?: DatasetSkillPackage[]
   },
-): ContextReactor<Context, Env> {
-  return async (reactorParams: ContextReactorParams<Context, Env>): Promise<ContextReactionResult> => {
-    const toolSpecs = Object.entries(actionsToActionSpecs(reactorParams.actions)).map(([name, definition]) => {
-      const record = asRecord(definition)
-      return {
-        name,
-        description: asString(record.description),
-        inputSchema: record.inputSchema ?? null,
-      }
-    })
-
-    const instruction = [
-      reactorParams.systemPrompt,
-      "",
-      "You must pick exactly one local tool call when a tool is available.",
-      "Return ONLY valid JSON with this shape and nothing else:",
-      '{"tool":"tool_name","input":{}}',
-      "",
-      "Available local tools:",
-      JSON.stringify(toolSpecs, null, 2),
-      "",
-      "User request:",
-      textFromTriggerEvent(reactorParams.triggerEvent),
-    ].join("\n")
-
-    const turn = await params.runner.runTurn({
-      instruction,
-      repoPath: params.repoPath,
-      approvalPolicy: params.approvalPolicy ?? "never",
-      skills: reactorParams.skills,
-    })
-
-    const parsed = parseToolCallPayload(turn.assistantText)
-    const toolName = asString(parsed?.tool).trim()
-    const toolInput = parsed?.input
-    const actionRef = randomUUID()
-    const toolPart =
-      toolName && Object.prototype.hasOwnProperty.call(reactorParams.actions, toolName)
-        ? [
-            {
-              type: `tool-${toolName}`,
-              toolCallId: actionRef,
-              input: toolInput ?? {},
-            },
-          ]
-        : []
-
-    return {
-      assistantEvent: {
-        id: reactorParams.eventId,
-        type: OUTPUT_ITEM_TYPE,
-        channel: "web",
-        createdAt: new Date().toISOString(),
-        status: "completed",
-        content: {
-          parts: [
-            {
-              type: "text",
-              text: turn.assistantText,
-            },
-            ...toolPart,
-          ],
-        },
-      },
-      actionRequests:
-        toolPart.length > 0
-          ? [
-              {
-                actionRef,
-                actionName: toolName,
-                input: toolInput ?? {},
-              },
-            ]
-          : [],
-      messagesForModel: [],
-      llm: {
-        provider: "codex-app-server",
-        model: "codex",
-        rawUsage: turn.usage,
-      },
-    }
-  }
-}
-
-export function createRealCodexCommandReactor<Context, Env extends { repoPath: string; approvalPolicy?: string }>(
-  params: {
-    runner: RealCodexRunner
-    repoPath: string
-    approvalPolicy?: string
-  },
-) {
-  return createCodexReactor<Context, CodexConfig, Env>({
-    resolveConfig: async () => ({
-      appServerUrl: "http://127.0.0.1/unused",
-      repoPath: params.repoPath,
-      approvalPolicy: params.approvalPolicy ?? "never",
-      mode: "local",
-    }),
-    executeTurn: async (args) => {
+): ReactionEngine<Record<string, unknown>, Record<string, unknown>> {
+  return {
+    async step<TOutput, TActions extends ReactionEngineActions>(
+      input: ReactionEngineInput<Record<string, unknown>, Record<string, unknown>, TOutput, TActions>,
+    ) {
       const turn = await params.runner.runTurn({
-        instruction: args.instruction,
-        repoPath: args.config.repoPath,
-        providerContextId: args.config.providerContextId,
-        approvalPolicy: args.config.approvalPolicy,
-        skills: args.skills,
-        onEvent: args.emitChunk,
+        instruction: [
+          input.step.instructions,
+          input.step.payload === undefined
+            ? ""
+            : `Payload:\n${JSON.stringify(input.step.payload, null, 2)}`,
+          "Complete the requested work, then return only valid JSON:",
+          '{"completed":true,"summary":"concise completion summary"}',
+        ].filter(Boolean).join("\n\n"),
+        repoPath: params.repoPath,
+        approvalPolicy: params.approvalPolicy ?? "never",
+        skills: params.skills,
       })
-
-      return {
-        providerContextId: turn.providerContextId,
-        turnId: turn.turnId,
-        assistantText: turn.assistantText,
-        reasoningText: turn.reasoningText,
-        diff: turn.diff,
-        usage: turn.usage,
-      }
+      const output = JSON.parse(stripJsonFences(turn.assistantText))
+      return input.step.output ? input.step.output.parse(output) : output
     },
-  })
+  }
 }

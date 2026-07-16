@@ -18,7 +18,6 @@ import { ArrowDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { MessageParts } from "./message-parts";
-import { ContextStepList } from "./context-step-list";
 import {
   getActionPartInfo,
   getCreateMessageText,
@@ -66,17 +65,13 @@ const MessageList = memo(function MessageList({
       return {
         id: event.id,
         role,
-        parts: event.content?.parts || [],
+        parts: event.eventParts,
         metadata: {
           channel: event.channel,
           type: event.type,
           createdAt: event.createdAt,
           eventId: event.id,
-          status: event.status,
-          emails: event.emails,
-          whatsappMessages: event.whatsappMessages,
         },
-        steps: event.steps ?? [],
       };
     };
 
@@ -97,7 +92,7 @@ const MessageList = memo(function MessageList({
       : "";
 
   const shouldShowTurnIndicator =
-    contextStatus === "open_streaming" || sendStatus === "submitting";
+    contextStatus === "running" || sendStatus === "submitting";
   const isTurnStreaming = shouldShowTurnIndicator;
   const messageListStateAttrs = {
     "aria-live": isTurnStreaming ? "polite" : "off",
@@ -165,10 +160,6 @@ const MessageList = memo(function MessageList({
       {visibleMessages.map((message: any) => {
         const isLatest =
           message === visibleMessages[visibleMessages.length - 1];
-        const hasSteps =
-          message.role === "assistant" &&
-          Array.isArray(message.steps) &&
-          message.steps.length > 0;
         const status =
           isLatest && isTurnStreaming && message?.role === "assistant"
             ? "streaming"
@@ -183,24 +174,14 @@ const MessageList = memo(function MessageList({
               message={message}
               showMetadata={showMessageMetadata}
             />
-            {!hasSteps ? (
-              <MessageParts
-                message={message}
-                status={status}
-                isLatest={isLatest}
-                actionComponents={actionComponents}
-                classNames={classNames}
-                showReasoning={showReasoning}
-              />
-            ) : null}
-            {hasSteps ? (
-              <ContextStepList
-                steps={message.steps}
-                actionComponents={actionComponents}
-                classNames={classNames}
-                showReasoning={showReasoning}
-              />
-            ) : null}
+            <MessageParts
+              message={message}
+              status={status}
+              isLatest={isLatest}
+              actionComponents={actionComponents}
+              classNames={classNames}
+              showReasoning={showReasoning}
+            />
             {renderMessageActions
               ? renderMessageActions({ message, status, isLatest })
               : null}
@@ -246,7 +227,6 @@ function MessageHeader({
   const metadata = message?.metadata ?? {};
   const chips = [
     { label: "event", value: shortIdentifier(metadata.eventId) },
-    { label: "status", value: metadata.status },
     { label: "channel", value: metadata.channel },
   ].filter((chip) => typeof chip.value === "string" && chip.value.length > 0);
 
@@ -297,8 +277,7 @@ function hasRenderableMessage(message: any) {
     return true;
   }
 
-  const steps = Array.isArray(message.steps) ? message.steps : [];
-  return steps.some((step: any) => hasVisibleAssistantParts(step?.parts));
+  return false;
 }
 
 function hasVisibleAssistantParts(parts: unknown[]): boolean {

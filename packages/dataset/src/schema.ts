@@ -1,6 +1,16 @@
 import { i } from "@instantdb/core"
-import { domain, type DomainSchemaResult } from "@ekairos/domain"
-import { eventsDomain } from "@ekairos/events"
+import {
+  DOMAIN_ACTION_FULL_INPUT_TYPE,
+  DOMAIN_ACTION_OWNER_TYPE,
+  DOMAIN_ACTION_RUNTIME_TYPE,
+  defineEvent,
+  domain,
+} from "@ekairos/domain"
+import { contextDomain } from "@ekairos/events"
+import { z } from "zod"
+import { datasetActions } from "./actions.js"
+
+export * from "./actions.js"
 
 const entities = {
   dataset_datasets: i.entity({
@@ -37,22 +47,37 @@ const links = {
   },
   dataset_datasetsContext: {
     forward: { on: "dataset_datasets", has: "one", label: "context" },
-    reverse: { on: "event_contexts", has: "many", label: "datasets" },
+    reverse: { on: "context_contexts", has: "many", label: "datasets" },
   },
 } as const
 
 const rooms = {} as const
 
-export const datasetDomain = domain("dataset").includes(eventsDomain).withSchema({
-  entities,
-  links,
-  rooms,
-}) as unknown as DomainSchemaResult<
-  typeof entities,
-  typeof links,
-  typeof rooms,
-  {},
-  "dataset",
-  "dataset"
->
+const materializationRequested = defineEvent({
+  payload: z.object({
+    mode: z.enum(["file", "transform"]),
+    prompt: z.string(),
+  }),
+  links: {
+    target: { on: "dataset_datasets", has: "one" },
+    sources: { on: "dataset_datasets", has: "many" },
+    file: { on: "$files", has: "one" },
+  },
+})
+
+const materialized = defineEvent({
+  payload: z.object({
+    datasetId: z.string(),
+    status: z.literal("materialized"),
+  }),
+  links: {
+    target: { on: "dataset_datasets", has: "one" },
+  },
+})
+
+export const datasetDomain = domain("dataset")
+  .includes(contextDomain)
+  .withSchema({ entities, links, rooms })
+  .withEvents({ materializationRequested, materialized })
+  .withActions(datasetActions)
 

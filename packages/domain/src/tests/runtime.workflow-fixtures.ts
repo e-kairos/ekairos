@@ -25,7 +25,8 @@ export type RuntimeWorkflowEnv = {
 export async function normalizeProbeLabelExecute(
   { input }: {
     input: { label: string }
-    runtime: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
+    runtime: RuntimeWorkflowTestRuntime
+    domain: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
   },
 ) {
   const execution = await readActionExecutionContext()
@@ -36,7 +37,6 @@ export async function normalizeProbeLabelExecute(
 }
 
 export const normalizeProbeLabelAction = defineDomainAction({
-  name: "runtime.probe.normalizeLabel",
   input: z.object({ label: z.string() }),
   output: z.object({
     label: z.string(),
@@ -46,19 +46,20 @@ export const normalizeProbeLabelAction = defineDomainAction({
 })
 
 export async function createProbeExecute(
-  { input, runtime }: {
+  { input, runtime, domain }: {
     input: { probeId: string; label: string }
-    runtime: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
+    runtime: RuntimeWorkflowTestRuntime
+    domain: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
   },
 ) {
   const execution = await readActionExecutionContext()
-  const normalized = await runtime.actions.normalizeProbeLabel({
+  const normalized = await domain.actions.normalizeProbeLabel({
     label: input.label,
   })
   const rowId = id()
 
-  await runtime.db.transact([
-    runtime.db.tx.runtime_probe_rows[rowId].update({
+  await domain.db.transact([
+    domain.db.tx.runtime_probe_rows[rowId].update({
       probeId: input.probeId,
       label: normalized.label,
       createdAt: new Date(),
@@ -78,7 +79,6 @@ export async function createProbeExecute(
 }
 
 export const createProbeAction = defineDomainAction({
-  name: "runtime.probe.create",
   input: z.object({ probeId: z.string(), label: z.string() }),
   output: z.object({
     rowId: z.string(),
@@ -94,13 +94,14 @@ export const createProbeAction = defineDomainAction({
 })
 
 export async function readProbeExecute(
-  { input, runtime }: {
+  { input, runtime, domain }: {
     input: { probeId: string }
-    runtime: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
+    runtime: RuntimeWorkflowTestRuntime
+    domain: DomainRuntime<typeof runtimeWorkflowDomain, RuntimeWorkflowEnv>
   },
 ) {
   const execution = await readActionExecutionContext()
-  const query = await runtime.db.query({
+  const query = await domain.db.query({
     runtime_probe_rows: {
       $: { where: { probeId: input.probeId }, limit: 1 },
     },
@@ -118,7 +119,6 @@ export async function readProbeExecute(
 }
 
 export const readProbeAction = defineDomainAction({
-  name: "runtime.probe.read",
   input: z.object({ probeId: z.string() }),
   output: z.object({
     probeId: z.string().nullable(),
@@ -188,13 +188,13 @@ export async function executeRuntimeActionWorkflow(
 
   const created = await executeRuntimeAction({
     runtime,
-    action: createProbeAction,
+    action: runtimeWorkflowDomain.actions.createProbe,
     input: params,
   })
 
   const read = await executeRuntimeAction({
     runtime,
-    action: readProbeAction,
+    action: runtimeWorkflowDomain.actions.readProbe,
     input: { probeId: params.probeId },
   })
 

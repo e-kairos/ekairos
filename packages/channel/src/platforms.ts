@@ -20,11 +20,21 @@ export type ChannelInbound = {
   message: ChannelMessage;
   /** Posts a reply on the same platform thread and persists it. */
   reply: (text: string) => Promise<void>;
+  /** Links the channel message to the trigger event item it produced. */
+  attachEvent: (eventId: string) => Promise<void>;
+};
+
+export type ChannelsRuntimeHandle = {
+  db(): Promise<any>;
 };
 
 export type CreateChannelsOptions = {
-  /** InstantDB admin client with the channel domain schema pushed. */
-  db: any;
+  /**
+   * App runtime (EkairosRuntime / reactor runtime handle). All persistence —
+   * channel messages, state, attachments — resolves through it, so channels
+   * live on the same database and tenancy as the agents they feed.
+   */
+  runtime: ChannelsRuntimeHandle;
   /** Bot identity across platforms. */
   userName: string;
   platforms: ChannelPlatformsConfig;
@@ -58,3 +68,51 @@ export async function createChannels(options: CreateChannelsOptions): Promise<Ch
   const { startPlatformRuntime } = await import("./internal/platform-runtime.js");
   return await startPlatformRuntime(options);
 }
+
+export {
+  createEmailChannel,
+  createWhatsAppChannel,
+  // email providers
+  mailgunInbound,
+  resend,
+  resendInbound,
+  // whatsapp providers
+  kapsoInbound,
+  twilio,
+  twilioInbound,
+  // signature primitives (for custom providers)
+  verifyMailgunSignature,
+  verifySvixSignature,
+  verifyTwilioSignature,
+  type ChannelFileRef,
+  type ChannelRuntimeHandle,
+  type ChannelRuntimeInput,
+  type ChannelSendParams,
+  type EmailChannelConfig,
+  type EmailIdentity,
+  type EmailIdentityInput,
+  type EmailInboundMessage,
+  type EmailInboundProvider,
+  type EmailOutboundPayload,
+  type EmailOutboundProvider,
+  type InboundRouting,
+  type NativeChannel,
+  type NativeChannelContext,
+  type WebhookPayload,
+  type WhatsAppChannelConfig,
+  type WhatsAppIdentity,
+  type WhatsAppIdentityInput,
+  type WhatsAppInboundMessage,
+  type WhatsAppInboundProvider,
+  type WhatsAppInteractiveParams,
+  type WhatsAppNativeChannel,
+  type WhatsAppOutboundProvider,
+  type WhatsAppTemplateParams,
+} from "./native.js";
+
+export {
+  bindReaction,
+  type BindReactionOptions,
+  type ChannelAgentRuntime,
+  type ReactionEffectOf,
+} from "./agent.js";

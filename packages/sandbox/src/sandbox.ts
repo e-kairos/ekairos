@@ -1,9 +1,8 @@
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import type { EkairosRuntime } from "@ekairos/domain/runtime"
-import { defineAction, type ContextAction } from "@ekairos/reactor/context"
+import type { ContextSandboxHandle } from "@ekairos/events"
 
 import {
-  SANDBOX_EXECUTE_COMMAND_ACTION_NAME,
   sandboxExecuteCommandInputSchema,
   sandboxExecuteCommandOutputSchema,
   type SandboxExecuteCommandInput,
@@ -18,13 +17,6 @@ type SandboxRuntimeHandle<Runtime extends AnyDomainRuntime> = Runtime & {
   use(domain: unknown): Promise<any>
 }
 
-export type SandboxActions = {
-  [SANDBOX_EXECUTE_COMMAND_ACTION_NAME]: ContextAction<
-    typeof sandboxExecuteCommandInputSchema,
-    typeof sandboxExecuteCommandOutputSchema
-  >
-}
-
 export type SerializedSandboxState = {
   version: 1
   sandboxId: string
@@ -33,6 +25,7 @@ export type SerializedSandboxState = {
   runtime?: string
   ports?: number[]
   purpose?: string
+  workspaceRoot?: string
 }
 
 export type SerializedSandbox = {
@@ -65,6 +58,10 @@ function asPorts(value: unknown): number[] | undefined {
   return ports.length > 0 ? ports : undefined
 }
 
+function defaultWorkspaceRoot(provider: SandboxProvider | undefined) {
+  return provider === "vercel" ? "/vercel/sandbox" : "/workspace"
+}
+
 async function readSandboxState(
   db: any,
   sandboxId: string,
@@ -72,15 +69,19 @@ async function readSandboxState(
   const result = await db.query({
     sandbox_sandboxes: { $: { where: { id: sandboxId } as any, limit: 1 } },
   })
-  const row = result?.sandbox_sandboxes?.[0] ?? {}
+  const row = result?.sandbox_sandboxes?.[0]
+  if (!row) throw new Error(`sandbox_not_found:${sandboxId}`)
+  const provider = asString(row.provider) as SandboxProvider | undefined
   return cleanRecord({
     version: 1 as const,
     sandboxId,
-    provider: asString(row.provider) as SandboxProvider | undefined,
+    provider,
     externalSandboxId: asString(row.externalSandboxId) || undefined,
     runtime: asString(row.runtime) || undefined,
     ports: asPorts(row.ports),
     purpose: asString(row.purpose) || undefined,
+    workspaceRoot:
+      asString(row?.params?.workspaceRoot).trim() || defaultWorkspaceRoot(provider),
   })
 }
 
@@ -109,14 +110,13 @@ function normalizeState(state: SerializedSandboxState): SerializedSandboxState {
     runtime: asString(state.runtime).trim() || undefined,
     ports: asPorts(state.ports),
     purpose: asString(state.purpose).trim() || undefined,
+    workspaceRoot:
+      asString(state.workspaceRoot).trim() || defaultWorkspaceRoot(state.provider),
   })
 }
 
-export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
-  static readonly executeCommandActionName = SANDBOX_EXECUTE_COMMAND_ACTION_NAME
-  static readonly executeCommandInputSchema = sandboxExecuteCommandInputSchema
-  static readonly executeCommandOutputSchema = sandboxExecuteCommandOutputSchema
-
+export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime>
+  implements ContextSandboxHandle {
   private readonly runtime: SandboxRuntimeHandle<Runtime>
   private readonly stateValue: SerializedSandboxState
 
@@ -141,6 +141,16 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
     return new Sandbox(runtime, state)
   }
 
+  static async open<Runtime extends AnyDomainRuntime>(
+    runtime: SandboxRuntimeHandle<Runtime>,
+    sandboxId: string,
+  ): Promise<Sandbox<Runtime>> {
+    const normalizedId = asString(sandboxId).trim()
+    if (!normalizedId) throw new Error("sandbox_id_required")
+    const scoped = await resolveSandboxDomain(runtime)
+    return new Sandbox(runtime, await readSandboxState(scoped.db, normalizedId))
+  }
+
   static from<Runtime extends AnyDomainRuntime>(
     runtime: SandboxRuntimeHandle<Runtime>,
     state: SerializedSandboxState,
@@ -163,6 +173,18 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
     return this.stateValue.sandboxId
   }
 
+  get id() {
+    return this.stateValue.sandboxId
+  }
+
+  get provider() {
+    return this.stateValue.provider ?? "sprites"
+  }
+
+  get workspaceRoot() {
+    return this.stateValue.workspaceRoot ?? defaultWorkspaceRoot(this.stateValue.provider)
+  }
+
   get state(): SerializedSandboxState {
     return { ...this.stateValue }
   }
@@ -180,7 +202,7 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
       kind: parsed.kind ?? "command",
       mode: parsed.mode ?? "foreground",
       metadata: {
-        source: "sandbox.action",
+        source: "sandbox.handle",
         ...(parsed.metadata ?? {}),
       },
     })
@@ -215,15 +237,69 @@ export class Sandbox<Runtime extends AnyDomainRuntime = AnyDomainRuntime> {
     )
   }
 
-  actions(): SandboxActions {
-    return {
-      [SANDBOX_EXECUTE_COMMAND_ACTION_NAME]: defineAction({
-        description: "Run a shell command in this sandbox.",
-        input: sandboxExecuteCommandInputSchema,
-        output: sandboxExecuteCommandOutputSchema,
-        execute: async ({ input }: { input: SandboxExecuteCommandInput }) =>
-          this.executeCommand(input),
-      }),
-    } as const
+  async exec(input: {
+    command: string
+    args?: string[]
+    cwd?: string
+    env?: Record<string, string>
+    timeoutMs?: number
+    signal?: AbortSignal
+  }): Promise<SandboxExecuteCommandOutput> {
+    return await this.executeCommand({
+      command: input.command,
+      args: input.args,
+      cwd: input.cwd,
+      env: input.env,
+      kind: "command",
+      mode: "foreground",
+    })
   }
+
+  async writeFile(file: {
+    path: string
+    content: string | Uint8Array | Buffer
+    encoding?: "utf-8" | "base64"
+  }): Promise<void> {
+    await this.writeFiles([file])
+  }
+
+  async writeFiles(files: Array<{
+    path: string
+    content: string | Uint8Array | Buffer
+    encoding?: "utf-8" | "base64"
+  }>): Promise<void> {
+    const domain = await resolveSandboxDomain(this.runtime)
+    const result = await domain.actions.writeFiles({
+      sandboxId: this.sandboxId,
+      files: files.map(file => ({
+        path: file.path,
+        contentBase64: file.encoding === "base64" && typeof file.content === "string"
+          ? file.content
+          : Buffer.from(file.content as any).toString("base64"),
+      })),
+    })
+    if (!result.ok) throw new Error(result.error)
+  }
+
+  async readFile(path: string): Promise<Uint8Array> {
+    const domain = await resolveSandboxDomain(this.runtime)
+    const result = await domain.actions.readFile({
+      sandboxId: this.sandboxId,
+      path,
+    })
+    if (!result.ok) throw new Error(result.error)
+    return new Uint8Array(Buffer.from(result.data.contentBase64, "base64"))
+  }
+
+  async exists(path: string): Promise<boolean> {
+    const result = await this.exec({ command: "test", args: ["-e", path] })
+    return result.success
+  }
+
+  async stop(): Promise<void> {
+    const domain = await resolveSandboxDomain(this.runtime)
+    const result = await domain.actions.stopSandbox({ sandboxId: this.sandboxId })
+    if (!result.ok) throw new Error(result.error)
+  }
+
 }

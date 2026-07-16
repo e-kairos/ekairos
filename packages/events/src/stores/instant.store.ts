@@ -1,910 +1,576 @@
-import "../polyfills/dom-events.js"
-import { id, lookup } from "@instantdb/admin"
-
-import { contextDomain } from "../schema.js"
-import type { DomainLike } from "@ekairos/domain"
-import { convertItemToModelMessages } from "../context.events.js"
-import {
-  assertContextTransition,
-  assertExecutionTransition,
-  assertItemTransition,
-  assertStepTransition,
-  type ExecutionStatus,
-  type StepStatus,
-} from "../context.contract.js"
-import type { ModelMessage } from "ai"
+import { uuidV5 } from "../context.part-identity.js"
 import type {
-  ContextItem,
+  ContextEvent,
+  ContextEventPart,
   ContextIdentifier,
-  ContextResource,
-  ContextStatus,
-  StoredContextResource,
-  StoredContext,
+  ContextReaction,
+  ContextSession,
   ContextStore,
+  ReactionStatus,
+  SaveContextEventInput,
+  SessionStatus,
+  StoredContext,
 } from "../context.store.js"
-export { parseAndStoreDocument } from "./instant.document-parser.js"
-import { expandEventsWithInstantDocuments } from "./instant.documents.js"
-export {
-  coerceDocumentTextPages,
-  expandEventsWithInstantDocuments,
-} from "./instant.documents.js"
-import {
-  mergeContextPartEnvelope,
-  normalizePartsForPersistence,
-  splitContextPartEnvelope,
-} from "../context.parts.js"
 
-export type InstantStoreDb = any
+const EVENT_PART_NAMESPACE = "f729b6df-52de-4b3c-a88e-72325e181c81"
 
-function shouldDebugInstantStore() {
-  return (
-    process.env.EKAIROS_CONTEXT_DEBUG === "1" ||
-    process.env.EKAIROS_CONTEXT_DEBUG === "1" ||
-    process.env.PLAYWRIGHT_TEST === "1"
-  )
+function date(value: unknown): Date {
+  if (value instanceof Date) return value
+  const parsed = new Date(String(value))
+  if (Number.isNaN(parsed.valueOf())) throw new Error("context_invalid_date")
+  return parsed
 }
 
-function clipText(value: string, max = 500) {
-  if (value.length <= max) return value
-  return `${value.slice(0, max)}...<truncated:${value.length - max}>`
+function optionalDate(value: unknown): Date | undefined {
+  return value == null ? undefined : date(value)
 }
 
-function simplifyForLog(value: unknown, depth = 0): unknown {
-  if (value === null || value === undefined) return value
-  if (typeof value === "string") return clipText(value)
-  if (typeof value === "number" || typeof value === "boolean") return value
+function linkedId(value: unknown): string | undefined {
+  const linked = Array.isArray(value) ? value[0] : value
+  if (!linked || typeof linked !== "object") return undefined
+  return typeof (linked as any).id === "string" ? (linked as any).id : undefined
+}
+
+function linkedIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(item => linkedId(item) ?? [])
+}
+
+function plainError(error: unknown): unknown {
+  if (!(error instanceof Error)) return error
+  return { name: error.name, message: error.message, stack: error.stack }
+}
+
+function canonical(value: unknown): unknown {
   if (value instanceof Date) return value.toISOString()
-  if (depth >= 2) return "[max-depth]"
-
-  if (Array.isArray(value)) {
-    const maxItems = 8
-    const items = value
-      .slice(0, maxItems)
-      .map((item) => simplifyForLog(item, depth + 1))
-    if (value.length > maxItems) {
-      items.push(`...+${value.length - maxItems} more`)
-    }
-    return items
-  }
-
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-    const maxEntries = 16
-    const out: Record<string, unknown> = {}
-    for (const [key, entryValue] of entries.slice(0, maxEntries)) {
-      out[key] = simplifyForLog(entryValue, depth + 1)
-    }
-    if (entries.length > maxEntries) {
-      out.__truncatedKeys = entries.length - maxEntries
-    }
-    return out
-  }
-
-  return String(value)
-}
-
-function summarizeError(error: unknown): Record<string, unknown> {
-  const err = error as any
-  return {
-    name: err?.name,
-    message: err?.message,
-    code: err?.code,
-    status: err?.status ?? err?.statusCode,
-    details: simplifyForLog(
-      err?.details ?? err?.body ?? err?.response ?? err?.data,
-    ),
-    stack:
-      typeof err?.stack === "string"
-        ? clipText(err.stack, 1500)
-        : undefined,
-  }
-}
-
-function ensureValidEntityId(value: unknown, label: string): string {
-  const normalized = typeof value === "string" ? value.trim() : ""
-  if (!normalized) {
-    throw new Error(`InstantStore: ${label} is required`)
-  }
-  return normalized
-}
-
-function sanitizeInstantString(value: string): string {
-  return value.includes("\u0000") ? value.replace(/\u0000/g, "") : value
-}
-
-function isOpaqueJsonValue(value: object): boolean {
-  return (
-    value instanceof Date ||
-    value instanceof ArrayBuffer ||
-    ArrayBuffer.isView(value)
+  if (Array.isArray(value)) return value.map(canonical)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonical(entry)]),
   )
 }
 
-function sanitizeInstantValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
-  if (typeof value === "string") {
-    return sanitizeInstantString(value) as T
-  }
-
-  if (value === null || value === undefined || typeof value !== "object") {
-    return value
-  }
-
-  if (isOpaqueJsonValue(value)) {
-    return value
-  }
-
-  const cached = seen.get(value)
-  if (cached) {
-    return cached as T
-  }
-
-  if (Array.isArray(value)) {
-    const out: unknown[] = []
-    seen.set(value, out)
-    for (const item of value) {
-      out.push(sanitizeInstantValue(item, seen))
-    }
-    return out as T
-  }
-
-  const out: Record<string, unknown> = {}
-  seen.set(value, out)
-  for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
-    out[sanitizeInstantString(key)] = sanitizeInstantValue(entryValue, seen)
-  }
-
-  return out as T
+function same(left: unknown, right: unknown) {
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right))
 }
 
-function logInstantTransactFailure(params: {
-  action: string
-  meta?: Record<string, unknown>
-  txs: unknown[]
-  error: unknown
-}) {
-  if (!shouldDebugInstantStore()) return
-
-  const payload = {
-    action: params.action,
-    meta: simplifyForLog(params.meta ?? {}),
-    txs: simplifyForLog(params.txs),
-    error: summarizeError(params.error),
-  }
-  // eslint-disable-next-line no-console
-  console.error("[context][instant.store] transact failed", payload)
+function toContext<Content>(row: any): StoredContext<Content> {
+  return Object.freeze({
+    id: String(row.id),
+    key: typeof row.key === "string" ? row.key : null,
+    ...(typeof row.name === "string" ? { name: row.name } : {}),
+    content: (row.content ?? null) as Content | null,
+    ...(row.previous === undefined ? {} : { previous: row.previous as Content }),
+    createdAt: date(row.createdAt),
+    ...(row.updatedAt == null ? {} : { updatedAt: date(row.updatedAt) }),
+  })
 }
 
-function sortItems<T extends { id?: unknown; createdAt?: unknown; updatedAt?: unknown }>(items: T[]) {
-  const toEpoch = (value: unknown): number => {
-    if (value instanceof Date) return value.getTime()
-    if (typeof value === "string" || typeof value === "number") {
-      const ms = new Date(value as any).getTime()
-      return Number.isFinite(ms) ? ms : 0
-    }
-    return 0
-  }
+function toPart(row: any): ContextEventPart {
+  return Object.freeze({
+    id: String(row.id),
+    key: String(row.key),
+    index: Number(row.index),
+    type: String(row.type),
+    content: row.content,
+    ...(row.metadata == null ? {} : { metadata: Object.freeze({ ...row.metadata }) }),
+    createdAt: date(row.createdAt),
+    ...(row.updatedAt == null ? {} : { updatedAt: date(row.updatedAt) }),
+  })
+}
 
-  return [...items].sort((a, b) => {
-    const ta = toEpoch(a?.createdAt ?? a?.updatedAt)
-    const tb = toEpoch(b?.createdAt ?? b?.updatedAt)
-    if (ta !== tb) return ta - tb
-    return String(a?.id ?? "").localeCompare(String(b?.id ?? ""))
+function toEvent<Payload>(row: any): ContextEvent<Payload> {
+  return Object.freeze({
+    id: String(row.id),
+    type: String(row.type),
+    createdAt: date(row.createdAt),
+    ...(linkedId(row.context) ? { contextId: linkedId(row.context)! } : {}),
+    ...(typeof row.domain === "string" ? { domain: row.domain } : {}),
+    ...(typeof row.name === "string" ? { name: row.name } : {}),
+    ...(typeof row.channel === "string" ? { channel: row.channel } : {}),
+    payload: row.payload as Payload,
+    links: Object.freeze({ ...(row.links ?? {}) }),
+    physicalLinks: Object.freeze({ ...(row.physicalLinks ?? {}) }),
+    metadata: Object.freeze({ ...(row.metadata ?? {}) }),
+    eventParts: Object.freeze(
+      [...(row.eventParts ?? [])]
+        .sort((left, right) => Number(left.index) - Number(right.index))
+        .map(toPart),
+    ),
+  })
+}
+
+function toSession(row: any): ContextSession {
+  return Object.freeze({
+    id: String(row.id),
+    contextId: linkedId(row.context) ?? String(row.contextId ?? ""),
+    definition: String(row.definition),
+    triggerId: linkedId(row.trigger) ?? String(row.triggerId ?? ""),
+    rootReactionId: linkedId(row.rootReaction) ?? String(row.rootReactionId ?? ""),
+    status: row.status as SessionStatus,
+    ...(linkedId(row.parent) ? { parentSessionId: linkedId(row.parent)! } : {}),
+    ...(typeof row.sandboxId === "string" ? { sandboxId: row.sandboxId } : {}),
+    ...(typeof row.workflowRunId === "string" ? { workflowRunId: row.workflowRunId } : {}),
+    ...(row.error === undefined ? {} : { error: row.error }),
+    createdAt: date(row.createdAt),
+    ...(row.updatedAt == null ? {} : { updatedAt: date(row.updatedAt) }),
+  })
+}
+
+function toReaction(row: any): ContextReaction {
+  return Object.freeze({
+    id: String(row.id),
+    sessionId: linkedId(row.session) ?? String(row.sessionId ?? ""),
+    type: String(row.type),
+    status: row.status as ReactionStatus,
+    position: Number(row.position),
+    depth: Number(row.depth),
+    causeIds: Object.freeze(
+      Array.isArray(row.causeIds) ? row.causeIds.map(String) : linkedIds(row.causes),
+    ),
+    effectIds: Object.freeze(
+      Array.isArray(row.effectIds) ? row.effectIds.map(String) : linkedIds(row.effects),
+    ),
+    ...(linkedId(row.parent) ? { parentReactionId: linkedId(row.parent)! } : {}),
+    ...(typeof row.instruction === "string" ? { instruction: row.instruction } : {}),
+    ...(row.error === undefined ? {} : { error: row.error }),
+    createdAt: date(row.createdAt),
+    ...(row.updatedAt == null ? {} : { updatedAt: date(row.updatedAt) }),
   })
 }
 
 export class InstantStore implements ContextStore {
-  private db: any
+  constructor(readonly db: any) {}
 
-  constructor(db: InstantStoreDb) {
-    this.db = db
+  private async contextRow(identifier: ContextIdentifier) {
+    const where = "id" in identifier ? { id: identifier.id } : { key: identifier.key }
+    const result = await this.db.query({
+      context_contexts: { $: { where, limit: 1 } },
+    } as any)
+    return result?.context_contexts?.[0] ?? null
   }
 
-  private normalizeContext<C>(row: any): StoredContext<C> {
-    return {
-      id: String(row?.id ?? ""),
-      key: typeof row?.key === "string" && row.key.length > 0 ? row.key : null,
-      name: typeof row?.name === "string" ? row.name : null,
-      status: (typeof row?.status === "string" ? row.status : "open_idle") as ContextStatus,
-      createdAt:
-        row?.createdAt instanceof Date ? row.createdAt : new Date(row?.createdAt ?? Date.now()),
-      updatedAt:
-        row?.updatedAt instanceof Date
-          ? row.updatedAt
-          : row?.updatedAt
-            ? new Date(row.updatedAt)
-            : undefined,
-      content: (row?.content as C) ?? null,
-      description: typeof row?.description === "string" ? row.description : null,
-      goal: typeof row?.goal === "string" ? row.goal : null,
-      resources: this.normalizeContextResources(row?.resources),
-      reactor:
-        row?.reactor && typeof row.reactor === "object"
-          ? (row.reactor as { kind: string; state?: Record<string, unknown> | null })
-          : null,
+  async getContext<Content>(identifier: ContextIdentifier) {
+    const row = await this.contextRow(identifier)
+    return row ? toContext<Content>(row) : null
+  }
+
+  async getOrCreateContext<Content>(identifier: ContextIdentifier) {
+    const existing = await this.getContext<Content>(identifier)
+    if (existing) return existing
+
+    const id: string = "id" in identifier && typeof identifier.id === "string"
+      ? identifier.id
+      : globalThis.crypto.randomUUID()
+    const createdAt = new Date()
+    const attrs = {
+      ...(typeof identifier.key === "string" ? { key: identifier.key } : {}),
+      createdAt,
     }
+    try {
+      await this.db.transact([this.db.tx.context_contexts[id].create(attrs)])
+    } catch (error) {
+      const raced = await this.getContext<Content>(identifier)
+      if (raced) return raced
+      throw error
+    }
+    return toContext<Content>({ id, ...attrs, content: null })
   }
 
-  private async ensureContextKey<C>(
-    context: StoredContext<C>,
-    expectedKey?: string | null,
-  ): Promise<StoredContext<C>> {
-    if (!expectedKey) return context
-    if (context.key === expectedKey) return context
-
+  async updateContextContent<Content>(identifier: ContextIdentifier, content: Content) {
+    const current = await this.getContext<Content>(identifier)
+    if (!current) throw new Error("context_not_found")
+    if (same(current.content, content)) return current
+    const updatedAt = new Date()
     await this.db.transact([
-      this.db.tx.event_contexts[context.id].update({
-        key: expectedKey,
-        updatedAt: new Date(),
+      this.db.tx.context_contexts[current.id].update({
+        content,
+        ...(current.content === null ? {} : { previous: current.content }),
+        updatedAt,
       }),
     ])
-
-    const refreshed = await this.getContext<C>({ id: context.id })
-    return refreshed ?? { ...context, key: expectedKey }
+    return Object.freeze({
+      ...current,
+      content,
+      ...(current.content === null ? {} : { previous: current.content as Content }),
+      updatedAt,
+    })
   }
 
-  private async createContextRecord<C>(
-    contextIdentifier: ContextIdentifier | null,
-  ): Promise<StoredContext<C>> {
-    const contextId: string =
-      contextIdentifier && "id" in contextIdentifier ? String(contextIdentifier.id) : id()
-    const key = contextIdentifier && "key" in contextIdentifier ? contextIdentifier.key : undefined
-
-    await this.db.transact([
-      this.db.tx.event_contexts[contextId].create({
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        key,
-        status: "open_idle",
-        content: {},
-        description: undefined,
-        goal: undefined,
-        resources: [],
-        reactor: undefined,
-      }),
-    ])
-
-    const context = await this.getContext<C>({ id: contextId })
-    if (!context) {
-      throw new Error("InstantStore: failed to create context")
-    }
-    return context
+  private async eventRow(eventId: string) {
+    const result = await this.db.query({
+      context_events: {
+        $: { where: { id: eventId }, limit: 1 },
+        context: {},
+        eventParts: { $: { order: { index: "asc" } } },
+      },
+    } as any)
+    return result?.context_events?.[0] ?? null
   }
 
-  async getOrCreateContext<C>(
-    contextIdentifier: ContextIdentifier | null,
-  ): Promise<StoredContext<C>> {
-    if (!contextIdentifier) {
-      return await this.createContextRecord<C>(null)
-    }
+  async getEvent<Payload = unknown>(eventId: string) {
+    const row = await this.eventRow(eventId)
+    return row ? toEvent<Payload>(row) : null
+  }
 
-    const existing = await this.getContext<C>(contextIdentifier)
+  async getEvents(identifier: ContextIdentifier) {
+    const where = "id" in identifier ? { id: identifier.id } : { key: identifier.key }
+    const result = await this.db.query({
+      context_contexts: {
+        $: { where, limit: 1 },
+        events: {
+          $: { order: { createdAt: "asc" } },
+          eventParts: { $: { order: { index: "asc" } } },
+        },
+      },
+    } as any)
+    return Object.freeze((result?.context_contexts?.[0]?.events ?? []).map(toEvent))
+  }
+
+  async saveEvent<Payload>(
+    event: SaveContextEventInput<Payload>,
+    origin?: ContextIdentifier,
+  ): Promise<ContextEvent<Payload>> {
+    const existing = await this.getEvent<Payload>(event.id)
+    const originContext = origin ? await this.getContext(origin) : null
+    if (origin && !originContext) throw new Error("context_event_origin_not_found")
+
+    const expected = {
+      id: event.id,
+      type: event.type,
+      createdAt: event.createdAt,
+      domain: event.domain,
+      name: event.name,
+      channel: event.channel,
+      payload: event.payload,
+      links: event.links,
+      physicalLinks: event.physicalLinks,
+      metadata: event.metadata,
+      contextId: originContext?.id,
+    }
     if (existing) {
-      if ("key" in contextIdentifier) {
-        return await this.ensureContextKey(existing, contextIdentifier.key)
+      const actual = {
+        id: existing.id,
+        type: existing.type,
+        createdAt: existing.createdAt,
+        domain: existing.domain,
+        name: existing.name,
+        channel: existing.channel,
+        payload: existing.payload,
+        links: existing.links,
+        physicalLinks: existing.physicalLinks,
+        metadata: existing.metadata,
+        contextId: existing.contextId,
       }
+      if (!same(actual, expected)) throw new Error(`context_event_conflict:${event.id}`)
+      if (event.eventParts) await this.saveEventParts(event.id, event.eventParts)
+      return (await this.getEvent<Payload>(event.id))!
+    }
+
+    const attrs = {
+      type: event.type,
+      createdAt: event.createdAt,
+      ...(event.domain ? { domain: event.domain } : {}),
+      ...(event.name ? { name: event.name } : {}),
+      ...(event.channel ? { channel: event.channel } : {}),
+      ...(event.payload === undefined ? {} : { payload: event.payload }),
+      ...(Object.keys(event.links).length === 0 ? {} : { links: event.links }),
+      ...(Object.keys(event.physicalLinks).length === 0 ? {} : { physicalLinks: event.physicalLinks }),
+      ...(Object.keys(event.metadata).length === 0 ? {} : { metadata: event.metadata }),
+    }
+    const physical = Object.fromEntries(
+      Object.entries(event.links).map(([alias, value]) => {
+        const mapping = event.physicalLinks[alias]
+        if (!mapping) throw new Error(`context_event_link_mapping_missing:${event.type}:${alias}`)
+        return [mapping.forwardLabel, value]
+      }),
+    )
+    const links = {
+      ...physical,
+      ...(originContext ? { context: originContext.id } : {}),
+    }
+    let tx = this.db.tx.context_events[event.id].create(attrs)
+    if (Object.keys(links).length > 0) tx = tx.link(links)
+    try {
+      await this.db.transact([tx])
+    } catch (error) {
+      const raced = await this.getEvent<Payload>(event.id)
+      if (!raced) throw error
+      return await this.saveEvent(event, origin)
+    }
+    if (event.eventParts) await this.saveEventParts(event.id, event.eventParts)
+    return (await this.getEvent<Payload>(event.id))!
+  }
+
+  async saveEventParts(
+    eventId: string,
+    parts: readonly Omit<ContextEventPart, "id" | "key" | "createdAt">[],
+  ) {
+    if (!(await this.getEvent(eventId))) throw new Error(`context_event_not_found:${eventId}`)
+    const current = (await this.getEvent(eventId))!.eventParts
+    const expected = parts.map(part => ({
+      index: part.index,
+      type: part.type,
+      content: part.content,
+      metadata: part.metadata,
+    }))
+    const actual = current.map(part => ({
+      index: part.index,
+      type: part.type,
+      content: part.content,
+      metadata: part.metadata,
+    }))
+    if (current.length > 0) {
+      if (!same(actual, expected)) throw new Error(`context_event_parts_conflict:${eventId}`)
+      return current
+    }
+
+    const createdAt = new Date()
+    const chunks = parts.map(part => {
+      const key = `${eventId}:${part.index}`
+      const id = uuidV5(key, EVENT_PART_NAMESPACE)
+      return this.db.tx.context_eventParts[id]
+        .create({
+          key,
+          index: part.index,
+          type: part.type,
+          content: part.content,
+          ...(part.metadata ? { metadata: part.metadata } : {}),
+          createdAt,
+        })
+        .link({ event: eventId })
+    })
+    if (chunks.length > 0) await this.db.transact(chunks)
+    return (await this.getEvent(eventId))!.eventParts
+  }
+
+  private async sessionRow(sessionId: string) {
+    const result = await this.db.query({
+      context_sessions: {
+        $: { where: { id: sessionId }, limit: 1 },
+        context: {},
+        trigger: {},
+        rootReaction: {},
+        parent: {},
+      },
+    } as any)
+    return result?.context_sessions?.[0] ?? null
+  }
+
+  async getSession(sessionId: string) {
+    const row = await this.sessionRow(sessionId)
+    return row ? toSession(row) : null
+  }
+
+  async openSession(input: Parameters<ContextStore["openSession"]>[0]) {
+    const existing = await this.getSession(input.id)
+    if (existing) {
+      const expected = {
+        contextId: input.contextId,
+        definition: input.definition,
+        triggerId: input.triggerId,
+        rootReactionId: input.rootReactionId,
+        parentSessionId: input.parentSessionId,
+        sandboxId: input.sandboxId,
+      }
+      const actual = {
+        contextId: existing.contextId,
+        definition: existing.definition,
+        triggerId: existing.triggerId,
+        rootReactionId: existing.rootReactionId,
+        parentSessionId: existing.parentSessionId,
+        sandboxId: existing.sandboxId,
+      }
+      if (!same(actual, expected)) throw new Error(`context_session_conflict:${input.id}`)
       return existing
     }
+    if (!(await this.getContext({ id: input.contextId }))) throw new Error("context_not_found")
+    if (!(await this.getEvent(input.triggerId))) throw new Error("context_session_trigger_not_found")
+    if (input.parentSessionId && !(await this.getSession(input.parentSessionId))) {
+      throw new Error("context_session_parent_not_found")
+    }
 
-    return await this.createContextRecord<C>(contextIdentifier)
-  }
-
-  async getContext<C>(
-    contextIdentifier: ContextIdentifier,
-  ): Promise<StoredContext<C> | null> {
-    try {
-      if ("id" in contextIdentifier) {
-        const res = await this.db.query({
-          event_contexts: {
-            $: { where: { id: contextIdentifier.id as any }, limit: 1 },
-          },
-        })
-        const row = (res?.event_contexts as any[])?.[0]
-        return row ? this.normalizeContext<C>(row) : null
-      }
-
-      const res = await this.db.query({
-        event_contexts: {
-          $: { where: { key: contextIdentifier.key }, limit: 1 },
-        },
+    const createdAt = input.createdAt ?? new Date()
+    let sessionTx = this.db.tx.context_sessions[input.id]
+      .create({
+        definition: input.definition,
+        status: "running",
+        ...(input.sandboxId ? { sandboxId: input.sandboxId } : {}),
+        ...(input.workflowRunId ? { workflowRunId: input.workflowRunId } : {}),
+        createdAt,
       })
-      const row = (res?.event_contexts as any[])?.[0]
-      return row ? this.normalizeContext<C>(row) : null
-    } catch (error: any) {
-      throw new Error("InstantStore: Error getting context: " + error.message)
+      .link({
+        context: input.contextId,
+        trigger: input.triggerId,
+        rootReaction: input.rootReactionId,
+        ...(input.parentSessionId ? { parent: input.parentSessionId } : {}),
+      })
+    const rootReactionTx = this.db.tx.context_reactions[input.rootReactionId]
+      .create({
+        type: input.definition,
+        status: "running",
+        position: 0,
+        depth: 0,
+        causeIds: [input.triggerId],
+        effectIds: [],
+        createdAt,
+      })
+      .link({
+        session: input.id,
+        causes: [input.triggerId],
+      })
+    const currentSessionTx = this.db.tx.context_contexts[input.contextId]
+      .link({ currentSession: input.id })
+    try {
+      await this.db.transact([sessionTx, rootReactionTx, currentSessionTx])
+    } catch (error) {
+      const raced = await this.getSession(input.id)
+      if (!raced) throw error
+      return raced
     }
+    return (await this.getSession(input.id))!
   }
 
-  async updateContextContent<C>(
-    contextIdentifier: ContextIdentifier,
-    content: C,
-  ): Promise<StoredContext<C>> {
-    const context = await this.getContext<C>(contextIdentifier)
-    if (!context?.id) throw new Error("InstantStore: context not found")
-
-    await this.db.transact([
-      this.db.tx.event_contexts[context.id].update({
-        content: content as any,
-        updatedAt: new Date(),
-      }),
-    ])
-
-    const updated = await this.getContext<C>({ id: context.id })
-    if (!updated) throw new Error("InstantStore: context not found after update")
-    return updated
-  }
-
-  async updateContextDefinition<C>(
-    contextIdentifier: ContextIdentifier,
-    definition: { description?: string | null; goal?: string | null },
-  ): Promise<StoredContext<C>> {
-    const context = await this.getContext<C>(contextIdentifier)
-    if (!context?.id) throw new Error("InstantStore: context not found")
-
-    const update: Record<string, unknown> = {
-      updatedAt: new Date(),
+  async completeSession(
+    sessionId: string,
+    status: Exclude<SessionStatus, "running">,
+    error?: unknown,
+  ) {
+    const current = await this.getSession(sessionId)
+    if (!current) throw new Error(`context_session_not_found:${sessionId}`)
+    if (current.status !== "running") {
+      if (current.status !== status || !same(current.error, plainError(error))) {
+        throw new Error(`context_session_terminal_conflict:${sessionId}`)
+      }
+      return
     }
-    if (definition.description !== undefined) {
-      update.description =
-        typeof definition.description === "string" ? definition.description : undefined
-    }
-    if (definition.goal !== undefined) {
-      update.goal = typeof definition.goal === "string" ? definition.goal : undefined
-    }
-
     await this.db.transact([
-      this.db.tx.event_contexts[context.id].update(update),
-    ])
-
-    const updated = await this.getContext<C>({ id: context.id })
-    if (!updated) throw new Error("InstantStore: context not found after definition update")
-    return updated
-  }
-
-  async updateContextReactor<C>(
-    contextIdentifier: ContextIdentifier,
-    reactor: { kind: string; state?: Record<string, unknown> | null },
-  ): Promise<StoredContext<C>> {
-    const context = await this.getContext<C>(contextIdentifier)
-    if (!context?.id) throw new Error("InstantStore: context not found")
-
-    await this.db.transact([
-      this.db.tx.event_contexts[context.id].update({
-        reactor: reactor as any,
-        updatedAt: new Date(),
-      }),
-    ])
-
-    const updated = await this.getContext<C>({ id: context.id })
-    if (!updated) throw new Error("InstantStore: context not found after reactor update")
-    return updated
-  }
-
-  async updateContextStatus(
-    contextIdentifier: ContextIdentifier,
-    status: ContextStatus,
-  ): Promise<void> {
-    const context = await this.getContext(contextIdentifier)
-    if (!context?.id) throw new Error("InstantStore: context not found")
-    if (context.status !== status) {
-      assertContextTransition(context.status, status)
-    }
-
-    await this.db.transact([
-      this.db.tx.event_contexts[context.id].update({
+      this.db.tx.context_sessions[sessionId].update({
         status,
         updatedAt: new Date(),
+        ...(error === undefined ? {} : { error: plainError(error) }),
       }),
     ])
   }
 
-  private async resolveContext<C>(contextIdentifier: ContextIdentifier): Promise<StoredContext<C>> {
-    const context = await this.getContext<C>(contextIdentifier)
-    if (!context?.id) throw new Error("InstantStore: context not found")
-    return context
+  private async reactionRow(reactionId: string) {
+    const result = await this.db.query({
+      context_reactions: {
+        $: { where: { id: reactionId }, limit: 1 },
+        session: {},
+        parent: {},
+        causes: {},
+        effects: {},
+      },
+    } as any)
+    return result?.context_reactions?.[0] ?? null
   }
 
-  private normalizeContextResource(resource: unknown): StoredContextResource | null {
-    if (!resource || typeof resource !== "object") return null
-    const record = resource as Record<string, unknown>
-    const key = typeof record.key === "string" ? record.key.trim() : ""
-    const type = typeof record.type === "string" ? record.type.trim() : ""
-    const name = typeof record.name === "string" ? record.name.trim() : ""
-    const description =
-      typeof record.description === "string" ? record.description.trim() : ""
-    if (!key || !type || !name || !description) return null
-
-    return {
-      ...(record as any),
-      key,
-      type,
-      name,
-      description,
-    } as StoredContextResource
+  async getReaction(reactionId: string) {
+    const row = await this.reactionRow(reactionId)
+    return row ? toReaction(row) : null
   }
 
-  private normalizeContextResources(value: unknown): StoredContextResource[] {
-    if (!Array.isArray(value)) return []
-    return value.flatMap((resource) => {
-      const normalized = this.normalizeContextResource(resource)
-      return normalized ? [normalized] : []
-    })
-  }
-
-  async getContextResources(
-    contextIdentifier: ContextIdentifier,
-  ): Promise<StoredContextResource[]> {
-    const context = await this.resolveContext(contextIdentifier)
-    return context.resources ?? []
-  }
-
-  async upsertContextResources(
-    contextIdentifier: ContextIdentifier,
-    resources: ContextResource[],
-  ): Promise<StoredContextResource[]> {
-    const context = await this.resolveContext(contextIdentifier)
-    const now = new Date()
-    const storedResources: StoredContextResource[] = []
-
-    for (const resource of resources) {
-      const resourceKey = typeof resource.key === "string" ? resource.key.trim() : ""
-      const type = typeof resource.type === "string" ? resource.type.trim() : ""
-      const name = typeof resource.name === "string" ? resource.name.trim() : ""
-      const description =
-        typeof resource.description === "string" ? resource.description.trim() : ""
-      if (!resourceKey || !type || !name || !description) {
-        throw new Error(
-          "InstantStore: context resources require key, type, name, and description.",
-        )
+  async openReaction(input: Parameters<ContextStore["openReaction"]>[0]) {
+    const existing = await this.getReaction(input.id)
+    if (existing) {
+      const expected = {
+        sessionId: input.sessionId,
+        type: input.type,
+        position: input.position,
+        depth: input.depth,
+        causeIds: [...input.causeIds],
+        parentReactionId: input.parentReactionId,
+        instruction: input.instruction,
       }
-
-      const sanitizedResource = sanitizeInstantValue(resource)
-      const storedResource = {
-        ...(sanitizedResource as any),
-        key: resourceKey,
-        type,
-        name,
-        description,
-      } as StoredContextResource
-      storedResources.push(storedResource)
+      const actual = {
+        sessionId: existing.sessionId,
+        type: existing.type,
+        position: existing.position,
+        depth: existing.depth,
+        causeIds: [...existing.causeIds],
+        parentReactionId: existing.parentReactionId,
+        instruction: existing.instruction,
+      }
+      if (!same(actual, expected)) throw new Error(`context_reaction_conflict:${input.id}`)
+      return existing
     }
-
-    await this.db.transact([
-      this.db.tx.event_contexts[context.id].update({
-        resources: storedResources as any,
-        updatedAt: now,
-      }),
-    ])
-
-    return await this.getContextResources({ id: context.id })
-  }
-
-  async saveEvent(event: ContextItem): Promise<ContextItem> {
-    const eventId = ensureValidEntityId((event as any)?.id, "event.id")
-    const sanitizedEvent = sanitizeInstantValue(event)
-    const existing = await this.getItem(eventId)
-    if (existing?.status && existing.status !== "stored") {
-      assertItemTransition(existing.status, "stored")
+    const session = await this.getSession(input.sessionId)
+    if (!session) throw new Error("context_reaction_session_not_found")
+    for (const causeId of input.causeIds) {
+      if (!(await this.getEvent(causeId))) throw new Error(`context_reaction_cause_not_found:${causeId}`)
     }
-    const txs = [
-      this.db.tx.event_items[eventId].update({
-        ...(sanitizedEvent as any),
-        id: eventId,
-        status: "stored",
-      }),
-    ]
-
-    try {
-      await this.db.transact(txs as any)
-    } catch (error) {
-      logInstantTransactFailure({
-        action: "saveEvent",
-        meta: {
-          eventId,
-          eventType: (event as any)?.type,
-          eventChannel: (event as any)?.channel,
-          eventCreatedAt: (event as any)?.createdAt,
-        },
-        txs,
-        error,
-      })
-      throw error
+    if (input.parentReactionId) {
+      const parent = await this.getReaction(input.parentReactionId)
+      if (!parent) throw new Error("context_reaction_parent_not_found")
+      if (parent.sessionId !== input.sessionId) {
+        throw new Error("context_reaction_parent_session_mismatch")
+      }
     }
-
-    return {
-      ...(sanitizedEvent as any),
-      id: eventId,
-      status: "stored",
-    } as ContextItem
-  }
-
-  async saveItem(
-    contextIdentifier: ContextIdentifier,
-    event: ContextItem,
-  ): Promise<ContextItem> {
-    const savedEvent = await this.saveEvent(event)
-    const context = await this.resolveContext(contextIdentifier)
-    const eventId = ensureValidEntityId(savedEvent.id, "event.id")
-    const txs = [
-      this.db.tx.event_items[eventId].link({ context: context.id }),
-    ]
-
-    try {
-      await this.db.transact(txs as any)
-    } catch (error) {
-      logInstantTransactFailure({
-        action: "saveItem",
-        meta: {
-          contextIdentifier: simplifyForLog(contextIdentifier),
-          contextId: context.id,
-          eventId,
-          eventType: (event as any)?.type,
-          eventChannel: (event as any)?.channel,
-          eventCreatedAt: (event as any)?.createdAt,
-        },
-        txs,
-        error,
-      })
-      throw error
-    }
-
-    return savedEvent
-  }
-
-  async updateItem(eventId: string, event: ContextItem): Promise<ContextItem> {
-    const current = await this.getItem(eventId)
-    if (current?.status && event.status && current.status !== event.status) {
-      assertItemTransition(current.status, event.status)
-    }
-    const sanitizedEvent = sanitizeInstantValue(event)
-    await this.db.transact([this.db.tx.event_items[eventId].update(sanitizedEvent as any)])
-    return {
-      ...(current as any),
-      ...(sanitizedEvent as any),
-      id: eventId,
-    } as ContextItem
-  }
-
-  async getItem(eventId: string): Promise<ContextItem | null> {
-    const res = await this.db.query({
-      event_items: {
-        $: { where: { id: eventId as any } },
-      },
-    })
-    return (res.event_items?.[0] as any) ?? null
-  }
-
-  async getItems(contextIdentifier: ContextIdentifier): Promise<ContextItem[]> {
-    const context = await this.resolveContext(contextIdentifier)
-    let res: any
-    try {
-      res = await this.db.query({
-        event_items: {
-          $: {
-            where: { context: context.id as any },
-            limit: 1000,
-          },
-        },
-      })
-    } catch {
-      res = await this.db.query({
-        event_items: {
-          $: {
-            where: { "context.id": context.id },
-            limit: 1000,
-          },
-        },
-      })
-    }
-
-    return sortItems(((res.event_items as any) ?? []) as ContextItem[])
-  }
-
-  private async getProjectedPartsForEvent(itemId: string): Promise<unknown[] | null> {
-    const eventResult = await this.db.query({
-      event_items: {
-        $: {
-          where: { id: itemId as any },
-          limit: 1,
-        },
-        executionsAsOutput: {},
-      },
-    })
-    const executionId = eventResult?.event_items?.[0]?.executionsAsOutput?.[0]?.id
-    if (!executionId) return null
-
-    const stepResult = await this.db.query({
-      event_steps: {
-        $: {
-          where: { "execution.id": executionId as any },
-          limit: 200,
-        },
-      },
-    })
-
-    const steps = sortItems(((stepResult?.event_steps as any[]) ?? []) as Array<{
-      id?: string
-      iteration?: number
-      createdAt?: unknown
-      updatedAt?: unknown
-    }>).sort((a, b) => {
-      const ai = typeof a?.iteration === "number" ? a.iteration : 0
-      const bi = typeof b?.iteration === "number" ? b.iteration : 0
-      if (ai !== bi) return ai - bi
-      return String(a?.id ?? "").localeCompare(String(b?.id ?? ""))
-    })
-
-    if (steps.length === 0) {
-      return null
-    }
-
-    const projectedParts: unknown[] = []
-
-    for (const step of steps) {
-      const stepId = typeof step?.id === "string" ? step.id : ""
-      if (!stepId) continue
-
-      const partResult = await this.db.query({
-        event_parts: {
-          $: {
-            where: { stepId: stepId as any },
-            limit: 500,
-            order: { idx: "asc" },
-          },
-        },
-      })
-
-      const partRows = (((partResult?.event_parts as any[]) ?? []) as Array<{
-        idx?: number
-        part?: unknown
-        metadata?: unknown
-      }>).sort((a, b) => {
-        const ai = typeof a?.idx === "number" ? a.idx : 0
-        const bi = typeof b?.idx === "number" ? b.idx : 0
-        if (ai !== bi) return ai - bi
-        return 0
-      })
-
-      projectedParts.push(
-        ...partRows.map((row) =>
-          mergeContextPartEnvelope({
-            part: row?.part,
-            metadata: row?.metadata,
-          }),
-        ),
-      )
-    }
-
-    return projectedParts
-  }
-
-  async createExecution(
-    contextIdentifier: ContextIdentifier,
-    triggerEventId: string,
-    reactionEventId: string,
-  ): Promise<{ id: string }> {
-    const normalizedTriggerEventId = ensureValidEntityId(triggerEventId, "triggerEventId")
-    const normalizedReactionEventId = ensureValidEntityId(reactionEventId, "reactionEventId")
-    const context = await this.resolveContext(contextIdentifier)
-    const executionId = id()
-    const currentStatus = context.status
-
-    if (currentStatus === "closed") {
-      throw new Error("InstantStore: context must be reopened before creating an execution")
-    }
-    if (currentStatus !== "open_streaming") {
-      assertContextTransition(currentStatus, "open_streaming")
-    }
-
-    const txs: any[] = [
-      this.db.tx.event_executions[executionId].create({
-        createdAt: new Date(),
-        status: "executing",
-      }),
-      this.db.tx.event_contexts[context.id].update({
-        status: "open_streaming",
-        updatedAt: new Date(),
-      }),
-      this.db.tx.event_executions[executionId].link({ context: context.id }),
-      this.db.tx.event_contexts[context.id].link({ currentExecution: executionId }),
-      this.db.tx.event_executions[executionId].link({ input: normalizedTriggerEventId }),
-      this.db.tx.event_executions[executionId].link({ output: normalizedReactionEventId }),
-      this.db.tx.event_items[normalizedTriggerEventId].link({ reactions: normalizedReactionEventId }),
-    ]
-
-    try {
-      await this.db.transact(txs)
-    } catch (error) {
-      logInstantTransactFailure({
-        action: "createExecution",
-        meta: {
-          contextIdentifier: simplifyForLog(contextIdentifier),
-          contextId: context.id,
-          executionId,
-          triggerEventId: normalizedTriggerEventId,
-          reactionEventId: normalizedReactionEventId,
-        },
-        txs,
-        error,
-      })
-      throw error
-    }
-
-    return { id: executionId }
-  }
-
-  async completeExecution(
-    contextIdentifier: ContextIdentifier,
-    executionId: string,
-    status: "completed" | "failed",
-  ): Promise<void> {
-    const context = await this.resolveContext(contextIdentifier)
-    const executionResult = await this.db.query({
-      event_executions: {
-        $: { where: { id: executionId as any }, limit: 1 },
-      },
-    })
-    const executionRow = (executionResult?.event_executions as any[])?.[0]
-    if (!executionRow) throw new Error("InstantStore: execution not found")
-
-    const currentExecutionStatus = String(executionRow.status ?? "executing") as ExecutionStatus
-    if (currentExecutionStatus !== status) {
-      assertExecutionTransition(currentExecutionStatus, status)
-    }
-    if (context.status !== "closed") {
-      assertContextTransition(context.status, "closed")
-    }
-
-    await this.db.transact([
-      this.db.tx.event_executions[executionId].update({ status, updatedAt: new Date() }),
-      this.db.tx.event_contexts[context.id].update({
-        status: "closed",
-        updatedAt: new Date(),
-      }),
-    ])
-  }
-
-  async createStep(params: {
-    executionId: string
-    iteration: number
-  }): Promise<{ id: string }> {
-    const executionId = ensureValidEntityId(params.executionId, "executionId")
-    const stepId = id()
-
-    const txs: any[] = [
-      this.db.tx.event_steps[stepId].create({
-        createdAt: new Date(),
+    const createdAt = input.createdAt ?? new Date()
+    let tx = this.db.tx.context_reactions[input.id]
+      .create({
+        type: input.type,
         status: "running",
-        iteration: params.iteration,
-      }),
-      this.db.tx.event_steps[stepId].link({ execution: executionId }),
-    ]
-
+        position: input.position,
+        depth: input.depth,
+        causeIds: [...input.causeIds],
+        effectIds: [],
+        ...(input.instruction ? { instruction: input.instruction } : {}),
+        createdAt,
+      })
+      .link({
+        session: input.sessionId,
+        causes: [...input.causeIds],
+        ...(input.parentReactionId ? { parent: input.parentReactionId } : {}),
+      })
     try {
-      await this.db.transact(txs)
+      await this.db.transact([tx])
     } catch (error) {
-      logInstantTransactFailure({
-        action: "createStep",
-        meta: {
-          executionId,
-          iteration: params.iteration,
-          stepId,
-        },
-        txs,
-        error,
-      })
-      throw error
+      const raced = await this.getReaction(input.id)
+      if (!raced) throw error
+      return raced
     }
-
-    return { id: stepId }
+    return (await this.getReaction(input.id))!
   }
 
-  async updateStep(
-    stepId: string,
-    patch: Partial<{
-      status: "running" | "completed" | "failed"
-      errorText: string
-      updatedAt: Date
-    }>,
-  ): Promise<void> {
-    if (patch.status) {
-      const stepResult = await this.db.query({
-        event_steps: {
-          $: { where: { id: stepId as any }, limit: 1 },
-        },
-      })
-      const stepRow = (stepResult?.event_steps as any[])?.[0]
-      if (!stepRow) throw new Error("InstantStore: step not found")
-      const currentStepStatus = String(stepRow.status ?? "running") as StepStatus
-      if (currentStepStatus !== patch.status) {
-        assertStepTransition(currentStepStatus, patch.status)
+  async completeReaction(
+    reactionId: string,
+    status: Exclude<ReactionStatus, "running">,
+    effectIds: readonly string[] = [],
+    error?: unknown,
+  ) {
+    const current = await this.getReaction(reactionId)
+    if (!current) {
+      throw new Error(`context_reaction_not_found:${reactionId}`)
+    }
+    for (const effectId of effectIds) {
+      if (!(await this.getEvent(effectId))) throw new Error(`context_reaction_effect_not_found:${effectId}`)
+    }
+    if (current.status !== "running") {
+      if (
+        current.status !== status ||
+        !same(current.effectIds, [...effectIds]) ||
+        !same(current.error, plainError(error))
+      ) {
+        throw new Error(`context_reaction_terminal_conflict:${reactionId}`)
       }
+      return
     }
-
-    const update: any = {
-      updatedAt: patch.updatedAt ?? new Date(),
-    }
-    if (patch.status !== undefined) update.status = patch.status
-    if (patch.errorText !== undefined) update.errorText = patch.errorText
-
-    await this.db.transact([this.db.tx.event_steps[stepId].update(update)])
-  }
-
-  async saveStepParts(params: { stepId: string; parts: any[] }): Promise<void> {
-    const parts = sanitizeInstantValue(
-      normalizePartsForPersistence(Array.isArray(params.parts) ? params.parts : []),
-    )
-    if (parts.length === 0) return
-
-    const txs = parts.map((part, idx) => {
-      const key = `${params.stepId}:${idx}`
-      const split = splitContextPartEnvelope(part)
-      return this.db.tx.event_parts[lookup("key", key)]
-        .update({
-          stepId: params.stepId,
-          idx,
-          type: typeof split.part?.type === "string" ? String(split.part.type) : undefined,
-          part: split.part,
-          metadata: split.metadata,
-          updatedAt: new Date(),
-        })
-        .link({ step: params.stepId })
+    let tx = this.db.tx.context_reactions[reactionId].update({
+      status,
+      effectIds: [...effectIds],
+      updatedAt: new Date(),
+      ...(error === undefined ? {} : { error: plainError(error) }),
     })
-
-    await this.db.transact(txs as any)
-  }
-
-  async itemsToModelMessages(events: ContextItem[]): Promise<ModelMessage[]> {
-    const expanded = await expandEventsWithInstantDocuments({
-      db: this.db,
-      events,
-      derivedEventType: "output",
-    })
-
-    const messages: ModelMessage[][] = []
-    for (const event of expanded) {
-      const projectedParts = await this.getProjectedPartsForEvent(String(event?.id ?? ""))
-      const projectedEvent =
-        projectedParts && projectedParts.length > 0
-          ? {
-              ...event,
-              content: {
-                ...(event?.content ?? {}),
-                parts: projectedParts,
-              },
-            }
-          : event
-
-      messages.push(await convertItemToModelMessages(projectedEvent as ContextItem))
-    }
-
-    return messages.flat()
+    if (effectIds.length > 0) tx = tx.link({ effects: [...effectIds] })
+    await this.db.transact([tx])
   }
 }
 
-export function createInstantStoreRuntime(params: {
-  getDb: (orgId: string) => Promise<InstantStoreDb> | InstantStoreDb
-  getOrgId?: (env: Record<string, unknown>) => string
-  domain?: DomainLike
-}) {
-  const storesByOrg = new Map<string, { store: InstantStore; db: InstantStoreDb; domain?: any }>()
-
-  return async (env: Record<string, unknown>) => {
-    const orgId =
-      params.getOrgId?.(env) ??
-      (typeof (env as any)?.orgId === "string" ? String((env as any).orgId) : "")
-    if (!orgId) {
-      throw new Error("[instant] Missing orgId in env. Provide env.orgId (or customize getOrgId).")
-    }
-
-    const cached = storesByOrg.get(orgId)
-    if (cached) return cached
-
-    const db = await params.getDb(orgId)
-    const store = new InstantStore(db)
-    const domain = params.domain ?? contextDomain
-    const concreteDomain = domain.fromDB ? domain.fromDB(db) : undefined
-    const runtime = { store, db, domain: concreteDomain }
-    storesByOrg.set(orgId, runtime)
-    return runtime
-  }
+export function createInstantStoreRuntime(db: any) {
+  return { db, store: new InstantStore(db) }
 }

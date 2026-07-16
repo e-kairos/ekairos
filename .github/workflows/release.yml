@@ -83,11 +83,8 @@ jobs:
             exit 1
           fi
 
-      - name: Run @ekairos/events AI SDK unit tests
-        run: pnpm --filter @ekairos/events run test:ai-sdk-reactor
-
-      - name: Run @ekairos/events scripted reactor unit tests
-        run: pnpm --filter @ekairos/events run test:scripted-reactor
+      - name: Run @ekairos/events tests
+        run: pnpm --filter @ekairos/events run test
 
   check-codex-reactor-workflow:
     name: Check - codex reactor workflow vitest
@@ -126,8 +123,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run @ekairos/openai-reactor workflow vitest
-        run: pnpm --filter @ekairos/openai-reactor run test:reactor:workflow
+      - name: Run @ekairos/reactor workflow vitest
+        run: pnpm --filter @ekairos/reactor run test:workflow
 
   publish:
     runs-on: ubuntu-latest

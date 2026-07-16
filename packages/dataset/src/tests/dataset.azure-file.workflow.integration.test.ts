@@ -6,7 +6,7 @@ import path from "node:path"
 import { config as dotenvConfig } from "dotenv"
 import { init } from "@instantdb/admin"
 import { configureRuntime } from "@ekairos/domain/runtime"
-import { SandboxService } from "@ekairos/sandbox"
+import { SandboxService } from "@ekairos/sandbox/service"
 import { start } from "workflow/api"
 import { describe, expect, it } from "vitest"
 
@@ -266,7 +266,7 @@ describeRepro("dataset Azure file workflow repro", () => {
           appId: app.appId,
           datasetId: result.datasetId,
           contextId: context?.id,
-          contextResourceTypes: context?.resources?.map((resource: any) => resource.type),
+          contextSourceKinds: context?.content?.sources?.map((source: any) => source.kind),
           sandboxId,
           fileId,
           workflowRunId,
@@ -287,7 +287,7 @@ describeRepro("dataset Azure file workflow repro", () => {
         expect(result.rowCount).toBeGreaterThan(0)
         expect(datasetRow?.resourceKinds).toBeUndefined()
         expect(context?.id).toBeTruthy()
-        expect(context?.resources?.map((resource: any) => resource.type)).toEqual(["file"])
+        expect(context?.content?.sources?.map((source: any) => source.kind)).toEqual(["file"])
         expect(steps.length).toBeGreaterThan(0)
         expect(reportPath).toContain("dataset-azure-workflow-repro")
       } finally {

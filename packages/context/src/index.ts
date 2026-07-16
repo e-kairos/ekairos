@@ -1,40 +1,39 @@
-import type { LanguageModel } from "ai"
-import { generateObject } from "ai"
-import type { z } from "zod"
-
 import {
   defineEvent,
   type DomainEventCollection,
-  type DomainEventCreateOptions,
+  type DomainEventConstructor,
+  type DomainEventConstructorDefinition,
   type DomainEventDefinition,
+  type DomainEventDraft,
+  type DomainEventLinkDefinition,
+  type DomainEventLinkParams,
   type DomainEventMethods,
-  type DomainEventRecord,
+  type DomainEventPhysicalLink,
   type DomainEventRegistration,
   type DomainEventsOf,
   type DomainLike,
+  type MaterializedDomainLike,
 } from "@ekairos/domain"
 import {
   ContextHandle,
   Events,
   Part,
   contextDomain,
-  eventsDomain,
-  reactionDomain,
+  type ContextEvent,
   type ContextHandleCreateParams,
   type ContextIdentifier,
-  type ContextItem,
   type ContextRuntimeServiceHandle,
+  type DomainEventEnvelope,
+  type DomainEventItem,
+  type StoredContext,
 } from "@ekairos/events"
-import {
-  defineReactor,
-  type ReactorEngine,
-  type ReactorEngineStepInput,
-  type ReactorFactory,
-  type ReactorReactRuntimeOptions,
-  type ReactorSandboxFactoryInput,
-  type ReactorSandboxInput,
-  type ReactorSandboxProvider,
+import type {
+  ReactOptions,
+  ReactionDefinition,
+  ReactionEffect,
 } from "@ekairos/reactor"
+import { executeReaction } from "@ekairos/reactor/internal"
+import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 
 export {
   ContextHandle,
@@ -42,156 +41,115 @@ export {
   Part,
   contextDomain,
   defineEvent,
-  eventsDomain,
-  reactionDomain,
 }
-
 export type {
+  ContextEvent,
   ContextHandleCreateParams,
   ContextIdentifier,
-  ContextItem,
   ContextRuntimeServiceHandle,
   DomainEventCollection,
-  DomainEventCreateOptions,
+  DomainEventConstructor,
+  DomainEventConstructorDefinition,
   DomainEventDefinition,
+  DomainEventDraft,
+  DomainEventEnvelope,
+  DomainEventItem,
+  DomainEventLinkDefinition,
+  DomainEventLinkParams,
   DomainEventMethods,
-  DomainEventRecord,
+  DomainEventPhysicalLink,
   DomainEventRegistration,
   DomainEventsOf,
 }
 
-export {
-  defineReactor,
-  defineReactor as defineReaction,
-}
-
-export type {
-  ReactorEngine as ContextReactionEngine,
-  ReactorEngineStepInput as ContextReactionEngineStepInput,
-  ReactorFactory as ContextReactionFactory,
-  ReactorReactRuntimeOptions as ContextReactionRuntimeOptions,
-  ReactorSandboxFactoryInput as ContextReactionSandboxFactoryInput,
-  ReactorSandboxInput as ContextReactionSandboxInput,
-  ReactorSandboxProvider as ContextReactionSandboxProvider,
-}
-
-type CallableDomainFor<Runtime> = DomainLike & {
-  (runtime: Runtime, options?: unknown): Promise<unknown>
-}
-
-export type ContextClient<Runtime extends ContextRuntimeServiceHandle> = {
-  create<Context = unknown>(
-    params: ContextHandleCreateParams<Context>,
-  ): Promise<ContextHandle<Context>>
-  get<Context = unknown>(
-    identifier: ContextIdentifier,
-  ): Promise<ContextHandle<Context> | null>
-  events: ReturnType<typeof Events>
-  use<Domain extends CallableDomainFor<Runtime>>(
+export type ContextRuntimeWithDomainUse = ContextRuntimeServiceHandle & {
+  use<Domain extends MaterializedDomainLike>(
     domain: Domain,
     options?: unknown,
-  ): Promise<Awaited<ReturnType<Domain>>>
+  ): Promise<unknown>
+  env?: unknown
+  materializeDataset?: unknown
 }
 
-export function Context<Runtime extends ContextRuntimeServiceHandle>(
+export class ReactionContextHandle<
+  ContextContent = unknown,
+  Runtime extends ContextRuntimeWithDomainUse = ContextRuntimeWithDomainUse,
+> extends ContextHandle<ContextContent> {
+  declare readonly runtime: Runtime
+
+  constructor(runtime: Runtime, context: StoredContext<ContextContent>) {
+    super(runtime, context)
+  }
+
+  static [WORKFLOW_SERIALIZE](instance: ReactionContextHandle<unknown, any>) {
+    return { runtime: instance.runtime, context: instance.context }
+  }
+
+  static [WORKFLOW_DESERIALIZE](data: {
+    runtime: ContextRuntimeWithDomainUse
+    context: StoredContext<unknown>
+  }) {
+    return new ReactionContextHandle(data.runtime, data.context)
+  }
+
+  async react<
+    Scope extends DomainLike,
+    Effect extends ReactionEffect,
+  >(
+    trigger: ContextEvent,
+    definition: ReactionDefinition<ContextContent, Scope, any, Effect>,
+    options?: ReactOptions,
+  ): Promise<Effect> {
+    return await executeReaction(this.runtime as any, this, trigger, definition, options)
+  }
+
+  override async refresh(): Promise<ReactionContextHandle<ContextContent, Runtime>> {
+    const handle = await super.refresh()
+    return new ReactionContextHandle(this.runtime, handle.context)
+  }
+
+  override async updateContent(
+    content: ContextContent,
+  ): Promise<ReactionContextHandle<ContextContent, Runtime>> {
+    const handle = await super.updateContent(content)
+    return new ReactionContextHandle(this.runtime, handle.context)
+  }
+}
+
+export type ContextClient<Runtime extends ContextRuntimeWithDomainUse> = Readonly<{
+  create<ContextContent = unknown>(
+    params: ContextHandleCreateParams<ContextContent>,
+  ): Promise<ReactionContextHandle<ContextContent, Runtime>>
+  get<ContextContent = unknown>(
+    identifier: ContextIdentifier,
+  ): Promise<ReactionContextHandle<ContextContent, Runtime> | null>
+  events: ReturnType<typeof Events>
+  use<Domain extends MaterializedDomainLike>(
+    domain: Domain,
+    options?: unknown,
+  ): ReturnType<Runtime["use"]>
+}>
+
+export function Context<Runtime extends ContextRuntimeWithDomainUse>(
   runtime: Runtime,
 ): ContextClient<Runtime> {
-  return {
-    async create<Context = unknown>(params: ContextHandleCreateParams<Context>) {
-      return await ContextHandle.create(runtime, params)
+  return Object.freeze({
+    async create<ContextContent = unknown>(
+      params: ContextHandleCreateParams<ContextContent>,
+    ) {
+      const handle = await ContextHandle.create(runtime, params)
+      return new ReactionContextHandle(runtime, handle.context)
     },
-    async get<Context = unknown>(identifier: ContextIdentifier) {
-      return await ContextHandle.get<Context>(runtime, identifier)
+    async get<ContextContent = unknown>(identifier: ContextIdentifier) {
+      const handle = await ContextHandle.get<ContextContent>(runtime, identifier)
+      return handle ? new ReactionContextHandle(runtime, handle.context) : null
     },
     events: Events(runtime),
-    async use<Domain extends CallableDomainFor<Runtime>>(
+    use<Domain extends MaterializedDomainLike>(
       domain: Domain,
       options?: unknown,
-    ): Promise<Awaited<ReturnType<Domain>>> {
-      if (typeof domain !== "function") {
-        throw new Error("Context(runtime).use(domain) requires a callable domain.")
-      }
-      const scoped = await domain(runtime, options)
-      return scoped as Awaited<ReturnType<Domain>>
+    ): ReturnType<Runtime["use"]> {
+      return runtime.use(domain, options) as ReturnType<Runtime["use"]>
     },
-  }
-}
-
-export type AiSdkStepEngineOptions<TContext = unknown, TEnv = unknown> = {
-  model:
-    | LanguageModel
-    | ((input: ReactorEngineStepInput<TContext, TEnv, unknown, any>) =>
-        | LanguageModel
-        | Promise<LanguageModel>)
-  system?:
-    | string
-    | ((input: ReactorEngineStepInput<TContext, TEnv, unknown, any>) =>
-        | string
-        | Promise<string>)
-}
-
-export function createAiSdkStepEngine<TContext = unknown, TEnv = unknown>(
-  options: AiSdkStepEngineOptions<TContext, TEnv>,
-): ReactorEngine<TContext, TEnv> {
-  return {
-    async step<TOutput, TActions extends Record<string, (...args: any[]) => unknown>>(
-      input: ReactorEngineStepInput<TContext, TEnv, TOutput, TActions>,
-    ): Promise<TOutput | unknown> {
-      if (!input.step.output) return undefined
-
-      const model =
-        typeof options.model === "function"
-          ? await options.model(input)
-          : options.model
-      const system =
-        typeof options.system === "function"
-          ? await options.system(input)
-          : options.system
-
-      const prompt = buildStepPrompt(input)
-      const result = await generateObject({
-        model,
-        ...(system ? { system } : {}),
-        prompt,
-        schema: input.step.output as z.ZodType<TOutput>,
-      })
-
-      return result.object
-    },
-  }
-}
-
-function buildStepPrompt<TContext, TEnv, TOutput, TActions extends Record<string, (...args: any[]) => unknown>>(
-  input: ReactorEngineStepInput<TContext, TEnv, TOutput, TActions>,
-) {
-  const sections: string[] = [
-    `Reaction: ${input.reactorKey}`,
-    `Step: ${input.step.key}`,
-    "",
-    "Instructions:",
-    input.step.instructions,
-  ]
-
-  if (input.context?.content && Object.keys(input.context.content as Record<string, unknown>).length > 0) {
-    sections.push("", "Initial context:", JSON.stringify(input.context.content, null, 2))
-  }
-
-  if (input.triggerEvent) {
-    sections.push("", "Trigger event:", JSON.stringify(input.triggerEvent, null, 2))
-  }
-
-  if (input.step.payload !== undefined) {
-    sections.push("", "Step payload:", JSON.stringify(input.step.payload, null, 2))
-  }
-
-  const actionNames = Object.keys(input.actions ?? {})
-  if (actionNames.length > 0) {
-    sections.push(
-      "",
-      "Available explicit actions:",
-      actionNames.map((name) => `- ${name}`).join("\n"),
-    )
-  }
-
-  return sections.join("\n")
+  })
 }

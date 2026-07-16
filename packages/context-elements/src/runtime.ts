@@ -162,6 +162,10 @@ async function resolveRuntimeCredentials(
     token,
     name: `context-elements-preview-${Date.now()}`,
     schema: schema as any,
+    perms: {
+      $default: { allow: { $default: "true" } },
+      $streams: { allow: { view: "true" } },
+    } as any,
   });
 
   rememberTempApp(created);

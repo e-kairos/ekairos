@@ -1,12 +1,11 @@
-import type { ConcreteDomain, DomainLike } from "@ekairos/domain"
+import type { ConcreteDomain, MaterializedDomainLike } from "@ekairos/domain"
 import type { EkairosRuntime, RuntimeForDomain, RuntimeResolveOptions } from "@ekairos/domain/runtime"
 
-import type { ContextEnvironment } from "./context.config.js"
 import type { ContextStore } from "./context.store.js"
 import { contextDomain } from "./schema.js"
 
 export type ContextRuntime<
-  Env extends ContextEnvironment = ContextEnvironment,
+  Env extends Record<string, unknown> = Record<string, unknown>,
 > = EkairosRuntime<Env, any, any>
 
 export type ContextRuntimeServiceHandle = {
@@ -16,8 +15,8 @@ export type ContextRuntimeServiceHandle = {
 }
 
 export type ContextRuntimeHandleForDomain<
-  Env extends ContextEnvironment = ContextEnvironment,
-  RequiredDomain extends DomainLike = typeof contextDomain,
+  Env extends Record<string, unknown> = Record<string, unknown>,
+  RequiredDomain extends MaterializedDomainLike = typeof contextDomain,
 > = ContextRuntimeServiceHandle & {
   use<Subdomain extends typeof contextDomain | RequiredDomain>(
     subdomain: Subdomain,
@@ -27,7 +26,7 @@ export type ContextRuntimeHandleForDomain<
 
 export type ContextRuntimeForDomain<
   Runtime extends ContextRuntime<any>,
-  RequiredDomain extends DomainLike = typeof contextDomain,
+  RequiredDomain extends MaterializedDomainLike = typeof contextDomain,
 > =
   & RuntimeForDomain<Runtime, typeof contextDomain>
   & RuntimeForDomain<Runtime, RequiredDomain>

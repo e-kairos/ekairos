@@ -1,26 +1,94 @@
-import type { ReactFlowProps } from "@xyflow/react";
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { Background, ReactFlow } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+import {
+  Excalidraw,
+  Footer,
+  MainMenu,
+  Sidebar,
+  WelcomeScreen,
+  restoreElements,
+} from "@excalidraw/excalidraw";
 
-type CanvasProps = ReactFlowProps & {
-  children?: ReactNode;
+type ExcalidrawApi = {
+  updateScene?: (scene: { appState?: Record<string, unknown>; elements?: unknown[] }) => void;
 };
 
-const deleteKeyCode = ["Backspace", "Delete"];
+type CanvasProps = {
+  children?: ReactNode;
+  elements?: unknown[];
+  appState?: Record<string, unknown>;
+  excalidrawAPI?: (api: ExcalidrawApi) => void;
+  gridModeEnabled?: boolean;
+  onChange?: (...args: unknown[]) => void;
+  theme?: "light" | "dark";
+  UIOptions?: Record<string, unknown>;
+  viewModeEnabled?: boolean;
+  zenModeEnabled?: boolean;
+};
 
-export const Canvas = ({ children, ...props }: CanvasProps) => (
-  <ReactFlow
-    deleteKeyCode={deleteKeyCode}
-    fitView
-    panOnDrag={false}
-    panOnScroll
-    selectionOnDrag={true}
-    zoomOnDoubleClick={false}
-    {...props}
-  >
-    <Background bgColor="var(--sidebar)" />
-    {children}
-  </ReactFlow>
-);
+export const Canvas = ({
+  appState,
+  children,
+  elements = [],
+  excalidrawAPI,
+  gridModeEnabled = false,
+  onChange = () => {},
+  theme = "light",
+  UIOptions,
+  viewModeEnabled = true,
+  zenModeEnabled = true,
+  ...props
+}: CanvasProps) => {
+  const [api, setApi] = useState<ExcalidrawApi | null>(null);
+  const restoredElements = useMemo(() => restoreElements(elements, null), [elements]);
+  const initialData = useMemo(
+    () => ({
+      appState: {
+        viewBackgroundColor: "var(--sidebar)",
+        ...appState,
+      },
+      elements: restoredElements,
+    }),
+    [appState, restoredElements],
+  );
+  const handleExcalidrawAPI = useCallback(
+    (nextApi: ExcalidrawApi) => {
+      setApi(nextApi);
+      excalidrawAPI?.(nextApi);
+    },
+    [excalidrawAPI],
+  );
+
+  useEffect(() => {
+    api?.updateScene?.({
+      appState: initialData.appState,
+      elements: restoredElements,
+    });
+  }, [api, initialData.appState, restoredElements]);
+
+  return (
+    <Excalidraw
+      excalidrawAPI={handleExcalidrawAPI}
+      gridModeEnabled={gridModeEnabled}
+      initialData={initialData}
+      onChange={onChange}
+      theme={theme}
+      UIOptions={UIOptions}
+      viewModeEnabled={viewModeEnabled}
+      zenModeEnabled={zenModeEnabled}
+      {...props}
+    >
+      {children ?? (
+        <>
+          <Sidebar name="custom">{null}</Sidebar>
+          <Footer>{null}</Footer>
+          <MainMenu>{null}</MainMenu>
+          <WelcomeScreen>{null}</WelcomeScreen>
+        </>
+      )}
+    </Excalidraw>
+  );
+};

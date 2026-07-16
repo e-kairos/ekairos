@@ -36,13 +36,13 @@ export default function CreateChannelsReferencePage() {
         <PropsTable
           rows={[
             {
-              name: "db",
-              type: "any",
+              name: "runtime",
+              type: "ChannelsRuntimeHandle",
               required: true,
               description: (
                 <>
-                  InstantDB <strong>admin</strong> client with the channel domain schema pushed. The
-                  runtime persists canonical messages and its internal delivery state (
+                  App runtime that resolves active domain persistence and tenancy. Channel stores
+                  canonical messages and delivery state (
                   <InlineCode>channel_state</InlineCode>, <InlineCode>channel_locks</InlineCode>,
                   ...) through this client.
                 </>
@@ -75,7 +75,7 @@ export default function CreateChannelsReferencePage() {
                   Maps a platform conversation to an agent context. Called with the channel kind and
                   the stable per-platform <InlineCode>threadKey</InlineCode>; return the{" "}
                   <InlineCode>contextId</InlineCode> the conversation belongs to (typically by
-                  ensuring an agent thread keyed on{" "}
+                  creating a context keyed on{" "}
                   <InlineCode>{"`${channel}:${threadKey}`"}</InlineCode>).
                 </>
               ),
@@ -86,8 +86,9 @@ export default function CreateChannelsReferencePage() {
               required: true,
               description: (
                 <>
-                  Reacts to an inbound message (typically: <InlineCode>thread.react</InlineCode> on
-                  the agent domain). Return text to auto-reply, or use{" "}
+                  Reacts to an inbound message. Use <InlineCode>bindReaction</InlineCode> to map the
+                  inbound message to a domain event and execute a reaction definition. Return text
+                  to auto-reply, or use{" "}
                   <InlineCode>inbound.reply</InlineCode> for streaming / multi-part replies and
                   return <InlineCode>null</InlineCode>.
                 </>
@@ -175,6 +176,17 @@ export default function CreateChannelsReferencePage() {
                 </>
               ),
             },
+            {
+              name: "attachItem",
+              type: "(itemId: string) => Promise<void>",
+              required: true,
+              description: (
+                <>
+                  Links the canonical channel message to the trigger event emitted by{" "}
+                  <InlineCode>bindReaction</InlineCode>.
+                </>
+              ),
+            },
           ]}
         />
       </Section>
@@ -223,13 +235,54 @@ export default function CreateChannelsReferencePage() {
         />
       </Section>
 
+      <Section title="bindReaction">
+        <Code title="signature">{`export type BindReactionOptions<
+  Definition extends ReactionDefinition<any, any, any, any>,
+> = Readonly<{
+  runtime: ChannelAgentRuntime;
+  reaction: Definition;
+  event: (inbound: ChannelInbound) =>
+    | ReturnType<Definition["trigger"]>
+    | Promise<ReturnType<Definition["trigger"]>>;
+  replyText?: (
+    effect: ReactionEffectOf<Definition>,
+    inbound: ChannelInbound,
+  ) => string | null | Promise<string | null>;
+}>;
+
+export function bindReaction<
+  Definition extends ReactionDefinition<any, any, any, any>,
+>(options: BindReactionOptions<Definition>):
+  (inbound: ChannelInbound) => Promise<string | null>`}</Code>
+        <p>
+          The binding emits the mapped domain event, attaches it to the canonical message, loads the
+          resolved context, and executes{" "}
+          <InlineCode>context.react(event, definition)</InlineCode>. When{" "}
+          <InlineCode>replyText</InlineCode> is omitted, it scans effects from last to first and
+          returns a non-empty string payload or its <InlineCode>text</InlineCode> or{" "}
+          <InlineCode>reply</InlineCode> field.
+        </p>
+      </Section>
+
       <Section title="Complete example">
-        <Code title="lib/channels.ts">{`import { createChannels } from "@ekairos/channel/platforms";
-import { db } from "@/lib/db"; // InstantDB admin client
-import { ensureThread, reactOnThread } from "@/lib/agent";
+        <Code title="lib/channels.ts">{`import { Context } from "@ekairos/context";
+import { bindReaction, createChannels } from "@ekairos/channel/platforms";
+import { runtime } from "@/lib/runtime";
+import { support, answerInbound } from "@/lib/support-domain";
+
+const react = bindReaction({
+  runtime,
+  reaction: answerInbound,
+  event: (inbound) =>
+    support.events.messageReceived({
+      text: inbound.message.text ?? "",
+      participant: inbound.message.participant,
+    }).link({ message: inbound.message.id }),
+  replyText: (effect) => effect.payload.reply,
+});
 
 export const channels = await createChannels({
-  db,
+  runtime,
   userName: "ekairos",
   platforms: {
     slack: {
@@ -239,13 +292,12 @@ export const channels = await createChannels({
     telegram: { botToken: process.env.TELEGRAM_BOT_TOKEN! },
   },
   resolveContextId: async ({ channel, threadKey }) => {
-    const thread = await ensureThread({ key: \`\${channel}:\${threadKey}\` });
-    return thread.contextId;
+    const context = await Context(runtime).create({
+      key: \`\${channel}:\${threadKey}\`,
+    });
+    return context.id;
   },
-  react: async (inbound) => {
-    const reaction = await reactOnThread(inbound.contextId, inbound.message);
-    return reaction.text;
-  },
+  react,
 });`}</Code>
         <Code title="app/api/channels/[platform]/route.ts">{`import { channels } from "@/lib/channels";
 

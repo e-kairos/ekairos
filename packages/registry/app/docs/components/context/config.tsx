@@ -162,7 +162,7 @@ export const contextRegistryItem: RegistryItem = {
   registryName: "context",
   title: "Context",
   subtitle:
-    "Conversation container plus lifecycle contract reference for context/execution/item/step/part/chunk.",
+    "Conversation container for Context, Session, Reaction, Event, and Event Part state.",
   category: "compound",
   props: [
     {
@@ -179,27 +179,26 @@ export const contextRegistryItem: RegistryItem = {
     },
   ],
   code: `import { Context, ContextContent, ContextScrollButton } from "@/components/ekairos/context"
-import { createContext, createScriptedReactor } from "@ekairos/reactor/context"
+import { defineReaction, type ReactionEngine } from "@ekairos/reactor"
+import { z } from "zod"
 
-const reactor = createScriptedReactor({
-  steps: [
-    {
-      assistantEvent: {
-        content: { parts: [{ type: "text", text: "Deterministic response" }] },
-      },
-        actionRequests: [],
-      messagesForModel: [],
-    },
-  ],
-  repeatLast: true,
-})
+const engine: ReactionEngine<{ orgId: string }> = {
+  agent: async () => ({ output: { text: "Deterministic response" } }),
+}
 
-const demoContext = createContext<{ orgId: string }>("demo.context")
-  .context((stored, env) => ({ ...stored.content, orgId: env.orgId }))
-  .narrative(() => "You are deterministic")
-  .actions(() => ({}))
-  .reactor(reactor)
-  .build()
+const demoReaction = defineReaction(
+  appDomain.events.requested,
+  { key: "demo.context", scope: appDomain, engine, sandbox: false },
+  async reaction => {
+    const response = await reaction.given(reaction.trigger).agent({
+      instruction: "Return a deterministic response.",
+      output: z.object({ text: z.string() }),
+    })
+    return await reaction.given(response).emit(
+      appDomain.events.completed(response.payload),
+    )
+  },
+)
 
 export function ContextView() {
   return (

@@ -77,16 +77,6 @@ function latestAssistantEvent(context: ContextValue) {
   return null;
 }
 
-function latestRunningStep(context: ContextValue) {
-  const assistant = latestAssistantEvent(context);
-  const steps = Array.isArray(assistant?.steps) ? assistant.steps : [];
-  for (let i = steps.length - 1; i >= 0; i -= 1) {
-    const step = steps[i];
-    if (step?.status === "running") return step;
-  }
-  return null;
-}
-
 function latestStartedActionName(parts: Array<Record<string, unknown>>) {
   const terminalActionIds = new Set<string>();
   for (let i = parts.length - 1; i >= 0; i -= 1) {
@@ -133,10 +123,11 @@ export function getContextActivityState({
   isUploading?: boolean;
 }): ContextActivityState | null {
   const contextStatus = context.contextStatus;
-  const executionStatus = context.context?.currentExecution?.status;
+  const sessionStatus = context.context?.currentSession?.status;
   const assistant = latestAssistantEvent(context);
-  const runningStep = latestRunningStep(context);
-  const assistantPending = assistant?.status === "pending";
+  const runningReaction = [...context.reactions]
+    .reverse()
+    .find((reaction) => reaction.status === "running");
 
   if (isUploading) {
     return {
@@ -159,7 +150,7 @@ export function getContextActivityState({
     };
   }
 
-  if (context.sendStatus === "submitting" && contextStatus !== "open_streaming") {
+  if (context.sendStatus === "submitting" && contextStatus !== "running") {
     return {
       label: "Enviando",
       animated: true,
@@ -169,7 +160,7 @@ export function getContextActivityState({
     };
   }
 
-  if (executionStatus === "failed" && assistantPending) {
+  if (sessionStatus === "failed") {
     return {
       label: "Error",
       title: "El ultimo turno termino con error.",
@@ -180,9 +171,9 @@ export function getContextActivityState({
     };
   }
 
-  if (contextStatus !== "open_streaming") return null;
+  if (contextStatus !== "running") return null;
 
-  if (executionStatus === "executing" && !assistant) {
+  if (!assistant) {
     return {
       label: "Iniciando",
       animated: true,
@@ -192,7 +183,7 @@ export function getContextActivityState({
     };
   }
 
-  if (!runningStep) {
+  if (!runningReaction) {
     return {
       label: "Preparando",
       animated: true,
@@ -202,7 +193,7 @@ export function getContextActivityState({
     };
   }
 
-  const parts = Array.isArray(runningStep.parts) ? runningStep.parts : [];
+  const parts = assistant.eventParts as Array<Record<string, unknown>>;
   const actionName = latestStartedActionName(parts);
   if (actionName) {
     return {

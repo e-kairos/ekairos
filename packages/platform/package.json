@@ -1,0 +1,41 @@
+{
+  "name": "@ekairos/platform",
+  "version": "1.22.0",
+  "description": "Ekairos Platform SDK - typed client for the Ekairos Platform API: applications (projects), runtime environments, and API keys",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-kairos/ekairos.git",
+    "directory": "packages/platform"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run -c vitest.config.mts"
+  },
+  "devDependencies": {
+    "@ekairos/tsconfig": "workspace:*",
+    "@types/node": "^24.5.0",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.8"
+  }
+}

@@ -1,175 +1,144 @@
-import type { ModelMessage } from "ai"
-import type {
-  ContextStatus,
-  ExecutionStatus,
-  StepStatus,
-  ItemStatus,
-  ItemType,
-  Channel,
-} from "./context.contract.js"
+import type { DomainEventPhysicalLink } from "./domain-event.js"
 
-export type ContextIdentifier = { id: string; key?: never } | { key: string; id?: never }
+export type ContextIdentifier =
+  | Readonly<{ id: string; key?: never }>
+  | Readonly<{ key: string; id?: never }>
 
-export type { ContextStatus } from "./context.contract.js"
-
-export type ContextResourceBase = {
-  key: string
-  type: string
-  name: string
-  description: string
-  role?: string | null
-  metadata?: Record<string, unknown> | null
-}
-
-export type ContextFileResource = ContextResourceBase & {
-  type: "file"
-  fileId?: string
-  documentId?: string
-  url?: string
-  filename?: string
-  mediaType?: string
-  size?: number
-}
-
-export type ContextLinkResource = ContextResourceBase & {
-  type: "link"
-  url: string
-}
-
-export type ContextRepositoryResource = ContextResourceBase & {
-  type: "repository"
-  provider?: string
-  repository: string
-  ref?: string
-  paths?: string[]
-  commitSha?: string
-}
-
-export type ContextDatasetResource = ContextResourceBase & {
-  type: "dataset"
-  datasetId: string
-}
-
-export type ContextExternalResource = ContextResourceBase & {
-  type: "external"
-  uri?: string
-}
-
-export type ContextResource =
-  | ContextFileResource
-  | ContextLinkResource
-  | ContextRepositoryResource
-  | ContextDatasetResource
-  | ContextExternalResource
-  | (ContextResourceBase & Record<string, unknown>)
-
-export type StoredContextResource = ContextResource & {
-  id?: string
-  storageKey?: string
-  createdAt?: Date
-  updatedAt?: Date
-}
-
-export type StoredContext<Context> = {
+export type StoredContext<Content = unknown> = Readonly<{
   id: string
   key: string | null
   name?: string | null
-  status: ContextStatus
+  content: Content | null
+  previous?: Content
   createdAt: Date
   updatedAt?: Date
-  content: Context | null
-  description?: string | null
-  goal?: string | null
-  resources?: StoredContextResource[] | null
-  reactor?: { kind: string; state?: Record<string, unknown> | null } | null
-}
+}>
 
-export type ContextItem = {
+export type ContextEventPart = Readonly<{
   id: string
-  type: ItemType
-  channel: Channel
-  createdAt: string
-  status?: ItemStatus
-  content: {
-    /**
-     * Deprecated as the source of truth for output items.
-     * The engine maintains this field as a compatibility mirror, but
-     * step-level `event_parts` should be used for replay and inspection.
-     */
-    parts?: unknown[]
-    [key: string]: unknown
-  }
-}
-
-export type ContextStep = {
-  id: string
+  key: string
+  index: number
+  type: string
+  content: unknown
+  metadata?: Readonly<Record<string, unknown>>
   createdAt: Date
   updatedAt?: Date
-  status: StepStatus
-  iteration: number
-  errorText?: string
-}
+}>
 
-export type ContextExecution = {
+export type ContextEvent<Payload = unknown> = Readonly<{
   id: string
-  status: ExecutionStatus
-}
+  type: string
+  createdAt: Date
+  contextId?: string
+  domain?: string
+  name?: string
+  channel?: string
+  payload: Payload
+  links: Readonly<Record<string, string | readonly string[]>>
+  physicalLinks: Readonly<Record<string, DomainEventPhysicalLink>>
+  metadata: Readonly<Record<string, unknown>>
+  eventParts: readonly ContextEventPart[]
+}>
+
+export type DomainEventItem<Payload = unknown> = ContextEvent<Payload> & Readonly<{
+  domain: string
+  name: string
+}>
+
+export type SessionStatus = "running" | "completed" | "failed"
+export type ReactionStatus = "running" | "completed" | "failed"
+
+export type ContextSession = Readonly<{
+  id: string
+  contextId: string
+  definition: string
+  triggerId: string
+  rootReactionId: string
+  status: SessionStatus
+  parentSessionId?: string
+  sandboxId?: string
+  workflowRunId?: string
+  error?: unknown
+  createdAt: Date
+  updatedAt?: Date
+}>
+
+export type ContextReaction = Readonly<{
+  id: string
+  sessionId: string
+  type: string
+  status: ReactionStatus
+  position: number
+  depth: number
+  causeIds: readonly string[]
+  effectIds: readonly string[]
+  parentReactionId?: string
+  instruction?: string
+  error?: unknown
+  createdAt: Date
+  updatedAt?: Date
+}>
+
+export type SaveContextEventInput<Payload = unknown> = Omit<
+  ContextEvent<Payload>,
+  "eventParts"
+> & Readonly<{
+  eventParts?: readonly Omit<ContextEventPart, "id" | "key" | "createdAt">[]
+}>
 
 export interface ContextStore {
-  getOrCreateContext<C>(contextIdentifier: ContextIdentifier | null): Promise<StoredContext<C>>
-  getContext<C>(contextIdentifier: ContextIdentifier): Promise<StoredContext<C> | null>
-  updateContextContent<C>(contextIdentifier: ContextIdentifier, content: C): Promise<StoredContext<C>>
-  updateContextDefinition<C>(
-    contextIdentifier: ContextIdentifier,
-    definition: { description?: string | null; goal?: string | null },
-  ): Promise<StoredContext<C>>
-  upsertContextResources(
-    contextIdentifier: ContextIdentifier,
-    resources: ContextResource[],
-  ): Promise<StoredContextResource[]>
-  getContextResources(contextIdentifier: ContextIdentifier): Promise<StoredContextResource[]>
-  updateContextReactor<C>(
-    contextIdentifier: ContextIdentifier,
-    reactor: { kind: string; state?: Record<string, unknown> | null },
-  ): Promise<StoredContext<C>>
-  updateContextStatus(contextIdentifier: ContextIdentifier, status: ContextStatus): Promise<void>
+  getOrCreateContext<Content>(identifier: ContextIdentifier): Promise<StoredContext<Content>>
+  getContext<Content>(identifier: ContextIdentifier): Promise<StoredContext<Content> | null>
+  updateContextContent<Content>(
+    identifier: ContextIdentifier,
+    content: Content,
+  ): Promise<StoredContext<Content>>
 
-  saveEvent(item: ContextItem): Promise<ContextItem>
-  saveItem(contextIdentifier: ContextIdentifier, item: ContextItem): Promise<ContextItem>
-  updateItem(itemId: string, item: ContextItem): Promise<ContextItem>
-  getItem(itemId: string): Promise<ContextItem | null>
-  getItems(contextIdentifier: ContextIdentifier): Promise<ContextItem[]>
+  saveEvent<Payload>(
+    event: SaveContextEventInput<Payload>,
+    origin?: ContextIdentifier,
+  ): Promise<ContextEvent<Payload>>
+  getEvent<Payload = unknown>(eventId: string): Promise<ContextEvent<Payload> | null>
+  getEvents(identifier: ContextIdentifier): Promise<ContextEvent[]>
+  saveEventParts(
+    eventId: string,
+    parts: readonly Omit<ContextEventPart, "id" | "key" | "createdAt">[],
+  ): Promise<readonly ContextEventPart[]>
 
-  createExecution(
-    contextIdentifier: ContextIdentifier,
-    triggerEventId: string,
-    reactionEventId: string,
-  ): Promise<{ id: string }>
-
-  completeExecution(
-    contextIdentifier: ContextIdentifier,
-    executionId: string,
-    status: Exclude<ExecutionStatus, "executing">,
+  openSession(input: Readonly<{
+    id: string
+    rootReactionId: string
+    contextId: string
+    definition: string
+    triggerId: string
+    parentSessionId?: string
+    sandboxId?: string
+    workflowRunId?: string
+    createdAt?: Date
+  }>): Promise<ContextSession>
+  getSession(sessionId: string): Promise<ContextSession | null>
+  completeSession(
+    sessionId: string,
+    status: Exclude<SessionStatus, "running">,
+    error?: unknown,
   ): Promise<void>
 
-  createStep(params: {
-    executionId: string
-    iteration: number
-  }): Promise<{ id: string }>
-
-  updateStep(
-    stepId: string,
-    patch: Partial<
-      Pick<
-        ContextStep,
-        | "status"
-        | "errorText"
-        | "updatedAt"
-      >
-    >,
+  openReaction(input: Readonly<{
+    id: string
+    sessionId: string
+    type: string
+    position: number
+    depth: number
+    causeIds: readonly string[]
+    parentReactionId?: string
+    instruction?: string
+    createdAt?: Date
+  }>): Promise<ContextReaction>
+  getReaction(reactionId: string): Promise<ContextReaction | null>
+  completeReaction(
+    reactionId: string,
+    status: Exclude<ReactionStatus, "running">,
+    effectIds?: readonly string[],
+    error?: unknown,
   ): Promise<void>
-
-  saveStepParts(params: { stepId: string; parts: any[] }): Promise<void>
-
-  itemsToModelMessages(items: ContextItem[]): Promise<ModelMessage[]>
 }

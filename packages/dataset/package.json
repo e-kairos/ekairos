@@ -1,7 +1,7 @@
 {
   "name": "@ekairos/dataset",
   "version": "1.22.0",
-  "description": "Pulzar Dataset Tools",
+  "description": "Durable formal datasets from explicit causal and domain sources",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -35,11 +35,6 @@
       "import": "./dist/query/index.js",
       "default": "./dist/query/index.js"
     },
-    "./agents": {
-      "types": "./dist/agents.d.ts",
-      "import": "./dist/agents.js",
-      "default": "./dist/agents.js"
-    },
     "./skill": {
       "types": "./dist/skill.d.ts",
       "import": "./dist/skill.js",
@@ -59,16 +54,13 @@
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run -c vitest.config.mts",
-    "test:workflow": "vitest run -c vitest.workflow.config.mts",
-    "test:direct": "vitest run -c vitest.config.mts src/tests/dataset.builder.instant.test.ts",
-    "test:tool": "vitest run -c vitest.config.mts src/tests/materializeDataset.tool.instant.test.ts",
-    "test:ai-sdk:instant": "vitest run -c vitest.codex.config.mts src/tests/materializeDataset.ai-sdk.instant.test.ts"
+    "test:workflow": "vitest run -c vitest.workflow.config.mts"
   },
   "dependencies": {
     "@ekairos/domain": "workspace:*",
     "@ekairos/events": "workspace:*",
     "@ekairos/reactor": "workspace:*",
-    "@ekairos/sandbox": "^1.22.0",
+    "@ekairos/sandbox": "workspace:*",
     "@instantdb/admin": "0.22.158",
     "@instantdb/core": "0.22.142",
     "ai": "^5.0.44",

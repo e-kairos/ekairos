@@ -1,12 +1,8 @@
 import { configureRuntime } from "@ekairos/domain/runtime";
 import { EkairosRuntime } from "@ekairos/domain";
-import { eventsDomain } from "@ekairos/events";
-import { configureContextDurableWorkflow } from "@ekairos/reactor/runtime";
 import { init } from "@instantdb/admin";
-import { domain } from "@ekairos/domain";
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";
-import "./lib/story-smoke.story";
-import { contextEngineDurableWorkflow } from "./lib/context-engine.workflow";
+import { storySmokeDomain } from "./lib/story-smoke.story";
 
 const appId =
   (process.env.NEXT_PUBLIC_INSTANT_APP_ID as string) ||
@@ -19,9 +15,7 @@ const adminToken =
 
 const appDomain =
   appId && adminToken
-    ? domain("context-workflow-smoke")
-        .includes(eventsDomain)
-        .schema({ entities: {}, links: {}, rooms: {} })
+    ? storySmokeDomain
     : null;
 
 const db =
@@ -85,5 +79,3 @@ export const runtimeConfig =
         } as any),
       })
     : null;
-
-configureContextDurableWorkflow(contextEngineDurableWorkflow);

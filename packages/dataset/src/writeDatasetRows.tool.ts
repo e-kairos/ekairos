@@ -1,11 +1,11 @@
-import { tool } from "ai"
+import { defineAction, type DomainActionDefinition } from "@ekairos/domain"
 import { z, type ZodTypeAny } from "zod"
 import { validateRows } from "./builder/schemaInference.js"
 import type { DatasetSchemaInput } from "./builder/types.js"
 import { getDatasetRuntimeDb } from "./dataset/steps.js"
 import { DatasetService } from "./service.js"
 
-type WriteRowsToolParams = {
+type PersistDatasetRowsParams = {
   datasetId: string
   sandboxId: string
   runtime: any
@@ -130,7 +130,7 @@ function createToolRowSchema(schemaInput: DatasetSchemaInput | any): ZodTypeAny 
   return zodFromJsonSchema(jsonSchema)
 }
 
-export async function persistDatasetRowsStep(params: WriteRowsToolParams & {
+async function persistDatasetRowsStep(params: PersistDatasetRowsParams & {
   rows: Array<Record<string, unknown>>
   summary?: string
 }) {
@@ -247,66 +247,105 @@ export async function persistDatasetRowsStep(params: WriteRowsToolParams & {
   }
 }
 
-export function createReplaceRowsTool(params: WriteRowsToolParams) {
-  const toolRowSchema = createToolRowSchema(params.schema)
-  const inputSchema = z.object({
-    rows: z
-      .array(toolRowSchema)
-      .min(1)
-      .describe("Output dataset rows. Each row must match the dataset output schema exactly."),
-    summary: z
-      .string()
-      .optional()
-      .describe("Short summary of the completed dataset including record count and structure."),
-  })
-
-  return tool({
-    description:
-      "Replace the dataset output with rows provided directly as JSON objects, then validate and complete the dataset.",
-    inputSchema: inputSchema as any,
-    execute: async ({ rows, summary }: { rows: Array<Record<string, unknown>>; summary?: string }) => {
-      const finalSummary = summary || `Completed dataset with ${rows.length} rows.`
-      console.log(`[Dataset ${params.datasetId}] ========================================`)
-      console.log(`[Dataset ${params.datasetId}] Tool: replaceRows`)
-      console.log(`[Dataset ${params.datasetId}] Rows: ${rows.length}`)
-      console.log(`[Dataset ${params.datasetId}] Summary: ${finalSummary}`)
-      console.log(`[Dataset ${params.datasetId}] ========================================`)
-
-      return await persistDatasetRowsStep({
-        ...params,
-        rows,
-        summary: finalSummary,
-      })
-    },
-  })
+const datasetRowsActionScopeSchema = {
+  datasetId: z.string(),
+  sandboxId: z.string(),
+  schema: z.unknown().optional(),
 }
 
-export function createCompleteObjectTool(params: WriteRowsToolParams) {
-  const toolRowSchema = createToolRowSchema(params.schema)
-  const inputSchema = z.object({
-    data: toolRowSchema.describe("Required final object. It must match the dataset output schema exactly. This field is mandatory; do not omit it."),
-    summary: z
-      .string()
-      .optional()
-      .describe("Short summary of the completed object and why it satisfies the output schema."),
-  })
+export const replaceRowsInputSchema = z.object({
+  ...datasetRowsActionScopeSchema,
+  rows: z
+    .array(rowSchema)
+    .min(1)
+    .describe("Output dataset rows. Each row must match the dataset output schema exactly."),
+  summary: z
+    .string()
+    .optional()
+    .describe("Short summary of the completed dataset including record count and structure."),
+})
 
-  return tool({
-    description:
-      "Complete an object-mode dataset by providing the final object directly. This writes one dataset row, validates it against the output schema, and completes the dataset. Do not call this tool until the final data object is fully constructed. Never call completeObject with only a summary.",
-    inputSchema: inputSchema as any,
-    execute: async ({ data, summary }: { data: Record<string, unknown>; summary?: string }) => {
-      const finalSummary = summary || "Completed object dataset."
-      console.log(`[Dataset ${params.datasetId}] ========================================`)
-      console.log(`[Dataset ${params.datasetId}] Tool: completeObject`)
-      console.log(`[Dataset ${params.datasetId}] Summary: ${finalSummary}`)
-      console.log(`[Dataset ${params.datasetId}] ========================================`)
+export const completeObjectInputSchema = z.object({
+  ...datasetRowsActionScopeSchema,
+  data: rowSchema.describe(
+    "Required final object. It must match the dataset output schema exactly. This field is mandatory; do not omit it.",
+  ),
+  summary: z
+    .string()
+    .optional()
+    .describe("Short summary of the completed object and why it satisfies the output schema."),
+})
 
-      return await persistDatasetRowsStep({
-        ...params,
-        rows: [data],
-        summary: finalSummary,
-      })
-    },
+export const datasetRowsActionOutputSchema = z
+  .object({
+    success: z.boolean(),
+    status: z.string(),
+    rowSource: z.string(),
+    outputPath: z.string().nullable(),
+    storagePath: z.string().nullable(),
+    summary: z.string().optional(),
+    error: z.string().optional(),
+    message: z.string().optional(),
   })
-}
+  .passthrough()
+
+export const replaceRows: DomainActionDefinition<
+  typeof replaceRowsInputSchema,
+  typeof datasetRowsActionOutputSchema
+> = defineAction({
+  description:
+    "Replace the dataset output with rows provided directly as JSON objects, then validate and complete the dataset.",
+  input: replaceRowsInputSchema,
+  output: datasetRowsActionOutputSchema,
+  execute: async ({ input, runtime }) => {
+    const { datasetId, sandboxId, schema, rows, summary } = input
+    const validatedRows = z.array(createToolRowSchema(schema)).min(1).parse(rows) as Array<
+      Record<string, unknown>
+    >
+    const finalSummary = summary || `Completed dataset with ${validatedRows.length} rows.`
+
+    console.log(`[Dataset ${datasetId}] ========================================`)
+    console.log(`[Dataset ${datasetId}] Action: replaceRows`)
+    console.log(`[Dataset ${datasetId}] Rows: ${validatedRows.length}`)
+    console.log(`[Dataset ${datasetId}] Summary: ${finalSummary}`)
+    console.log(`[Dataset ${datasetId}] ========================================`)
+
+    return await persistDatasetRowsStep({
+      runtime,
+      datasetId,
+      sandboxId,
+      schema,
+      rows: validatedRows,
+      summary: finalSummary,
+    })
+  },
+})
+
+export const completeObject: DomainActionDefinition<
+  typeof completeObjectInputSchema,
+  typeof datasetRowsActionOutputSchema
+> = defineAction({
+  description:
+    "Complete an object-mode dataset by providing the final object directly. This writes one dataset row, validates it against the output schema, and completes the dataset. Do not call this action until the final data object is fully constructed. Never call completeObject with only a summary.",
+  input: completeObjectInputSchema,
+  output: datasetRowsActionOutputSchema,
+  execute: async ({ input, runtime }) => {
+    const { datasetId, sandboxId, schema, data, summary } = input
+    const validatedData = createToolRowSchema(schema).parse(data) as Record<string, unknown>
+    const finalSummary = summary || "Completed object dataset."
+
+    console.log(`[Dataset ${datasetId}] ========================================`)
+    console.log(`[Dataset ${datasetId}] Action: completeObject`)
+    console.log(`[Dataset ${datasetId}] Summary: ${finalSummary}`)
+    console.log(`[Dataset ${datasetId}] ========================================`)
+
+    return await persistDatasetRowsStep({
+      runtime,
+      datasetId,
+      sandboxId,
+      schema,
+      rows: [validatedData],
+      summary: finalSummary,
+    })
+  },
+})

@@ -27,23 +27,18 @@ ekairos create-app --demo
 
 `--demo` defaults to a supply-chain app, `--next`, `--install`, `--smoke`, `--keep-server`, and `pnpm`.
 
-Domain operations stay under the domain namespace:
-
-```powershell
-ekairos domain query "{ procurement_order: { supplier: {} } }" --baseUrl=http://localhost:3000 --admin
-```
-
-Platform-authenticated operations start with OAuth login:
+Domain operations run Platform-mediated and start with OAuth login:
 
 ```powershell
 ekairos login
 ekairos whoami
 ```
 
-After login, prefer Platform-mediated domain operations when the target is a
-registered remote application. The CLI obtains the Platform access token from
-local storage and sends the query/action to `/api/platform/domain/run`; Platform
-uses the registered domain credential for the host application.
+After login, every `ekairos domain ...` call requires `--app=<platform-app-id>`.
+The CLI obtains the Platform access token from local storage and sends the
+query/action to `/api/platform/domain/run`; Platform signs the request with the
+registered domain credential for the host application. There is no direct mode:
+the CLI never talks to a customer `/api/domain` route itself.
 
 ```powershell
 ekairos domain query "{ task_tasks: { $: { limit: 5 } } }" `

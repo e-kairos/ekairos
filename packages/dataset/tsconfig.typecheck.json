@@ -10,6 +10,7 @@
     "src/__type_tests__/dataset.query-source-runtime.typecheck.ts",
     "src/__type_tests__/dataset.query-typing.typecheck.ts",
     "src/__type_tests__/dataset.runtime.typecheck.ts",
+    "src/__type_tests__/dataset.type-schema.typecheck.ts",
     "src/__type_tests__/dataset.structure-output-api.typecheck.ts",
     "src/__type_tests__/dataset.structure-source-api.typecheck.ts"
   ],

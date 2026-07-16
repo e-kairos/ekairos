@@ -1,6 +1,15 @@
-import { createFileParseContext } from "../file/file-dataset.agent.js"
-import { readInstantFileStep } from "../file/steps.js"
-import { createTransformDatasetContext } from "../transform/transform-dataset.agent.js"
+import { lookup } from "@instantdb/admin"
+import { ContextHandle, Events } from "@ekairos/events"
+import {
+  defineReaction,
+  type ReactionDefinition,
+  type ReactionEffect,
+} from "@ekairos/reactor"
+import { executeReaction } from "@ekairos/reactor/internal"
+import { z } from "zod"
+
+import { createDatasetId } from "../id.js"
+import { datasetDomain } from "../schema.js"
 import {
   datasetGetByIdStep,
   datasetInferAndUpdateSchemaStep,
@@ -10,32 +19,25 @@ import {
 import {
   getDatasetOutputPath,
   getDatasetScriptsDir,
-  getDatasetResourcesDir,
+  getDatasetSourcesDir,
   getDatasetStandardDirs,
 } from "../datasetFiles.js"
 import { registerDatasetAgentMaterializers } from "./agentMaterializers.js"
 import {
   buildFileDefaultInstructions,
-  buildRawResourceInstructions,
   buildTransformInstructions,
 } from "./instructions.js"
 import {
   createOrUpdateDatasetMetadata,
   materializeRowsToDataset,
-  uploadInlineTextResource,
+  uploadInlineTextSource,
 } from "./persistence.js"
-import { materializeQueryResource } from "./materializeQuery.js"
-import {
-  readDatasetSandboxTextFileStep,
-  runDatasetSandboxCommandStep,
-  writeDatasetSandboxFilesStep,
-  writeDatasetSandboxTextFilesStep,
-} from "../sandbox/steps.js"
+import { materializeQuerySource } from "./materializeQuery.js"
 import type {
   AnyDatasetRuntime,
   DatasetBuilderState,
   DatasetSchemaInput,
-  InternalDatasetResource,
+  InternalDatasetSource,
 } from "./types.js"
 import type { SandboxState } from "../file/file-dataset.types.js"
 import type { FilePreviewContext } from "../file/filepreview.types.js"
@@ -43,44 +45,9 @@ import type {
   TransformSandboxState,
   TransformInputPreviewContext,
 } from "../transform/transform-dataset.types.js"
-import type { SandboxSession } from "@ekairos/sandbox"
 
 function makeIntermediateDatasetId(targetDatasetId: string, resourceKind: string, index: number) {
   return `${targetDatasetId}__${resourceKind}_${index}`
-}
-
-function normalizeParsedTextRows(value: unknown): any[] {
-  if (Array.isArray(value)) {
-    return value.map((item) => (item && typeof item === "object" ? item : { value: item }))
-  }
-  if (value && typeof value === "object") return [value]
-  return [{ value }]
-}
-
-function materializeRawTextRows(resource: Extract<InternalDatasetResource, { kind: "text" }>): any[] {
-  const text = String(resource.text ?? "")
-  const mimeType = String(resource.mimeType ?? "").toLowerCase()
-  const name = String(resource.name ?? "").toLowerCase()
-  const shouldParseJson =
-    mimeType.includes("json") || name.endsWith(".json") || name.endsWith(".jsonl")
-
-  if (shouldParseJson) {
-    try {
-      if (name.endsWith(".jsonl")) {
-        const rows = text
-          .split(/\r?\n/g)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-        return rows.flatMap((row) => normalizeParsedTextRows(row))
-      }
-      return normalizeParsedTextRows(JSON.parse(text))
-    } catch {
-      return [{ text }]
-    }
-  }
-
-  return [{ text }]
 }
 
 function parseContentDispositionFileName(value: unknown): string {
@@ -108,14 +75,14 @@ function isPdfContentDisposition(value: unknown): boolean {
   return text.includes("application/pdf") || text.includes(".pdf")
 }
 
-function sanitizeResourceFileName(value: unknown, fallback: string): string {
+function sanitizeSourceFileName(value: unknown, fallback: string): string {
   const name = String(value ?? "").trim() || fallback
   const cleaned = name.replace(/[\\/:"*?<>|]+/g, "_").replace(/\s+/g, "_").slice(0, 120)
   return cleaned || fallback
 }
 
 function sanitizePdfFileName(value: unknown, fallback: string): string {
-  const cleaned = sanitizeResourceFileName(value, fallback)
+  const cleaned = sanitizeSourceFileName(value, fallback)
   return cleaned.toLowerCase().endsWith(".pdf") ? cleaned : `${cleaned}.pdf`
 }
 
@@ -147,11 +114,18 @@ function parseJsonlDataRows(content: string): any[] {
     .filter((row) => row && typeof row === "object" && !Array.isArray(row))
 }
 
-async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntime>(
+async function tryMaterializeRawPdfFileSource<Runtime extends AnyDatasetRuntime>(
   state: DatasetBuilderState<Runtime>,
-  resource: Extract<InternalDatasetResource, { kind: "file" }>,
+  resource: Extract<InternalDatasetSource, { kind: "file" }>,
   targetDatasetId: string,
 ): Promise<string | null> {
+  const { readInstantFileStep } = await import("../file/steps.js")
+  const {
+    readDatasetSandboxTextFileStep,
+    runDatasetSandboxCommandStep,
+    writeDatasetSandboxFilesStep,
+    writeDatasetSandboxTextFilesStep,
+  } = await import("../sandbox/steps.js")
   const file = await readInstantFileStep({ runtime: state.runtime, fileId: resource.fileId })
   if (!isPdfContentDisposition(file.contentDisposition)) return null
 
@@ -161,13 +135,12 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
     parseContentDispositionFileName(file.contentDisposition),
     `${resource.fileId}.pdf`,
   )
-  const resourcePath = `${getDatasetResourcesDir(targetDatasetId)}/${fileName}`
+  const resourcePath = `${getDatasetSourcesDir(targetDatasetId)}/${fileName}`
   const scriptPath = `${getDatasetScriptsDir(targetDatasetId)}/extract_pdf_text.py`
 
   await runDatasetSandboxCommandStep({
     runtime: state.runtime,
     sandboxId,
-    sandbox: state.sandbox,
     cmd: "mkdir",
     args: ["-p", ...getDatasetStandardDirs(targetDatasetId)],
   })
@@ -175,14 +148,12 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   await writeDatasetSandboxFilesStep({
     runtime: state.runtime,
     sandboxId,
-    sandbox: state.sandbox,
     files: [{ path: resourcePath, contentBase64: file.contentBase64 }],
   })
 
   const install = await runDatasetSandboxCommandStep({
     runtime: state.runtime,
     sandboxId,
-    sandbox: state.sandbox,
     cmd: "python",
     args: ["-m", "pip", "install", "pypdf", "--quiet"],
   })
@@ -193,7 +164,6 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   await writeDatasetSandboxTextFilesStep({
     runtime: state.runtime,
     sandboxId,
-    sandbox: state.sandbox,
     files: [
       {
         path: scriptPath,
@@ -237,7 +207,6 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   const extraction = await runDatasetSandboxCommandStep({
     runtime: state.runtime,
     sandboxId,
-    sandbox: state.sandbox,
     cmd: "python",
     args: [scriptPath, resourcePath, outputPath, resource.fileId, fileName],
   })
@@ -248,7 +217,6 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   const output = await readDatasetSandboxTextFileStep({
     runtime: state.runtime,
     sandboxId,
-    sandbox: state.sandbox,
     path: outputPath,
   })
   const rows = parseJsonlDataRows(output.content)
@@ -270,45 +238,29 @@ async function tryMaterializeRawPdfFileResource<Runtime extends AnyDatasetRuntim
   return targetDatasetId
 }
 
-async function materializeRawTextResource<Runtime extends AnyDatasetRuntime>(
-  state: DatasetBuilderState<Runtime>,
-  resource: Extract<InternalDatasetResource, { kind: "text" }>,
-  targetDatasetId: string,
-) {
-  const rows = materializeRawTextRows(resource)
-  await materializeRowsToDataset(state.runtime, {
-    datasetId: targetDatasetId,
-    sandboxId: state.sandboxId,
-    title: state.title ?? resource.name ?? targetDatasetId,
-    instructions: state.instructions,
-    contextId: state.contextId ?? "",
-    rows,
-    schema: state.outputSchema,
-    first: state.first,
-  })
-  return targetDatasetId
-}
-
-async function writePreparedFileResourceToSandbox<Runtime extends AnyDatasetRuntime>(params: {
+async function writePreparedFileSourceToSandbox<Runtime extends AnyDatasetRuntime>(params: {
   runtime: Runtime
   sandboxId: string
-  sandbox?: SandboxSession
   datasetId: string
   fileId: string
   filename?: string
 }) {
+  const { readInstantFileStep } = await import("../file/steps.js")
+  const {
+    runDatasetSandboxCommandStep,
+    writeDatasetSandboxFilesStep,
+  } = await import("../sandbox/steps.js")
   const file = await readInstantFileStep({ runtime: params.runtime, fileId: params.fileId })
   const contentDispositionName = parseContentDispositionFileName(file.contentDisposition)
-  const fileName = sanitizeResourceFileName(
+  const fileName = sanitizeSourceFileName(
     params.filename ?? contentDispositionName,
     `${params.fileId}.bin`,
   )
-  const resourcePath = `${getDatasetResourcesDir(params.datasetId)}/${fileName}`
+  const resourcePath = `${getDatasetSourcesDir(params.datasetId)}/${fileName}`
 
   await runDatasetSandboxCommandStep({
     runtime: params.runtime,
     sandboxId: params.sandboxId,
-    sandbox: params.sandbox,
     cmd: "mkdir",
     args: ["-p", ...getDatasetStandardDirs(params.datasetId)],
   })
@@ -316,7 +268,6 @@ async function writePreparedFileResourceToSandbox<Runtime extends AnyDatasetRunt
   await writeDatasetSandboxFilesStep({
     runtime: params.runtime,
     sandboxId: params.sandboxId,
-    sandbox: params.sandbox,
     files: [{ path: resourcePath, contentBase64: file.contentBase64 }],
   })
 
@@ -329,23 +280,7 @@ function resolveDatasetSandboxId<Runtime extends AnyDatasetRuntime>(
 ) {
   const sandboxId = String(state.sandboxId ?? "").trim()
   if (sandboxId) return sandboxId
-  if (state.sandbox?.id) return state.sandbox.id
-
-  throw new Error("dataset_sandbox_required")
-}
-
-export async function resolveDatasetAgentDurable(requestedDurable?: boolean): Promise<boolean> {
-  if (!requestedDurable) return false
-
-  try {
-    const { getWorkflowMetadata } = await import("workflow")
-    const workflowRunId = getWorkflowMetadata?.()?.workflowRunId
-    if (workflowRunId) return false
-  } catch {
-    // Outside Workflow runtime there is no active metadata, so honor the caller.
-  }
-
-  return true
+  throw new Error("dataset_sandbox_id_required")
 }
 
 type PreparedFileDatasetContext = {
@@ -379,6 +314,115 @@ type DatasetContextInitialization = PreparedDatasetContext & {
   instructions?: string
 }
 
+const datasetMaterializationOutputSchema = z
+  .object({
+    completed: z.literal(true),
+    action: z.string().optional(),
+    summary: z.string().optional(),
+    output: z.any().optional(),
+  })
+  .passthrough()
+
+type FileMaterializationReactionContext = Omit<PreparedFileDatasetContext, "kind"> & {
+  instructions: string
+}
+
+type TransformMaterializationReactionContext = Omit<PreparedTransformDatasetContext, "kind"> & {
+  instructions: string
+  sources: unknown[]
+}
+
+export type DatasetTriggerEventParams = {
+  mode: "file" | "transform"
+  prompt: string
+  targetDatasetId?: string
+  sourceDatasetIds?: string[]
+  fileId?: string
+}
+
+export function createDatasetTriggerEvent(params: DatasetTriggerEventParams) {
+  const draft = datasetDomain.events.materializationRequested({
+    mode: params.mode,
+    prompt: params.prompt,
+  })
+  return draft.link({
+    ...(params.targetDatasetId
+      ? { target: lookup("datasetId", params.targetDatasetId) }
+      : {}),
+    ...(params.sourceDatasetIds?.length
+      ? {
+          sources: params.sourceDatasetIds.map(
+            (datasetId) => lookup("datasetId", datasetId),
+          ),
+        }
+      : {}),
+    ...(params.fileId ? { file: params.fileId } : {}),
+  })
+}
+
+async function runDatasetMaterializationReaction<
+  Runtime extends AnyDatasetRuntime,
+  Context,
+  Effect extends ReactionEffect,
+>(params: {
+  runtime: Runtime
+  contextKey: string
+  trigger: DatasetTriggerEventParams
+  initialContext: Context
+  definition: ReactionDefinition<
+    Context,
+    typeof datasetDomain,
+    typeof datasetDomain.events.materializationRequested,
+    Effect
+  >
+  parentSessionId?: string
+}): Promise<Effect> {
+  const prepared = await prepareDatasetMaterializationReactionStep({
+    runtime: params.runtime,
+    contextKey: params.contextKey,
+    trigger: params.trigger,
+    initialContext: params.initialContext,
+  })
+  const context = new ContextHandle<Context>(params.runtime, prepared.context)
+
+  return await executeReaction(
+    params.runtime,
+    context,
+    prepared.triggerEvent,
+    params.definition,
+    { parentSessionId: params.parentSessionId },
+  )
+}
+
+export async function prepareDatasetMaterializationReactionStep<
+  Runtime extends AnyDatasetRuntime,
+  Context,
+>(params: {
+  runtime: Runtime
+  contextKey: string
+  trigger: DatasetTriggerEventParams
+  initialContext: Context
+}) {
+  "use step"
+
+  const context = await ContextHandle.create<Context>(params.runtime, {
+    key: params.contextKey,
+    content: params.initialContext,
+  })
+
+  const triggerEvent = await Events(params.runtime as any).emit(createDatasetTriggerEvent(params.trigger), {
+    id: createDatasetId(),
+    channel: "web",
+    contextId: context.id,
+    createdAt: new Date(),
+  })
+
+  return Object.freeze({
+    context: context.context,
+    triggerEvent,
+  })
+}
+
 export async function initializeDatasetStep<Runtime extends AnyDatasetRuntime>(params: {
   runtime: Runtime
   datasetId: string
@@ -406,14 +450,14 @@ export async function initializeDatasetStep<Runtime extends AnyDatasetRuntime>(p
   }
 }
 
-export async function prepareDatasetResourcesStep<Runtime extends AnyDatasetRuntime>(
+export async function prepareDatasetSourcesStep<Runtime extends AnyDatasetRuntime>(
   params:
     | {
         kind: "file"
         runtime: Runtime
         datasetId: string
         sandboxId: string
-        resource: Extract<InternalDatasetResource, { kind: "file" | "text" }>
+        resource: Extract<InternalDatasetSource, { kind: "file" | "text" }>
         schema?: DatasetSchemaInput
       }
     | {
@@ -431,7 +475,7 @@ export async function prepareDatasetResourcesStep<Runtime extends AnyDatasetRunt
     const fileId =
       params.resource.kind === "file"
         ? params.resource.fileId
-        : await uploadInlineTextResource(params.runtime, params.datasetId, params.resource)
+        : await uploadInlineTextSource(params.runtime, params.datasetId, params.resource)
 
     return {
       kind: "file",
@@ -539,20 +583,20 @@ export async function completeDatasetStep<Runtime extends AnyDatasetRuntime>(par
   }
 }
 
-export async function materializeSingleFileLikeResource<Runtime extends AnyDatasetRuntime>(
+export async function materializeSingleFileLikeSource<Runtime extends AnyDatasetRuntime>(
   state: DatasetBuilderState<Runtime>,
-  resource: Extract<InternalDatasetResource, { kind: "file" | "text" }>,
+  resource: Extract<InternalDatasetSource, { kind: "file" | "text" }>,
   targetDatasetId: string,
 ) {
   if (resource.kind === "file" && !state.outputSchema) {
-    const materializedPdf = await tryMaterializeRawPdfFileResource(state, resource, targetDatasetId)
+    const materializedPdf = await tryMaterializeRawPdfFileSource(state, resource, targetDatasetId)
     if (materializedPdf) return materializedPdf
   }
 
   const sandboxId = resolveDatasetSandboxId(state, targetDatasetId)
 
-  if (!state.reactor) {
-    throw new Error("dataset_reactor_required")
+  if (!state.engine) {
+    throw new Error("dataset_engine_required")
   }
 
   await initializeDatasetStep({
@@ -565,7 +609,7 @@ export async function materializeSingleFileLikeResource<Runtime extends AnyDatas
     schema: state.outputSchema,
   })
 
-  const prepared = await prepareDatasetResourcesStep({
+  const prepared = await prepareDatasetSourcesStep({
     kind: "file",
     runtime: state.runtime,
     datasetId: targetDatasetId,
@@ -576,10 +620,9 @@ export async function materializeSingleFileLikeResource<Runtime extends AnyDatas
   if (prepared.kind !== "file") {
     throw new Error("dataset_context_kind_mismatch:file")
   }
-  const preparedFile = await writePreparedFileResourceToSandbox({
+  const preparedFile = await writePreparedFileSourceToSandbox({
     runtime: state.runtime,
     sandboxId,
-    sandbox: state.sandbox,
     datasetId: targetDatasetId,
     fileId: prepared.fileId,
     filename: prepared.filename,
@@ -597,105 +640,165 @@ export async function materializeSingleFileLikeResource<Runtime extends AnyDatas
     throw new Error("dataset_context_kind_mismatch:file")
   }
 
-  const parseContext = createFileParseContext<any>(context.fileId, {
+  const initialContext: FileMaterializationReactionContext = {
     datasetId: context.datasetId,
-    instructions: context.instructions,
-    reactor: state.reactor as any,
+    fileId: context.fileId,
+    instructions: context.instructions ?? "",
     sandboxId: context.sandboxId,
     sandboxState: context.sandboxState,
     filePreview: context.filePreview,
     schema: context.schema,
     filename: context.filename,
     mediaType: context.mediaType,
-  })
-
-  await parseContext.parse(state.runtime as any, {
-    durable: await resolveDatasetAgentDurable(state.durable),
-    prompt: context.prompt,
-    initialContent: {
-      datasetId: context.datasetId,
-      fileId: context.fileId,
-      instructions: context.instructions ?? "",
-      sandboxId: context.sandboxId,
-      sandboxState: context.sandboxState,
-      filePreview: context.filePreview,
-      schema: context.schema,
-      filename: context.filename,
-      mediaType: context.mediaType,
+  }
+  const definition = defineReaction<
+    typeof datasetDomain.events.materializationRequested,
+    FileMaterializationReactionContext,
+    typeof datasetDomain
+  >(
+    datasetDomain.events.materializationRequested,
+    {
+      key: `dataset.file.materialize:${targetDatasetId}`,
+      scope: datasetDomain,
+      engine: state.engine,
+      sandbox: sandboxId,
     },
+    async reaction => {
+      const input = reaction.context.content
+      const prepared = await reaction.given(reaction.trigger).action(
+        datasetDomain.actions.prepareFileMaterialization,
+        {
+          contextId: reaction.context.id,
+          sessionId: reaction.id,
+          sourceEventId: reaction.trigger.id,
+          datasetId: input.datasetId,
+          fileId: input.fileId,
+          sandboxId: input.sandboxId,
+          instructions: input.instructions,
+          sandboxState: input.sandboxState,
+          filePreview: input.filePreview,
+          schema: input.schema,
+          filename: input.filename,
+          mediaType: input.mediaType,
+        },
+      )
+      const outputPath = (prepared.payload.sandboxState as SandboxState).outputPath
+      const coreActions = [
+        datasetDomain.actions.executeCommand.scope({
+          datasetId: input.datasetId,
+          sandboxId: input.sandboxId,
+          contextId: reaction.context.id,
+          sessionId: reaction.id,
+        }),
+        datasetDomain.actions.completeDataset.scope({
+          datasetId: input.datasetId,
+          sandboxId: input.sandboxId,
+          outputPath,
+        }),
+        datasetDomain.actions.clearDataset.scope({
+          datasetId: input.datasetId,
+          sandboxId: input.sandboxId,
+        }),
+        datasetDomain.actions.defineNotation.scope({
+          datasetId: input.datasetId,
+        }),
+      ] as const
+      const current = reaction.given(prepared)
+      const materialized = input.schema?.schema
+        ? await current.agent({
+            instruction: prepared.payload.instructions,
+            output: datasetMaterializationOutputSchema,
+            actions: coreActions,
+            maxRounds: 20,
+          })
+        : await current.agent({
+            instruction: prepared.payload.instructions,
+            output: datasetMaterializationOutputSchema,
+            actions: [
+              ...coreActions,
+              datasetDomain.actions.generateSchema.scope({
+                datasetId: input.datasetId,
+                fileId: input.fileId,
+              }),
+            ],
+            maxRounds: 20,
+          })
+      const target = reaction.trigger.links.target
+      if (!target) throw new Error("dataset_materialization_target_link_required")
+      return await reaction.given(materialized).emit(
+        datasetDomain.events.materialized({
+          datasetId: input.datasetId,
+          status: "materialized",
+        }).link({ target }),
+      )
+    },
+  )
+
+  await runDatasetMaterializationReaction({
+    runtime: state.runtime,
+    contextKey: `dataset:${targetDatasetId}`,
+    trigger: {
+      mode: "file",
+      prompt: context.prompt,
+      targetDatasetId,
+      fileId: context.fileId,
+    },
+    initialContext,
+    definition,
+    parentSessionId: state.parentSessionId,
   })
 
   return targetDatasetId
-}
-
-async function normalizeResourceToDatasetId<Runtime extends AnyDatasetRuntime>(
-  state: DatasetBuilderState<Runtime>,
-  resource: InternalDatasetResource,
-  targetDatasetId: string,
-  resourceIndex: number,
-) {
-  if (resource.kind === "dataset") {
-    return resource.datasetId
-  }
-
-  const intermediateDatasetId = makeIntermediateDatasetId(targetDatasetId, resource.kind, resourceIndex)
-
-  if (resource.kind === "query") {
-    await materializeQueryResource(state.runtime, resource, {
-      datasetId: intermediateDatasetId,
-      sandboxId: state.sandboxId,
-      title: resource.title,
-      first: false,
-      contextId: state.contextId ?? "",
-    })
-    return intermediateDatasetId
-  }
-
-  if (resource.kind === "text") {
-    await materializeRawTextResource(
-      {
-        ...state,
-        outputSchema: undefined,
-        first: false,
-        instructions: buildRawResourceInstructions(resource.kind),
-        title: resource.name ?? state.title,
-      },
-      resource,
-      intermediateDatasetId,
-    )
-    return intermediateDatasetId
-  }
-
-  if (resource.kind === "context") {
-    throw new Error("dataset_context_resource_must_be_resolved_before_materialization")
-  }
-
-  await materializeSingleFileLikeResource(
-    {
-      ...state,
-      outputSchema: undefined,
-      first: false,
-      instructions: buildRawResourceInstructions(resource.kind),
-    },
-    resource,
-    intermediateDatasetId,
-  )
-  return intermediateDatasetId
 }
 
 export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntime>(
   state: DatasetBuilderState<Runtime>,
   targetDatasetId: string,
 ) {
-  if (!state.reactor) {
-    throw new Error("dataset_reactor_required")
+  const sandboxId = resolveDatasetSandboxId(state, targetDatasetId)
+
+  if (!state.engine) {
+    throw new Error("dataset_engine_required")
   }
 
-  const sandboxId = resolveDatasetSandboxId(state, targetDatasetId)
   const stateWithSandbox = { ...state, sandboxId }
+  const sourceInputs = stateWithSandbox.sources
+  const sources: any[] = [...(stateWithSandbox.sourceDescriptors ?? [])]
 
-  const inputDatasetIds = (stateWithSandbox.contextResources ?? []).map((resource, index) =>
-    String((resource as any).datasetId ?? resource.key ?? `resource_${index + 1}`),
+  for (let index = 0; index < sources.length; index += 1) {
+    const record = sources[index] as Record<string, unknown>
+    if (record.kind !== "query") continue
+
+    const source = sourceInputs[index]
+    if (!source || source.kind !== "query") {
+      throw new Error(`dataset_query_source_mismatch:${String(record.key ?? index)}`)
+    }
+
+    const intermediateDatasetId = makeIntermediateDatasetId(targetDatasetId, "query", index)
+    await materializeQuerySource(stateWithSandbox.runtime, source, {
+      datasetId: intermediateDatasetId,
+      sandboxId,
+      title: source.title,
+      first: false,
+      contextId: stateWithSandbox.contextId ?? "",
+    })
+
+    sources[index] = {
+      key: record.key,
+      kind: "dataset",
+      name: record.name,
+      description: record.description,
+      datasetId: intermediateDatasetId,
+    }
+  }
+
+  const inputDatasetIds = sources.map((source, index) =>
+    String((source as any).datasetId ?? source.key ?? `source_${index + 1}`),
+  )
+  const linkedSourceDatasetIds = sources.flatMap(source =>
+    (source as any).kind === "dataset" && typeof (source as any).datasetId === "string"
+      ? [(source as any).datasetId as string]
+      : [],
   )
 
   const transformSchema =
@@ -743,37 +846,107 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
     throw new Error("dataset_context_kind_mismatch:transform")
   }
 
-  const transformContext = createTransformDatasetContext<any>({
+  const initialContext: TransformMaterializationReactionContext = {
+    datasetId: context.datasetId,
     inputDatasetIds: context.inputDatasetIds,
     outputSchema: context.outputSchema,
-    instructions: context.instructions,
-    datasetId: context.datasetId,
-    reactor: stateWithSandbox.reactor as any,
+    instructions: context.instructions ?? "",
     sandboxId: context.sandboxId,
     sandboxState: context.sandboxState,
     inputPreviews: context.inputPreviews,
-    contextResources: stateWithSandbox.contextResources ?? [],
-  })
-
-  await transformContext.transform(stateWithSandbox.runtime as any, {
-    durable: await resolveDatasetAgentDurable(stateWithSandbox.durable),
-    prompt: context.prompt,
-    initialContent: {
-      datasetId: context.datasetId,
-      inputDatasetIds: context.inputDatasetIds,
-      outputSchema: context.outputSchema,
-      instructions: context.instructions,
-      sandboxId: context.sandboxId,
-      sandboxState: context.sandboxState,
-      inputPreviews: context.inputPreviews,
-      contextResources: stateWithSandbox.contextResources ?? [],
+    sources,
+  }
+  const definition = defineReaction<
+    typeof datasetDomain.events.materializationRequested,
+    TransformMaterializationReactionContext,
+    typeof datasetDomain
+  >(
+    datasetDomain.events.materializationRequested,
+    {
+      key: `dataset.transform.materialize:${targetDatasetId}`,
+      scope: datasetDomain,
+      engine: state.engine,
+      sandbox: sandboxId,
     },
+    async reaction => {
+      const input = reaction.context.content
+      const prepared = await reaction.given(reaction.trigger).action(
+        datasetDomain.actions.prepareTransformMaterialization,
+        {
+          datasetId: input.datasetId,
+          inputDatasetIds: input.inputDatasetIds,
+          outputSchema: input.outputSchema,
+          instructions: input.instructions,
+          sandboxId: input.sandboxId,
+          sandboxState: input.sandboxState,
+          inputPreviews: input.inputPreviews,
+          sources: input.sources,
+        },
+      )
+      const materialized = await reaction.given(prepared).agent({
+        instruction: prepared.payload.instructions,
+        output: datasetMaterializationOutputSchema,
+        actions: [
+          datasetDomain.actions.completeObject.scope({
+            datasetId: input.datasetId,
+            sandboxId: input.sandboxId,
+            schema: input.outputSchema,
+          }),
+          datasetDomain.actions.replaceRows.scope({
+            datasetId: input.datasetId,
+            sandboxId: input.sandboxId,
+            schema: input.outputSchema,
+          }),
+          datasetDomain.actions.executeCommand.scope({
+            datasetId: input.datasetId,
+            sandboxId: input.sandboxId,
+            contextId: reaction.context.id,
+            sessionId: reaction.id,
+            sources: input.sources as any[],
+          }),
+          datasetDomain.actions.completeDataset.scope({
+            datasetId: input.datasetId,
+            sandboxId: input.sandboxId,
+          }),
+          datasetDomain.actions.clearDataset.scope({
+            datasetId: input.datasetId,
+            sandboxId: input.sandboxId,
+          }),
+          datasetDomain.actions.defineNotation.scope({
+            datasetId: input.datasetId,
+          }),
+        ],
+        maxRounds: 20,
+      })
+      const target = reaction.trigger.links.target
+      if (!target) throw new Error("dataset_materialization_target_link_required")
+      return await reaction.given(materialized).emit(
+        datasetDomain.events.materialized({
+          datasetId: input.datasetId,
+          status: "materialized",
+        }).link({ target }),
+      )
+    },
+  )
+
+  await runDatasetMaterializationReaction({
+    runtime: stateWithSandbox.runtime,
+    contextKey: `dataset:${targetDatasetId}`,
+    trigger: {
+      mode: "transform",
+      prompt: context.prompt,
+      targetDatasetId,
+      sourceDatasetIds: linkedSourceDatasetIds,
+    },
+    initialContext,
+    definition,
+    parentSessionId: stateWithSandbox.parentSessionId,
   })
 
   return targetDatasetId
 }
 
 registerDatasetAgentMaterializers({
-  materializeSingleFileLikeResource,
+  materializeSingleFileLikeSource,
   materializeDerivedDataset,
 })

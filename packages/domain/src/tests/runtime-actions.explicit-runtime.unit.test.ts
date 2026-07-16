@@ -19,18 +19,16 @@ describe("runtime action explicit runtime instance", () => {
     let explicitDomain: any;
     explicitDomain = baseExplicitDomain.withActions({
       normalizeTitle: defineDomainAction({
-        name: "explicit.task.normalizeTitle",
         input: z.object({ title: z.string() }),
         output: z.object({ title: z.string(), runtimeCall: z.number() }),
-        async execute({ input, runtime }) {
+        async execute({ input, domain }) {
             return {
             title: String(input.title).trim(),
-            runtimeCall: runtime.db.runtimeCall,
+            runtimeCall: domain.db.runtimeCall,
           };
         },
       }),
       createTask: defineDomainAction({
-        name: "explicit.task.create",
         input: z.object({ title: z.string() }),
         output: z.object({
           title: z.string(),
@@ -38,12 +36,12 @@ describe("runtime action explicit runtime instance", () => {
           parentRuntimeCall: z.number(),
           nestedRuntimeCall: z.number(),
         }),
-        async execute({ runtime, input }) {
-            const normalized = await runtime.actions.normalizeTitle({ title: input.title });
+        async execute({ runtime, domain, input }) {
+            const normalized = await domain.actions.normalizeTitle({ title: input.title });
           return {
             title: normalized.title,
             orgId: runtime.env.orgId,
-            parentRuntimeCall: runtime.db.runtimeCall,
+            parentRuntimeCall: domain.db.runtimeCall,
             nestedRuntimeCall: normalized.runtimeCall,
           };
         },

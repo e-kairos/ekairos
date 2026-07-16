@@ -89,8 +89,9 @@ export async function startPlatformRuntime(options: CreateChannelsOptions): Prom
     adapters[platform] = factory(config as AnyRecord);
   }
 
-  const state = new InstantStateAdapter(options.db);
-  const store = new InstantChannelMessageStore(options.db);
+  const db = await options.runtime.db();
+  const state = new InstantStateAdapter(db);
+  const store = new InstantChannelMessageStore(db);
 
   const bot = new ChatCtor({
     userName: options.userName,
@@ -139,6 +140,14 @@ export async function startPlatformRuntime(options: CreateChannelsOptions): Prom
             contextId,
           }),
         );
+      },
+      attachEvent: async (eventId: string) => {
+        await db.transact([
+          db.tx.channel_messages[inboundMessage.id].link({
+            event: eventId,
+            context: contextId,
+          }),
+        ]);
       },
     };
 

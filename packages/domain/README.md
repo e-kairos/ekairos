@@ -33,12 +33,13 @@ If you already have an Instant platform token, provision the app and write `.env
 ekairos create-app my-app --next --instantToken=$INSTANT_PERSONAL_ACCESS_TOKEN
 ```
 
-Then run it and inspect it:
+Then register it on the Ekairos Platform and inspect it Platform-mediated
+(`ekairos login` first; there is no direct CLI mode against the app route):
 
 ```bash
-ekairos domain inspect --baseUrl=http://localhost:3000 --admin --pretty
-ekairos domain "supplyChain.order.launch" "{ reference: 'PO-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }" --baseUrl=http://localhost:3000 --admin --pretty
-ekairos domain query "{ procurement_order: { supplier: {}, stockItems: {}, shipments: { inspections: {} } } }" --baseUrl=http://localhost:3000 --admin --pretty
+ekairos domain introspect --app=<platform-app-id> --pretty
+ekairos domain action "supplyChain.order.launch" "{ reference: 'PO-7842', supplierName: 'Marula Components', sku: 'DRV-2048' }" --app=<platform-app-id> --pretty
+ekairos domain query "{ procurement_order: { supplier: {}, stockItems: {}, shipments: { inspections: {} } } }" --app=<platform-app-id> --pretty
 ```
 
 ## Next.js Route
@@ -157,6 +158,39 @@ export async function runWorkflow() {
 - Keep workflow orchestration above actions.
 - Use `DOMAIN.md` plus `domain.contextString()` when an AI agent needs the model explained.
 
+## Domain Event Drafts
+
+Domain events declare a Zod payload and optional links to entities in the composed
+Instant schema. Registering an event adds pure constructors to `domain.events`;
+constructing a draft never writes to the database.
+
+```ts
+const orderSubmitted = defineEvent({
+  payload: z.object({ orderId: z.string() }),
+  links: {
+    order: { on: "orders_orders", has: "one" },
+    lines: { on: "orders_lines", has: "many" },
+  },
+});
+
+const ordersDomain = ordersSchema.withEvents({ orderSubmitted });
+const draft = ordersDomain.events.orderSubmitted({ orderId: "ord_1" })
+  .link({ order: "ord_1", lines: ["line_1", "line_2"] });
+
+// The callable is also a reflective trigger definition.
+ordersDomain.events.orderSubmitted.payload;
+ordersDomain.events.orderSubmitted.links;
+ordersDomain.events.orderSubmitted.physicalLinks;
+ordersDomain.events.orderSubmitted.kind;
+```
+
+Drafts are immutable and carry parsed payload, logical links, event identity, and
+the generated physical Instant link metadata required by an emitter. Link values
+match Instant `LinkParams`: `one` accepts a string, while `many` accepts a string
+or string array. Constructors and their metadata are immutable, and every draft
+references the constructor's exact frozen `definition`. Persistence belongs to an
+emitter, not the domain runtime.
+
 ## Public And Full Domains
 
 Use normal domain composition to split browser-visible schema from server/runtime
@@ -241,12 +275,10 @@ configure Instant permissions for actual data access.
 The CLI accepts JSON5, `@file`, and stdin:
 
 ```bash
-ekairos domain query "{ tasks: { $: { limit: 5 } } }" --admin
-ekairos domain query @query.json5 --admin
-cat query.json5 | ekairos domain query - --admin
+ekairos domain query "{ tasks: { $: { limit: 5 } } }" --app=<platform-app-id>
+ekairos domain query @query.json5 --app=<platform-app-id>
+cat query.json5 | ekairos domain query - --app=<platform-app-id>
 ```
-
-Add `--meta` when you need to know whether a query used the local client runtime path or the server route.
 
 ## Tests
 

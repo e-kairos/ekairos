@@ -1,0 +1,43 @@
+{
+  "name": "@ekairos/lab",
+  "version": "1.22.0",
+  "description": "Ekairos Lab - coding reactions built on context, reactor, and sandbox",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e-kairos/ekairos.git",
+    "directory": "packages/lab"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ekairos/reactor": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@ekairos/tsconfig": "workspace:*",
+    "@types/node": "^24.5.0",
+    "typescript": "^5.9.2"
+  }
+}

@@ -1,12 +1,15 @@
 import { domain } from "@ekairos/domain";
-import { eventsDomain } from "@ekairos/events/schema";
+import { datasetDomain } from "@ekairos/dataset/domain";
+import { contextDomain } from "@ekairos/events/schema";
 
 const appDomain = domain("context-elements")
-  .includes(eventsDomain)
-  .schema({
+  .includes(contextDomain)
+  .includes(datasetDomain)
+  .withSchema({
     entities: {},
     links: {},
     rooms: {},
-  });
+  })
+  .withActions(datasetDomain.actions);
 
 export default appDomain;

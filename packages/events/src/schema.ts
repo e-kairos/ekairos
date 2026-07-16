@@ -1,209 +1,105 @@
-import { i } from "@instantdb/core"
 import { domain } from "@ekairos/domain"
+import { i } from "@instantdb/core"
 
-const eventSchema = {
-    entities: {
-        event_contexts: i.entity({
-            createdAt: i.date(),
-            updatedAt: i.date().optional(),
-            key: i.string().optional().indexed().unique(),
-            name: i.string().optional(),
-            status: i.string().optional().indexed(), // open_idle | open_streaming | closed
-            content: i.any().optional(),
-            description: i.string().optional(),
-            goal: i.string().optional(),
-            resources: i.any().optional(),
-            reactor: i.json().optional(),
-        }),
-        event_items: i.entity({
-            channel: i.string().indexed(),
-            createdAt: i.date().indexed(),
-            kind: i.string().optional().indexed(),
-            domain: i.string().optional().indexed(),
-            name: i.string().optional().indexed(),
-            key: i.string().optional().indexed().unique(),
-            type: i.string().optional().indexed(),
-            data: i.json().optional(),
-            content: i.any().optional(),
-            status: i.string().optional().indexed(),
-        }),
-        event_executions: i.entity({
-            createdAt: i.date(),
-            updatedAt: i.date().optional(),
-            status: i.string().optional().indexed(), // executing | completed | failed
-            workflowRunId: i.string().optional().indexed(),
-            activeStreamId: i.string().optional().indexed(),
-            activeStreamClientId: i.string().optional().indexed(),
-            lastStreamId: i.string().optional().indexed(),
-            lastStreamClientId: i.string().optional().indexed(),
-        }),
-        event_steps: i.entity({
-            createdAt: i.date().indexed(),
-            updatedAt: i.date().optional(),
-            status: i.string().optional().indexed(), // running | completed | failed
-            iteration: i.number().indexed(),
-            errorText: i.string().optional(),
-            streamId: i.string().optional().indexed(),
-            streamClientId: i.string().optional().indexed(),
-            streamStartedAt: i.date().optional().indexed(),
-            streamFinishedAt: i.date().optional().indexed(),
-            streamAbortReason: i.string().optional(),
-        }),
-        event_parts: i.entity({
-            key: i.string().unique().indexed(), // `${stepId}:${idx}`
-            stepId: i.string().indexed(),
-            idx: i.number().indexed(),
-            type: i.string().optional().indexed(), // canonical part.type
-            part: i.json().optional(),
-            metadata: i.json().optional(), // provider/model/runtime metadata only
-            updatedAt: i.date().optional(),
-        }),
-        event_trace_events: i.entity({
-            key: i.string().unique().indexed(), // `${workflowRunId}:${eventId}`
-            workflowRunId: i.string().indexed(),
-            seq: i.number().indexed(),
-            eventId: i.string().indexed(),
-            eventKind: i.string().indexed(),
-            eventAt: i.date().optional(),
-            ingestedAt: i.date().optional(),
-            orgId: i.string().optional().indexed(),
-            projectId: i.string().optional().indexed(),
-            contextKey: i.string().optional().indexed(),
-            contextId: i.string().optional().indexed(),
-            executionId: i.string().optional().indexed(),
-            stepId: i.string().optional().indexed(),
-            contextEventId: i.string().optional().indexed(),
-            toolCallId: i.string().optional().indexed(),
-            partKey: i.string().optional().indexed(),
-            partIdx: i.number().optional().indexed(),
-            spanId: i.string().optional().indexed(),
-            parentSpanId: i.string().optional().indexed(),
-            isDeleted: i.boolean().optional(),
-            aiProvider: i.string().optional().indexed(),
-            aiModel: i.string().optional().indexed(),
-            promptTokens: i.number().optional(),
-            promptTokensCached: i.number().optional(),
-            promptTokensUncached: i.number().optional(),
-            completionTokens: i.number().optional(),
-            totalTokens: i.number().optional(),
-            latencyMs: i.number().optional(),
-            cacheCostUsd: i.number().optional(),
-            computeCostUsd: i.number().optional(),
-            costUsd: i.number().optional(),
-            payload: i.any().optional(),
-        }),
-        event_trace_runs: i.entity({
-            workflowRunId: i.string().unique().indexed(),
-            orgId: i.string().optional().indexed(),
-            projectId: i.string().optional().indexed(),
-            firstEventAt: i.date().optional().indexed(),
-            lastEventAt: i.date().optional().indexed(),
-            lastIngestedAt: i.date().optional().indexed(),
-            eventsCount: i.number().optional(),
-            status: i.string().optional().indexed(),
-            payload: i.any().optional(),
-        }),
-        event_trace_spans: i.entity({
-            spanId: i.string().unique().indexed(),
-            parentSpanId: i.string().optional().indexed(),
-            workflowRunId: i.string().indexed(),
-            executionId: i.string().optional().indexed(),
-            stepId: i.string().optional().indexed(),
-            kind: i.string().optional().indexed(),
-            name: i.string().optional().indexed(),
-            status: i.string().optional().indexed(),
-            startedAt: i.date().optional().indexed(),
-            endedAt: i.date().optional().indexed(),
-            durationMs: i.number().optional(),
-            payload: i.any().optional(),
-        }),
-        document_documents: i.entity({
-            name: i.string().optional().indexed(),
-            mimeType: i.string().optional(),
-            size: i.number().optional(),
-            ownerId: i.string().optional().indexed(),
-            orgId: i.string().optional().indexed(),
-            createdAt: i.date().optional().indexed(),
-            processedAt: i.date().optional().indexed(),
-            updatedAt: i.date().optional(),
-            lastJobId: i.string().optional(),
-            content: i.json().optional(),
-        }),
+const contextSchema = {
+  entities: {
+    context_contexts: i.entity({
+      key: i.string().optional().unique().indexed(),
+      name: i.string().optional(),
+      content: i.any().optional(),
+      previous: i.any().optional(),
+      createdAt: i.date().indexed(),
+      updatedAt: i.date().optional().indexed(),
+    }),
+    context_sessions: i.entity({
+      definition: i.string().indexed(),
+      status: i.string().indexed(),
+      sandboxId: i.string().optional().indexed(),
+      workflowRunId: i.string().optional().indexed(),
+      error: i.any().optional(),
+      createdAt: i.date().indexed(),
+      updatedAt: i.date().optional().indexed(),
+    }),
+    context_events: i.entity({
+      type: i.string().indexed(),
+      domain: i.string().optional().indexed(),
+      name: i.string().optional().indexed(),
+      channel: i.string().optional().indexed(),
+      payload: i.any().optional(),
+      links: i.json().optional(),
+      physicalLinks: i.json().optional(),
+      metadata: i.json().optional(),
+      createdAt: i.date().indexed(),
+    }),
+    context_reactions: i.entity({
+      type: i.string().indexed(),
+      status: i.string().indexed(),
+      position: i.number().indexed(),
+      depth: i.number().indexed(),
+      causeIds: i.json(),
+      effectIds: i.json(),
+      instruction: i.string().optional(),
+      error: i.any().optional(),
+      createdAt: i.date().indexed(),
+      updatedAt: i.date().optional().indexed(),
+    }),
+    context_eventParts: i.entity({
+      key: i.string().unique().indexed(),
+      index: i.number().indexed(),
+      type: i.string().indexed(),
+      content: i.json(),
+      metadata: i.json().optional(),
+      createdAt: i.date().indexed(),
+      updatedAt: i.date().optional().indexed(),
+    }),
+  },
+  links: {
+    contextEventContext: {
+      forward: { on: "context_events", has: "one", label: "context" },
+      reverse: { on: "context_contexts", has: "many", label: "events" },
     },
-    links: {
-        eventTriggerReaction: {
-            forward: { on: "event_items", has: "many", label: "reactions" },
-            reverse: { on: "event_items", has: "one", label: "trigger" },
-        },
-        contextItemsContext: {
-            forward: { on: "event_items", has: "one", label: "context" },
-            reverse: { on: "event_contexts", has: "many", label: "items" },
-        },
-        contextExecutionsContext: {
-            forward: { on: "event_executions", has: "one", label: "context" },
-            reverse: { on: "event_contexts", has: "many", label: "executions" },
-        },
-        contextCurrentExecution: {
-            forward: { on: "event_contexts", has: "one", label: "currentExecution" },
-            reverse: { on: "event_executions", has: "one", label: "currentOf" },
-        },
-        contextExecutionInput: {
-            forward: { on: "event_executions", has: "one", label: "input" },
-            reverse: { on: "event_items", has: "many", label: "executionsAsInput" },
-        },
-        contextExecutionOutput: {
-            forward: { on: "event_executions", has: "one", label: "output" },
-            reverse: { on: "event_items", has: "many", label: "executionsAsOutput" },
-        },
-        contextExecutionsTrigger: {
-            forward: { on: "event_executions", has: "one", label: "trigger" },
-            reverse: { on: "event_items", has: "many", label: "executionsAsTrigger" },
-        },
-        contextExecutionsReaction: {
-            forward: { on: "event_executions", has: "one", label: "reaction" },
-            reverse: { on: "event_items", has: "many", label: "executionsAsReaction" },
-        },
-        contextStepsExecution: {
-            forward: { on: "event_steps", has: "one", label: "execution" },
-            reverse: { on: "event_executions", has: "many", label: "steps" },
-        },
-        contextExecutionItems: {
-            forward: { on: "event_items", has: "one", label: "execution" },
-            reverse: { on: "event_executions", has: "many", label: "items" },
-        },
-        contextPartsStep: {
-            forward: { on: "event_parts", has: "one", label: "step" },
-            reverse: { on: "event_steps", has: "many", label: "parts" },
-        },
-        contextStepStream: {
-            forward: { on: "event_steps", has: "one", label: "stream" },
-            reverse: { on: "$streams", has: "many", label: "step" },
-        },
-        contextExecutionActiveStream: {
-            forward: { on: "event_executions", has: "one", label: "activeStream" },
-            reverse: { on: "$streams", has: "many", label: "activeOf" },
-        },
-        contextExecutionLastStream: {
-            forward: { on: "event_executions", has: "one", label: "lastStream" },
-            reverse: { on: "$streams", has: "many", label: "lastOf" },
-        },
-        documentFile: {
-            forward: {
-                on: "document_documents",
-                has: "one",
-                label: "file",
-            },
-            reverse: {
-                on: "$files",
-                has: "one",
-                label: "document",
-            },
-        },
+    contextSessionContext: {
+      forward: { on: "context_sessions", has: "one", label: "context" },
+      reverse: { on: "context_contexts", has: "many", label: "sessions" },
     },
-    rooms: {},
+    contextCurrentSession: {
+      forward: { on: "context_contexts", has: "one", label: "currentSession" },
+      reverse: { on: "context_sessions", has: "one", label: "currentOf" },
+    },
+    contextSessionParent: {
+      forward: { on: "context_sessions", has: "one", label: "parent" },
+      reverse: { on: "context_sessions", has: "many", label: "children" },
+    },
+    contextSessionTrigger: {
+      forward: { on: "context_sessions", has: "one", label: "trigger" },
+      reverse: { on: "context_events", has: "many", label: "triggeredSessions" },
+    },
+    contextSessionRootReaction: {
+      forward: { on: "context_sessions", has: "one", label: "rootReaction" },
+      reverse: { on: "context_reactions", has: "one", label: "rootOf" },
+    },
+    contextReactionSession: {
+      forward: { on: "context_reactions", has: "one", label: "session" },
+      reverse: { on: "context_sessions", has: "many", label: "reactions" },
+    },
+    contextReactionParent: {
+      forward: { on: "context_reactions", has: "one", label: "parent" },
+      reverse: { on: "context_reactions", has: "many", label: "children" },
+    },
+    contextReactionCauses: {
+      forward: { on: "context_reactions", has: "many", label: "causes" },
+      reverse: { on: "context_events", has: "many", label: "causedReactions" },
+    },
+    contextReactionEffects: {
+      forward: { on: "context_reactions", has: "many", label: "effects" },
+      reverse: { on: "context_events", has: "many", label: "effectOf" },
+    },
+    contextEventPartsEvent: {
+      forward: { on: "context_eventParts", has: "one", label: "event" },
+      reverse: { on: "context_events", has: "many", label: "eventParts" },
+    },
+  },
+  rooms: {},
 } as const
 
-export const eventsDomain = domain("events").withSchema(eventSchema)
-
-export const contextDomain = eventsDomain
-export const reactionDomain = eventsDomain
+export const contextDomain = domain("context").withSchema(contextSchema)

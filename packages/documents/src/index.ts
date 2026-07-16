@@ -1,36 +1,51 @@
-export { documentsDomain, type DocumentsSchema } from "./lib/domain";
-export { documentDomain } from "./lib/domain/document/schema";
-export { documentProvidersDomain } from "./lib/domain/document/providers/schema";
+export {
+  documents,
+  DocumentHandle,
+  DocumentNotReadyError,
+  DocumentParseError,
+  type DocumentsApi,
+  type DocumentsConfig,
+  type DocumentsRuntime,
+  type DocumentFileRef,
+  type DocumentCreateOptions,
+  type DocumentPageContent,
+  type DocumentReadResult,
+} from "./documents.js"
+
+export { documentActions, type DocumentActionsOptions } from "./actions.js"
 
 export {
-  DocumentService,
-} from "./lib/domain/document/service";
+  documentDomain,
+  DOCUMENT_STATUSES,
+  DOCUMENT_JOB_STATUSES,
+  INLINE_PROVIDER,
+  type DocumentStatus,
+  type DocumentJobStatus,
+} from "./schema.js"
 
 export {
-  ReductoParsePresets,
-  getPresetConfig,
-} from "./lib/domain/document/presets";
+  ProviderResultNotReadyError,
+  type DocumentParseProvider,
+  type DocumentProviderName,
+  type NormalizedParsePage,
+  type NormalizedParseResult,
+  type ProviderJobRef,
+  type ProviderJobStatus,
+  type ProviderParseOptions,
+  type ProviderResultType,
+} from "./providers/provider.js"
 
-export * from "./lib/domain/document/types";
-export * from "./lib/domain/document/providers";
+export {
+  llamaCloud,
+  LlamaCloudProvider,
+  type LlamaCloudParseConfig,
+  type LlamaCloudParseMode,
+  type LlamaCloudProviderOptions,
+} from "./providers/llamacloud.js"
 
-export { ReductoService } from "./lib/domain/integration/reducto/service";
-export * from "./lib/domain/integration/reducto/types";
-
-export { LlamaCloudService } from "./lib/domain/integration/llamacloud/service";
-export * from "./lib/domain/integration/llamacloud/types";
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+export {
+  reducto,
+  ReductoProvider,
+  type ReductoParseConfig,
+  type ReductoProviderOptions,
+} from "./providers/reducto.js"

@@ -27,6 +27,7 @@ export async function setup() {
         ...createBaseBuilderConfig({
           workingDir,
           dirs: ["src/tests/workflow"],
+          externalPackages: ["@ekairos/sandbox/service"],
         }),
         buildTarget: "next",
         suppressCreateWorkflowsBundleLogs: true,

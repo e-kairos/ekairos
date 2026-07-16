@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { spawn } from "node:child_process"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { Sandbox as JustBashSandbox, type SandboxOptions as JustBashOptions } from "just-bash"
@@ -68,6 +68,7 @@ export type SandboxSession = {
   writeFile(file: SandboxFileInput): Promise<void>
   writeFiles(files: SandboxFileInput[]): Promise<void>
   readFile(path: string): Promise<Uint8Array>
+  exists(path: string): Promise<boolean>
   stop(): Promise<void>
   getPortUrl?(port: number): Promise<string>
   checkpoint?(comment?: string): Promise<SandboxSessionCheckpoint>
@@ -152,6 +153,36 @@ function shellEscapeArg(value: string): string {
   if (value.length === 0) return "''"
   if (/^[a-zA-Z0-9_./:-]+$/.test(value)) return value
   return `'${value.replace(/'/g, `'\"'\"'`)}'`
+}
+
+function isLocalMissingPathError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) return false
+  return error.code === "ENOENT" || error.code === "ENOTDIR"
+}
+
+function providerErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined
+
+  const directStatus =
+    "status" in error && typeof error.status === "number"
+      ? error.status
+      : "statusCode" in error && typeof error.statusCode === "number"
+        ? error.statusCode
+        : undefined
+  if (directStatus !== undefined) return directStatus
+
+  if (!("response" in error) || !error.response || typeof error.response !== "object") {
+    return undefined
+  }
+  return "status" in error.response && typeof error.response.status === "number"
+    ? error.response.status
+    : undefined
+}
+
+function pathProbeResult(provider: "vercel" | "sprites", path: string, exitCode: number): boolean {
+  if (exitCode === 0) return true
+  if (exitCode === 1) return false
+  throw new Error(`${provider}_exists_failed: test -e ${path} exited with code ${exitCode}`)
 }
 
 async function runLocalCommand(
@@ -255,6 +286,15 @@ export function localSandbox(options: LocalSandboxOptions = {}): SandboxSessionP
         async readFile(path) {
           return new Uint8Array(await readFile(path))
         },
+        async exists(path) {
+          try {
+            await stat(path)
+            return true
+          } catch (error) {
+            if (isLocalMissingPathError(error)) return false
+            throw error
+          }
+        },
         async stop() {
           if (options.cleanup || generatedRoot) {
             await rm(workspaceRoot, { recursive: true, force: true })
@@ -318,6 +358,9 @@ export function justBashSandbox(options?: JustBashOptions): SandboxSessionProvid
           const content = await sandbox.readFile(path, "base64")
           return new Uint8Array(Buffer.from(content, "base64"))
         },
+        async exists(path) {
+          return await sandbox.bashEnvInstance.fs.exists(path)
+        },
         async stop() {
           await sandbox.stop()
         },
@@ -375,6 +418,10 @@ export function vercelSandbox(config: SandboxConfig = {}): SandboxSessionProvide
           const stream = await sandbox.readFile({ path })
           if (!stream) return new Uint8Array()
           return await streamToBytes(stream as AsyncIterable<string | Buffer | Uint8Array | ArrayBuffer>)
+        },
+        async exists(path) {
+          const result = await sandbox.runCommand({ cmd: "test", args: ["-e", path] })
+          return pathProbeResult("vercel", path, result.exitCode)
         },
         async stop() {
           await sandbox.stop({ blocking: true })
@@ -447,6 +494,15 @@ export function daytonaSandbox(config: SandboxConfig = {}): SandboxSessionProvid
           const bytes = await (sandbox as DaytonaSandbox).fs.downloadFile(path)
           return new Uint8Array(Buffer.from(bytes))
         },
+        async exists(path) {
+          try {
+            await (sandbox as DaytonaSandbox).fs.getFileDetails(path)
+            return true
+          } catch (error) {
+            if (providerErrorStatus(error) === 404) return false
+            throw error
+          }
+        },
         async stop() {
           await daytona.stop(sandbox)
         },
@@ -501,6 +557,14 @@ export function spritesSandbox(config: SandboxConfig = {}): SandboxSessionProvid
           const result = await spritesExec({ spriteName: sandbox.name, command: "sh", args: ["-lc", cmd] })
           return new Uint8Array(Buffer.from(String(result.stdout ?? "").trim(), "base64"))
         },
+        async exists(path) {
+          const result = await spritesExec({
+            spriteName: sandbox.name,
+            command: "test",
+            args: ["-e", path],
+          })
+          return pathProbeResult("sprites", path, result.exitCode)
+        },
         async stop() {
           if (config.sprites?.deleteOnStop === false) return
           // Sprites lifecycle deletion remains in SandboxService; session stop is best effort.
@@ -519,6 +583,7 @@ export type AgentOsSandboxClient = Pick<
   | "runProcess"
   | "writeFsFile"
   | "readFsFile"
+  | "statFs"
   | "mkdirFs"
   | "destroySandbox"
   | "sandboxId"
@@ -575,6 +640,15 @@ export function agentOsSandbox(options: {
         async readFile(path) {
           const bytes = await client.readFsFile({ path })
           return new Uint8Array(Buffer.from(bytes))
+        },
+        async exists(path) {
+          try {
+            await client.statFs({ path })
+            return true
+          } catch (error) {
+            if (providerErrorStatus(error) === 404) return false
+            throw error
+          }
         },
         async stop() {
           await client.destroySandbox()

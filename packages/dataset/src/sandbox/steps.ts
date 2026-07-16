@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process"
+import { createHash } from "node:crypto"
 import { promises as fs } from "node:fs"
 import path from "node:path"
 import { promisify } from "node:util"
-import { SandboxService, type SandboxConfig, type SandboxSession } from "@ekairos/sandbox"
+import type { SandboxConfig } from "@ekairos/sandbox"
+import { SandboxService } from "@ekairos/sandbox/service"
 
 const execFileAsync = promisify(execFile)
 const localSandboxRoots = new Map<string, string>()
@@ -22,14 +24,6 @@ export type DatasetSandboxRunCommandResult = {
   stderr: string
 }
 
-function commandResultFromSession(result: any): DatasetSandboxRunCommandResult {
-  return {
-    exitCode: Number(result?.exitCode ?? (result?.success === false ? 1 : 0)),
-    stdout: String(result?.output ?? result?.stdout ?? ""),
-    stderr: String(result?.error ?? result?.stderr ?? ""),
-  }
-}
-
 function isLocalDatasetSandboxMode() {
   return String(process.env.DATASET_TEST_LOCAL_SANDBOX ?? "").trim() === "1"
 }
@@ -44,9 +38,15 @@ async function getRuntimeDb(runtime: any) {
 }
 
 function getLocalSandboxRoot(sandboxId: string) {
+  const label = sandboxId
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "sandbox"
+  const fingerprint = createHash("sha256").update(sandboxId).digest("hex").slice(0, 16)
+
   return (
     localSandboxRoots.get(sandboxId) ||
-    path.resolve(process.cwd(), "test-results", "dataset-sandboxes", sandboxId)
+    path.resolve(process.cwd(), "test-results", "dataset-sandboxes", `${label}-${fingerprint}`)
   )
 }
 
@@ -132,19 +132,10 @@ export async function createDatasetSandboxStep(
 export async function runDatasetSandboxCommandStep(params: {
   runtime: any
   sandboxId: DatasetSandboxId
-  sandbox?: SandboxSession
   cmd: string
   args?: string[]
 }): Promise<DatasetSandboxRunCommandResult> {
   "use step"
-
-  if (params.sandbox) {
-    const result = await params.sandbox.exec({
-      command: params.cmd,
-      args: params.args ?? [],
-    })
-    return commandResultFromSession(result)
-  }
 
   if (isLocalDatasetSandboxMode()) {
     return await runLocalSandboxCommand({
@@ -168,19 +159,9 @@ export async function runDatasetSandboxCommandStep(params: {
 export async function writeDatasetSandboxFilesStep(params: {
   runtime: any
   sandboxId: DatasetSandboxId
-  sandbox?: SandboxSession
   files: Array<{ path: string; contentBase64: string }>
 }): Promise<void> {
   "use step"
-
-  if (params.sandbox) {
-    await params.sandbox.writeFiles(params.files.map((file) => ({
-      path: file.path,
-      content: file.contentBase64,
-      encoding: "base64" as const,
-    })))
-    return
-  }
 
   if (isLocalDatasetSandboxMode()) {
     for (const file of params.files) {
@@ -199,18 +180,9 @@ export async function writeDatasetSandboxFilesStep(params: {
 export async function writeDatasetSandboxTextFilesStep(params: {
   runtime: any
   sandboxId: DatasetSandboxId
-  sandbox?: SandboxSession
   files: Array<{ path: string; content: string }>
 }): Promise<void> {
   "use step"
-
-  if (params.sandbox) {
-    await params.sandbox.writeFiles(params.files.map((file) => ({
-      path: file.path,
-      content: file.content,
-    })))
-    return
-  }
 
   if (isLocalDatasetSandboxMode()) {
     for (const file of params.files) {
@@ -233,15 +205,9 @@ export async function writeDatasetSandboxTextFilesStep(params: {
 export async function readDatasetSandboxFileStep(params: {
   runtime: any
   sandboxId: DatasetSandboxId
-  sandbox?: SandboxSession
   path: string
 }): Promise<{ contentBase64: string }> {
   "use step"
-
-  if (params.sandbox) {
-    const content = await params.sandbox.readFile(params.path)
-    return { contentBase64: Buffer.from(content).toString("base64") }
-  }
 
   if (isLocalDatasetSandboxMode()) {
     const content = await fs.readFile(params.path)
@@ -258,15 +224,9 @@ export async function readDatasetSandboxFileStep(params: {
 export async function readDatasetSandboxTextFileStep(params: {
   runtime: any
   sandboxId: DatasetSandboxId
-  sandbox?: SandboxSession
   path: string
 }): Promise<{ content: string }> {
   "use step"
-
-  if (params.sandbox) {
-    const content = await params.sandbox.readFile(params.path)
-    return { content: Buffer.from(content).toString("utf-8") }
-  }
 
   if (isLocalDatasetSandboxMode()) {
     const content = await fs.readFile(params.path, "utf-8")
@@ -283,14 +243,8 @@ export async function readDatasetSandboxTextFileStep(params: {
 export async function stopDatasetSandboxStep(params: {
   runtime: any
   sandboxId: DatasetSandboxId
-  sandbox?: SandboxSession
 }): Promise<void> {
   "use step"
-
-  if (params.sandbox) {
-    await params.sandbox.stop()
-    return
-  }
 
   if (isLocalDatasetSandboxMode()) {
     const root = getLocalSandboxRoot(params.sandboxId)

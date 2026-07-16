@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { Script } from 'node:vm';
+import { PlatformApi } from '@ekairos/platform';
 import { getPlatformAccessToken, resolvePlatformUrl } from './platform-auth.js';
 
 type PlatformDomainOptions = {
@@ -104,48 +105,47 @@ async function buildPlatformBody(args: string[], appId: string, options: Platfor
 	throw new Error(`Unsupported platform domain operation: ${operation}`);
 }
 
-async function registerPlatformEnvironment(
+async function runEnvironmentCommand(
+	subcommand: string,
 	options: PlatformDomainOptions & { app: string },
 	platformUrl: string,
 	accessToken: string,
 ) {
-	const key = asText(options.env);
-	if (!key) {
-		throw new Error('Missing --env for domain env register.');
-	}
-	const env = await readEnvData(options.data ?? options.envData);
-	if (!env) {
-		throw new Error('Missing --data for domain env register.');
+	const platform = new PlatformApi({
+		auth: { token: accessToken },
+		platformUrl,
+	});
+	const indent = options.pretty ? 2 : 0;
+
+	if (subcommand === 'list') {
+		const environments = await platform.environments.list(options.app);
+		console.log(JSON.stringify({ ok: true, environments }, null, indent));
+		return 0;
 	}
 
-	const response = await fetch(`${platformUrl}/api/platform/environments/upsert`, {
-		body: JSON.stringify({
+	if (subcommand === 'register') {
+		const key = asText(options.env);
+		if (!key) {
+			throw new Error('Missing --env for domain env register.');
+		}
+		const env = await readEnvData(options.data ?? options.envData);
+		if (!env) {
+			throw new Error('Missing --data for domain env register.');
+		}
+
+		const environment = await platform.environments.register({
 			appId: options.app,
 			key,
 			title: asText(options.title) || key,
 			env,
-		}),
-		headers: {
-			authorization: `Bearer ${accessToken}`,
-			'content-type': 'application/json',
-		},
-		method: 'POST',
-	});
-	const text = await response.text();
-	let payload: unknown = text;
-	try {
-		payload = JSON.parse(text);
-	} catch {
-		// Keep raw response text.
+		});
+		console.log(JSON.stringify({ ok: true, environment }, null, indent));
+		return 0;
 	}
-	console.log(typeof payload === 'string'
-		? payload
-		: JSON.stringify(payload, null, options.pretty ? 2 : 0));
-	if (!response.ok) return 1;
-	if (payload && typeof payload === 'object' && (payload as { ok?: unknown }).ok === false) {
-		return 1;
-	}
-	return 0;
+
+	throw new Error(
+		`Unsupported domain env subcommand: ${subcommand}. Use env list or env register.`,
+	);
 }
 
 export async function runPlatformDomainCommand(
@@ -167,8 +167,9 @@ export async function runPlatformDomainCommand(
 		);
 	}
 
-	if (args[0] === 'env' && args[1] === 'register') {
-		return await registerPlatformEnvironment(
+	if (args[0] === 'env') {
+		return await runEnvironmentCommand(
+			String(args[1] ?? 'list'),
 			{ ...options, app: appId },
 			platformUrl,
 			credentials.accessToken,

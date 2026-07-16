@@ -1,58 +1,22 @@
-export { agentDomain } from "./schema.js";
-
-export {
-  createAssistantItem,
-  createTextInputItem,
-  generateAgentId,
-  getItemReasoning,
-  getItemText,
-  type AgentContextMeta,
-  type AgentItem,
-  type AgentItemChannel,
-} from "./items.js";
-
-export type {
-  ThreadChunk,
-  ThreadMeta,
-  ThreadSendInput,
-  ThreadSnapshot,
-  ThreadTransport,
-  ThreadTransportEvent,
-  ThreadTurnStatus,
-} from "./transport.js";
-
-export {
-  MemoryAgentStore,
-  type AgentStore,
-  type ThreadIdentifier,
-  type ThreadRecord,
-  type ThreadStore,
-} from "./store.js";
-
-export {
-  type AgentReactionParams,
-  type AgentReactionResult,
-  type AgentReactor,
-} from "./reactor.js";
-
-export { createThread, type Thread, type ThreadOptions } from "./thread.js";
+export { agentDomain } from "./schema.js"
 
 /**
- * InstantDB query for a thread timeline: the thread, its context items in
- * order, and the channel messages (email, whatsapp, ...) linked to each item
- * and to the context. Use it from `db.useQuery` in db-bound deployments.
+ * InstaQL query for the durable thread association and its causal timeline.
+ * Writes belong to domain Actions and Reactions; this package only owns the
+ * agent_threads projection used by conversational UIs.
  */
 export function buildThreadTimelineQuery(threadKey: string) {
   return {
     agent_threads: {
       $: { where: { key: threadKey } },
       context: {
-        items: {
+        events: {
           $: { order: { createdAt: "asc" as const } },
+          eventParts: { $: { order: { index: "asc" as const } } },
           channelMessages: {},
         },
         channelMessages: {},
       },
     },
-  };
+  }
 }

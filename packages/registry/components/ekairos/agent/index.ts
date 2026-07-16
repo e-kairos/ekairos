@@ -3,7 +3,6 @@ export {
   ContextActivityIndicator,
   ContextHistory,
   ContextNewButton,
-  ContextStepList,
   MessageList,
   MessageParts,
   PromptBar,

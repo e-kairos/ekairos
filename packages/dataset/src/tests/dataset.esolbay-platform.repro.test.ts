@@ -5,16 +5,17 @@ import path from "node:path"
 import { init } from "@instantdb/admin"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime, configureRuntime } from "@ekairos/domain/runtime"
-import { eventsDomain } from "@ekairos/events"
-import { createScriptedReactor } from "@ekairos/reactor/context"
-import { sandboxDomain, SandboxService } from "@ekairos/sandbox"
+import { contextDomain } from "@ekairos/events"
+import { SandboxService } from "@ekairos/sandbox/service"
+import { sandboxDomain } from "@ekairos/sandbox/schema"
 
-import { dataset } from "../dataset"
+import { materializeDataset } from "../dataset"
 import {
   readDatasetSandboxTextFileStep,
   runDatasetSandboxCommandStep,
 } from "../sandbox/steps"
 import { datasetDomain } from "../schema"
+import { actionStep, deterministicReactionEngine } from "./_reactionEngine"
 
 const shouldRun = process.env.RUN_ESOLBAY_DATASET_REPRO === "1"
 const maybeDescribe = shouldRun ? describe : describe.skip
@@ -34,8 +35,9 @@ const DAYTONA_NO_AVAILABLE_RUNNERS_RETRY_DELAYS_MS = [1_000, 2_500, 5_000, 10_00
 const appDomain = domain("dataset-esolbay-platform-repro")
   .includes(datasetDomain)
   .includes(sandboxDomain)
-  .includes(eventsDomain)
+  .includes(contextDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
+  .withActions(datasetDomain.actions)
 
 type TestEnv = Record<string, unknown> & {
   orgId: string
@@ -97,29 +99,7 @@ function createRuntime(orgId: string) {
 }
 
 function scriptedToolStep(toolName: string, input: Record<string, unknown>, text = `run ${toolName}`) {
-  const toolCallId = `${toolName}-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  return {
-    assistantEvent: {
-      content: {
-        parts: [
-          { type: "text", text },
-          {
-            type: `tool-${toolName}`,
-            toolCallId,
-            input,
-          },
-        ],
-      },
-    },
-    actionRequests: [
-      {
-        actionRef: toolCallId,
-        actionName: toolName,
-        input,
-      },
-    ],
-    messagesForModel: [],
-  }
+  return actionStep(toolName, input)
 }
 
 async function wait(ms: number) {
@@ -230,68 +210,39 @@ async function getDatasetSnapshot(datasetId: string) {
 
 async function findContextId(datasetId: string) {
   const query: any = await adminDb!.query({
-    event_contexts: {
+    context_contexts: {
       $: { where: { key: `dataset:${datasetId}` }, limit: 1 },
     },
   })
-  return String(query.event_contexts?.[0]?.id ?? "")
+  return String(query.context_contexts?.[0]?.id ?? "")
 }
 
-async function queryEventParts(stepRows: any[]) {
-  const rows: any[] = []
-  for (const step of stepRows) {
-    const stepId = String(step?.id ?? "")
-    if (!stepId) continue
-    const query: any = await adminDb!.query({
-      event_parts: {
-        $: {
-          where: { "step.id": stepId as any },
-          order: { idx: "asc" },
-          limit: 100,
-        },
-        step: {},
-      },
-    } as any)
-    rows.push(...(query.event_parts ?? []))
-  }
-  return rows
-}
-
-async function getContextInspection(contextId: string, executionId: string) {
-  const snapshot: any = await adminDb!.query({
-    event_contexts: {
+async function getContextInspection(contextId: string, sessionId: string) {
+  return await adminDb!.query({
+    context_contexts: {
       $: { where: { id: contextId as any }, limit: 1 },
-      currentExecution: {},
-    },
-    event_executions: {
-      $: { where: { id: executionId as any }, limit: 1 },
-      context: {},
-      trigger: {},
-      reaction: {},
-    },
-    event_steps: {
-      $: {
-        where: { "execution.id": executionId as any },
-        order: { createdAt: "asc" },
-        limit: 100,
+      currentSession: {},
+      events: {
+        $: { order: { createdAt: "asc" }, limit: 100 },
+        eventParts: { $: { order: { index: "asc" }, limit: 500 } },
       },
-      execution: {},
     },
-    event_items: {
-      $: {
-        where: { "context.id": contextId as any },
-        order: { createdAt: "asc" },
-        limit: 100,
-      },
+    context_sessions: {
+      $: { where: { id: sessionId as any }, limit: 1 },
       context: {},
-      execution: {},
+      trigger: { eventParts: {} },
+      rootReaction: {
+        causes: { eventParts: {} },
+        effects: { eventParts: {} },
+      },
+      reactions: {
+        $: { order: { position: "asc" }, limit: 100 },
+        causes: { eventParts: {} },
+        effects: { eventParts: {} },
+        parent: {},
+      },
     },
   } as any)
-  const stepRows = Array.isArray(snapshot.event_steps) ? snapshot.event_steps : []
-  return {
-    ...snapshot,
-    event_parts: await queryEventParts(stepRows),
-  }
 }
 
 async function inspectSandboxFilesystem(params: {
@@ -362,7 +313,7 @@ maybeDescribe("dataset Esolbay platform repro", () => {
     const fileId = await uploadRequisitionItemsCsv(datasetId)
     sandboxId = await createEsolbayStyleDaytonaSandbox({ orgId, datasetId })
 
-    const reactor = createScriptedReactor({
+    const reactor = deterministicReactionEngine({
       steps: [
         scriptedToolStep(
           "executeCommand",
@@ -402,8 +353,8 @@ maybeDescribe("dataset Esolbay platform repro", () => {
       ],
     })
 
-    const result = await dataset(runtime)
-      .sandbox({ sandboxId })
+    const result = await materializeDataset(runtime)
+      .sandbox(sandboxId)
       .fromFile({
         fileId,
         description: "Esolbay requisition items csv",
@@ -427,22 +378,23 @@ maybeDescribe("dataset Esolbay platform repro", () => {
         },
       })
       .instructions("Generate a dataset for this file using the provided RequisitionItem schema.")
-      .reactor(reactor)
+      .engine(reactor)
       .build({ datasetId })
 
     const snapshot = await getDatasetSnapshot(result.datasetId)
     const contextId = await findContextId(result.datasetId)
-    const executionInspectionQuery: any = await adminDb!.query({
-      event_executions: {
+    const sessionInspectionQuery: any = await adminDb!.query({
+      context_sessions: {
         $: {
           where: { "context.id": contextId as any },
+          order: { createdAt: "desc" },
           limit: 1,
         },
       },
     } as any)
-    const executionId = String(executionInspectionQuery.event_executions?.[0]?.id ?? "")
-    const inspection = await getContextInspection(contextId, executionId)
-    const contextContent = inspection.event_contexts?.[0]?.content ?? {}
+    const sessionId = String(sessionInspectionQuery.context_sessions?.[0]?.id ?? "")
+    const inspection: any = await getContextInspection(contextId, sessionId)
+    const contextContent = inspection.context_contexts?.[0]?.content ?? {}
     const sandboxFs = await inspectSandboxFilesystem({
       runtime,
       sandboxId,
@@ -460,7 +412,7 @@ maybeDescribe("dataset Esolbay platform repro", () => {
       fileId,
       sandboxId,
       contextId,
-      executionId,
+      sessionId,
       contextUrl,
       status: snapshot.dataset.status,
       rowCount: snapshot.rows.length,
@@ -468,11 +420,8 @@ maybeDescribe("dataset Esolbay platform repro", () => {
       schemaTitle: snapshot.dataset.schema?.title,
       contextContent,
       inspection: {
-        event_contexts: inspection.event_contexts,
-        event_executions: inspection.event_executions,
-        event_steps: inspection.event_steps,
-        event_items: inspection.event_items,
-        event_parts: inspection.event_parts,
+        contexts: inspection.context_contexts,
+        sessions: inspection.context_sessions,
       },
       sandboxFs,
       dataFileId: Array.isArray(snapshot.dataset.dataFile)

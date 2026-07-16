@@ -1,0 +1,2 @@
+.changes/**/*.patch text eol=lf whitespace=-trailing-space,-space-before-tab,-blank-at-eof
+.changes/**/*.git.diff text eol=lf whitespace=-trailing-space,-space-before-tab,-blank-at-eof

@@ -1,97 +1,63 @@
-import {
-  OUTPUT_ITEM_TYPE,
-  type ContextItem,
-} from "@ekairos/events"
 import type {
-  ContextReactionResult,
-  ContextReactor,
-  ContextReactorParams,
-} from "@ekairos/reactor/context"
-import type { ContextEnvironment } from "@ekairos/reactor/runtime"
-
-type AnyRecord = Record<string, unknown>
-
-function asString(value: unknown): string {
-  if (typeof value === "string") return value
-  if (value === null || value === undefined) return ""
-  return String(value)
-}
-
-function asRecord(value: unknown): AnyRecord {
-  if (!value || typeof value !== "object") return {}
-  return value as AnyRecord
-}
+  ReactionEngine,
+  ReactionEngineActions,
+  ReactionEngineInput,
+} from "@ekairos/reactor"
 
 export type CursorTurnResult = {
   text: string
-  metadata?: Record<string, unknown>
 }
 
-export type CreateCursorReactorOptions<
-  Context,
-  Env extends ContextEnvironment = ContextEnvironment,
-> = {
-  executeTurn: (params: {
-    env: Env
-    context: AnyRecord
-    triggerEvent: ContextItem
-    contextId: string
-    executionId: string
-    stepId: string
-    iteration: number
-    writable?: WritableStream<unknown>
-    silent: boolean
-  }) => Promise<CursorTurnResult>
-}
-
-/**
- * Cursor Agent reactor scaffold.
- *
- * Integrators provide `executeTurn` (prefer a `"use step"` function) and Context
- * keeps durability, persistence and step lifecycle.
- */
-export function createCursorReactor<
-  Context,
-  Env extends ContextEnvironment = ContextEnvironment,
+export type CursorExecuteTurn<
+  TContext = unknown,
+> = <
+  TOutput,
+  TActions extends ReactionEngineActions,
 >(
-  options: CreateCursorReactorOptions<Context, Env>,
-): ContextReactor<Context, Env> {
-  return async (
-    params: ContextReactorParams<Context, Env>,
-  ): Promise<ContextReactionResult> => {
-    const context = asRecord(params.context.content)
-    const turn = await options.executeTurn({
-      env: params.env,
-      context,
-      triggerEvent: params.triggerEvent,
-      contextId: params.contextId,
-      executionId: params.executionId,
-      stepId: params.stepId,
-      iteration: params.iteration,
-      writable: params.writable,
-      silent: false,
-    })
+  input: ReactionEngineInput<TContext, TOutput, TActions>,
+) => Promise<CursorTurnResult>
 
-    const assistantEvent: ContextItem = {
-      id: params.eventId,
-      type: OUTPUT_ITEM_TYPE,
-      channel: "web",
-      createdAt: new Date().toISOString(),
-      status: "completed",
-      content: {
-        parts: [{ type: "text", text: asString(turn.text).trim() }],
-      },
+export type CursorEngineOptions<TContext = unknown> = {
+  executeTurn: CursorExecuteTurn<TContext>
+}
+
+function parseStructuredOutput(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed) return undefined
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+    if (fenced?.[1]) return JSON.parse(fenced[1].trim())
+    throw new Error("cursor_engine_output_json_required")
+  }
+}
+
+export class CursorEngine<TContext = unknown>
+  implements ReactionEngine<TContext> {
+  readonly executeTurn: CursorExecuteTurn<TContext>
+
+  constructor(options: CursorEngineOptions<TContext>) {
+    this.executeTurn = options.executeTurn
+  }
+
+  async agent<TOutput, TActions extends ReactionEngineActions>(
+    input: ReactionEngineInput<TContext, TOutput, TActions>,
+  ) {
+    if (Object.keys(input.actions).length > 0) {
+      throw new Error("cursor_engine_actions_not_supported")
     }
 
+    const turn = await this.executeTurn(input)
     return {
-      assistantEvent,
-      actionRequests: [],
-      messagesForModel: [],
-      llm: {
-        provider: "cursor",
-        model: "cursor-agent",
-        rawProviderMetadata: turn.metadata,
-      },
+      output: input.output ? parseStructuredOutput(turn.text) : turn.text as TOutput,
+      metadata: { provider: "cursor" },
     }
   }
+}
+
+export function cursorEngine<TContext = unknown>(
+  options: CursorEngineOptions<TContext>,
+): CursorEngine<TContext> {
+  return new CursorEngine(options)
 }

@@ -1,9 +1,7 @@
 packages:
   - packages/*
   - packages/reactors/*
-  - packages/structure/*
   - packages/events/tests/playwright/server
-  - '!packages/documents'
 
 catalog:
   '@ai-sdk/openai': ^2.0.68

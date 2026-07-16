@@ -142,18 +142,18 @@ export default function ChannelMessageReferencePage() {
       </Section>
 
       <Section title="ChannelKind">
-        <Code title="open union + constants">{`export const WEB_CHANNEL = "web";
-export const EMAIL_CHANNEL = "email";
-export const WHATSAPP_CHANNEL = "whatsapp";
+        <Code title="open union + constants">{`import type { Channel } from "@ekairos/events";
 
-/** Open union: known channels get literal types, custom channels are allowed. */
-export type ChannelKind = "web" | "email" | "whatsapp" | (string & {});`}</Code>
+export const WEB_CHANNEL = "web" satisfies Channel;
+export const EMAIL_CHANNEL = "email" satisfies Channel;
+export const WHATSAPP_CHANNEL = "whatsapp" satisfies Channel;
+
+export type ChannelKind = Channel;`}</Code>
         <p>
-          The <InlineCode>(string &amp; &#123;&#125;)</InlineCode> trick keeps the union open: the
-          three known kinds autocomplete, and any other string (a custom{" "}
-          <InlineCode>&quot;sms&quot;</InlineCode> or <InlineCode>&quot;push&quot;</InlineCode>{" "}
-          channel) still typechecks. Prefer the exported constants over string literals when
-          referring to the built-in kinds.
+          <InlineCode>@ekairos/events</InlineCode> owns the open channel tag used by context
+          items. Channel aliases it so custom kinds like <InlineCode>&quot;sms&quot;</InlineCode>{" "}
+          or <InlineCode>&quot;push&quot;</InlineCode> flow through the same message and event
+          contracts.
         </p>
       </Section>
 
@@ -273,34 +273,11 @@ const message = createChannelMessage({
             },
           ]}
         />
-        <p>Who implements it:</p>
-        <PropsTable
-          rows={[
-            {
-              name: "Instant-backed store",
-              type: "internal to the runtime",
-              description: (
-                <>
-                  InstantDB deployments back the interface with the{" "}
-                  <InlineCode>channel_messages</InlineCode> entity. You get it as{" "}
-                  <InlineCode>channels.store</InlineCode> from <InlineCode>createChannels</InlineCode>{" "}
-                  — you never construct it yourself.
-                </>
-              ),
-            },
-            {
-              name: "MemoryAgentStore",
-              type: "@ekairos/agent",
-              description: (
-                <>
-                  In-memory implementation for local/embedded runtimes (Electron, CLIs, tests). It
-                  implements <InlineCode>ChannelMessageStore</InlineCode> alongside the context and
-                  thread stores, so the same agent code runs without InstantDB.
-                </>
-              ),
-            },
-          ]}
-        />
+        <p>
+          <InlineCode>createChannels</InlineCode> returns the runtime-backed implementation as{" "}
+          <InlineCode>channels.store</InlineCode>. It persists through the same app runtime supplied
+          to <InlineCode>createChannels</InlineCode>; applications do not construct the store.
+        </p>
       </Section>
 
       <Section title="Real-world records">

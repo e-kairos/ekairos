@@ -169,7 +169,7 @@ Record migration state per org:
 
 ## Integration with ekairos/structure
 
-Use `@ekairos/structure` for:
+Use `@ekairos/dataset` for:
 
 - dataset extraction normalization,
 - structured transform pipelines,

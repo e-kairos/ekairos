@@ -2,6 +2,18 @@ import { i } from "@instantdb/core";
 import type { InstantAdminDatabase } from "@instantdb/admin";
 import type { EntitiesDef, LinksDef, RoomsDef, InstantSchemaDef, EntityDef, InstaQLParams } from "@instantdb/core";
 import { z } from "zod";
+import {
+  createDomainActionDefinition,
+  executeDomainActionPrivate,
+  getDomainActionBindingView,
+  isDomainActionDefinition,
+  isDomainActionRegistration,
+  rebindDomainActionOwner,
+  registerDomainAction,
+  scopeDomainActionRegistration,
+  setActiveDomainActionScopeFactory,
+  setDomainActionMembership,
+} from "./domain-action.internal.js";
 export {
   EkairosRuntime,
   type RuntimeForDomain,
@@ -56,47 +68,86 @@ export type DomainInclude =
 
 export type DomainActionSchema = z.ZodType;
 
+type AnyMaterializedDomain = MaterializedDomainLike;
+
+/** @internal Publicly nameable phantom keys for exported action registrations. */
+export const DOMAIN_ACTION_RUNTIME_TYPE: unique symbol = Symbol.for(
+  "@ekairos/domain/action-runtime-type",
+);
+/** @internal Publicly nameable phantom keys for exported action registrations. */
+export const DOMAIN_ACTION_OWNER_TYPE: unique symbol = Symbol.for(
+  "@ekairos/domain/action-owner-type",
+);
+/** @internal Publicly nameable phantom keys for exported scoped action registrations. */
+export const DOMAIN_ACTION_FULL_INPUT_TYPE: unique symbol = Symbol.for(
+  "@ekairos/domain/action-full-input-type",
+);
+
+export type DomainActionRuntimeLike<Env = any> = {
+  readonly env: Env;
+  db(options?: unknown): Promise<unknown>;
+  meta(): { domain?: DomainLike | null };
+  use<SubD extends AnyMaterializedDomain>(
+    subdomain: SubD,
+    options?: unknown,
+  ): Promise<ActiveDomain<SubD, Env>>;
+};
+
+type RuntimeEnvOfActionRuntime<Runtime> =
+  Runtime extends { readonly env: infer Env } ? Env : unknown;
+
+type ActionOwnerDomain<Domain> =
+  Domain extends AnyMaterializedDomain ? Domain : any;
+
 export type DomainActionExecuteParams<
   InputSchema extends DomainActionSchema = DomainActionSchema,
-  Runtime = DomainRuntime<any>,
+  Runtime = DomainActionRuntimeLike,
   Domain = unknown,
 > = {
   input: z.output<InputSchema>;
   runtime: Runtime;
+  domain: DomainRuntime<
+    ActionOwnerDomain<Domain>,
+    RuntimeEnvOfActionRuntime<Runtime>
+  >;
 };
 
 export type DomainActionDefinition<
   InputSchema extends DomainActionSchema = DomainActionSchema,
   OutputSchema extends DomainActionSchema = DomainActionSchema,
-  Runtime = unknown,
+  Runtime = DomainActionRuntimeLike,
   Domain = unknown,
-> = {
-  name?: string;
+> = Readonly<{
   description?: string;
   input: InputSchema;
   output: OutputSchema;
   inputSchema?: unknown;
   outputSchema?: unknown;
-  requiredScopes?: string[];
-  /**
-   * Domain actions are command units with typed input and output.
-   *
-   * Recommended pattern:
-   *
-   * `async execute({ runtime, input }) { await runtime.db.transact([...]); }`
-   *
-   * Action execution receives `input` and a runtime already scoped to the
-   * domain that declared the action. Workflow boundaries belong to the
-   * orchestration layer, not to the action executor.
-   */
+  requiredScopes?: readonly string[];
+  readonly [DOMAIN_ACTION_RUNTIME_TYPE]?: Readonly<{
+    runtime: Runtime;
+    domain: Domain;
+  }>;
+}>;
+
+export type DomainActionImplementationDefinition<
+  InputSchema extends DomainActionSchema = DomainActionSchema,
+  OutputSchema extends DomainActionSchema = DomainActionSchema,
+  Runtime = DomainActionRuntimeLike,
+  Domain = unknown,
+> = {
+  description?: string;
+  input: InputSchema;
+  output: OutputSchema;
+  requiredScopes?: readonly string[];
   execute: (
     params: DomainActionExecuteParams<InputSchema, Runtime, Domain>,
   ) => Promise<z.output<OutputSchema>> | z.output<OutputSchema>;
 };
 
 type ObjectInputOfSchema<InputSchema extends DomainActionSchema> =
-  z.output<InputSchema> extends Record<string, unknown>
-    ? z.output<InputSchema>
+  z.input<InputSchema> extends Record<string, unknown>
+    ? z.input<InputSchema>
     : never;
 
 type ScopedActionInputFromSchema<
@@ -109,110 +160,171 @@ export type DomainActionScopeMethod<
   OutputSchema extends DomainActionSchema,
   Runtime,
   Domain,
+  FullInputSchema extends DomainActionSchema,
+  Key extends string,
+  OwnerDomainName extends string,
 > = <const Bound extends Partial<ObjectInputOfSchema<InputSchema>>>(
   boundInput: Bound,
 ) => DomainActionRegistration<
   z.ZodType<ScopedActionInputFromSchema<InputSchema, Bound>>,
   OutputSchema,
   Runtime,
-  Domain
+  Domain,
+  Key,
+  OwnerDomainName,
+  FullInputSchema
 >;
 
 export type DomainActionRegistration<
   InputSchema extends DomainActionSchema = DomainActionSchema,
   OutputSchema extends DomainActionSchema = DomainActionSchema,
-  Runtime = unknown,
+  Runtime = DomainActionRuntimeLike,
   Domain = unknown,
-> = DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain> & {
-  name: string;
-  scope: DomainActionScopeMethod<InputSchema, OutputSchema, Runtime, Domain>;
-};
+  Key extends string = string,
+  OwnerDomainName extends string = string,
+  FullInputSchema extends DomainActionSchema = InputSchema,
+> = Readonly<
+  DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain> & {
+    id: `${OwnerDomainName}.${Key}`;
+    ownerDomain: OwnerDomainName;
+    key: Key;
+    scope: DomainActionScopeMethod<
+      InputSchema,
+      OutputSchema,
+      Runtime,
+      Domain,
+      FullInputSchema,
+      Key,
+      OwnerDomainName
+    >;
+    readonly [DOMAIN_ACTION_OWNER_TYPE]?: Domain;
+    readonly [DOMAIN_ACTION_FULL_INPUT_TYPE]?: FullInputSchema;
+  }
+>;
 
 export type DomainActionLike =
-  DomainActionDefinition<any, any, any, any>;
+  | DomainActionDefinition<any, any, any, any>
+  | DomainActionRegistration<any, any, any, any>;
 
-export type DomainActionCollection =
-  | Record<string, DomainActionLike>
-  | DomainActionLike[]
-  | DomainActionRegistration[];
+export type DomainActionCollection = Readonly<Record<string, DomainActionLike>>;
 
 export type DomainEventSchema = z.ZodType;
 
-export type DomainEventPayloadParams<Payload> = {
-  payload: Payload;
-  event: {
-    key: string;
-    name: string;
-    kind: string;
-    domainName?: string;
-  };
+export type DomainEventLinkDefinition<
+  EntityNamespace extends string = string,
+  Cardinality extends "one" | "many" = "one" | "many",
+> = {
+  readonly on: EntityNamespace;
+  readonly has: Cardinality;
 };
 
 export type DomainEventDefinition<
   InputSchema extends DomainEventSchema = DomainEventSchema,
+  Links extends Record<string, DomainEventLinkDefinition> = {},
 > = {
-  name?: string;
-  description?: string;
-  payload: InputSchema;
-  type?: string;
-  channel?: string;
-  status?: string;
-  data?: (payload: z.output<InputSchema>) => unknown;
-  content?: (
-    params: DomainEventPayloadParams<z.output<InputSchema>>,
-  ) => Record<string, unknown>;
-  parts?: (params: DomainEventPayloadParams<z.output<InputSchema>>) => unknown[];
+  readonly payload: InputSchema;
+  readonly links?: Links;
 };
 
 export type DomainEventRegistration<
   InputSchema extends DomainEventSchema = DomainEventSchema,
+  Links extends Record<string, DomainEventLinkDefinition> = {},
   OwnerDomain = unknown,
-> = DomainEventDefinition<InputSchema> & {
-  name: string;
-  kind: string;
+  EventName extends string = string,
+  DomainName extends string = string,
+  Kind extends string = string,
+> = DomainEventDefinition<InputSchema, Links> & {
+  name: EventName;
+  kind: Kind;
+  domain: DomainName;
   ownerDomain?: OwnerDomain;
 };
 
 export type DomainEventCollection =
-  | Record<string, DomainEventDefinition<any> | DomainEventRegistration<any, any>>
-  | Array<DomainEventDefinition<any> | DomainEventRegistration<any, any>>;
+  Record<string, DomainEventDefinition<any, any> | DomainEventRegistration<any, any, any>>;
 
-export type DomainEventMap = Record<string, DomainEventRegistration<any, any>>;
+export type DomainEventMap = Record<string, DomainEventRegistration<any, any, any>>;
 
-export type DomainEventCreateOptions = {
-  id?: string;
-  key?: string;
-  type?: string;
-  channel?: string;
-  status?: string;
-  createdAt?: string | Date;
-  content?: Record<string, unknown>;
+type DomainEventLinkValue<Link extends DomainEventLinkDefinition> =
+  Link["has"] extends "one" ? string : string | string[];
+
+export type DomainEventLinkParams<Links extends Record<string, DomainEventLinkDefinition>> = {
+  [Alias in keyof Links]?: DomainEventLinkValue<Links[Alias]>;
 };
 
-export type DomainEventRecord<Input = unknown> = {
-  id: string;
-  kind: string;
-  domain?: string;
-  name: string;
-  key?: string;
-  type: string;
-  channel: string;
-  status?: string;
-  createdAt: string;
-  data: Input;
-  content: Record<string, unknown>;
-};
+export type DomainEventPhysicalLink = Readonly<{
+  alias: string;
+  key: string;
+  target: string;
+  has: "one" | "many";
+  forwardLabel: string;
+  reverseLabel: string;
+}>;
+
+export type DomainEventConstructorDefinition<
+  InputSchema extends DomainEventSchema = DomainEventSchema,
+  Links extends Record<string, DomainEventLinkDefinition> = {},
+  Kind extends string = string,
+  DomainName extends string = string,
+  EventName extends string = string,
+> = Readonly<{
+  payload: InputSchema;
+  links: Readonly<Links>;
+  kind: Kind;
+  domain: DomainName;
+  name: EventName;
+  physicalLinks: Readonly<Record<keyof Links & string, DomainEventPhysicalLink>>;
+}>;
+
+export type DomainEventDraft<
+  Payload = unknown,
+  Links extends Record<string, DomainEventLinkDefinition> = {},
+  InputSchema extends DomainEventSchema = DomainEventSchema,
+  Kind extends string = string,
+  DomainName extends string = string,
+  EventName extends string = string,
+> = Readonly<{
+  payload: Payload;
+  links: Readonly<Partial<Record<keyof Links & string, string | readonly string[]>>>;
+  kind: Kind;
+  domain: DomainName;
+  name: EventName;
+  physicalLinks: Readonly<Record<keyof Links & string, DomainEventPhysicalLink>>;
+  definition: DomainEventConstructorDefinition<InputSchema, Links, Kind, DomainName, EventName>;
+  link(params: DomainEventLinkParams<Links>): DomainEventDraft<Payload, Links, InputSchema, Kind, DomainName, EventName>;
+}>;
 
 type DomainEventPayloadOf<Event> =
-  Event extends DomainEventRegistration<infer InputSchema, any>
+  Event extends DomainEventRegistration<infer InputSchema, any, any>
     ? z.output<InputSchema>
     : never;
 
+type DomainEventLinksOf<Event> =
+  Event extends DomainEventRegistration<any, infer Links, any> ? Links : {};
+
+type DomainEventSchemaOf<Event> =
+  Event extends DomainEventRegistration<infer InputSchema, any, any> ? InputSchema : DomainEventSchema;
+
+export type DomainEventConstructor<
+  InputSchema extends DomainEventSchema = DomainEventSchema,
+  Links extends Record<string, DomainEventLinkDefinition> = {},
+  Kind extends string = string,
+  DomainName extends string = string,
+  EventName extends string = string,
+> = ((payload: z.output<InputSchema>) => DomainEventDraft<
+  z.output<InputSchema>, Links, InputSchema, Kind, DomainName, EventName
+>) & DomainEventConstructorDefinition<InputSchema, Links, Kind, DomainName, EventName> & Readonly<{
+  definition: DomainEventConstructorDefinition<InputSchema, Links, Kind, DomainName, EventName>;
+}>;
+
 export type DomainEventMethods<Events extends DomainEventMap> = {
-  [K in keyof Events & string]: (
-    payload: DomainEventPayloadOf<Events[K]>,
-    options?: DomainEventCreateOptions,
-  ) => Promise<DomainEventRecord<DomainEventPayloadOf<Events[K]>>>;
+  [K in keyof Events & string]: DomainEventConstructor<
+    DomainEventSchemaOf<Events[K]>,
+    DomainEventLinksOf<Events[K]>,
+    Events[K]["kind"],
+    Events[K]["domain"],
+    K
+  >;
 };
 
 let domainDocLoader: DomainDocLoader | null = null;
@@ -260,7 +372,6 @@ type AnyDomainSchemaResult = {
 const EKAIROS_META = Symbol.for("@ekairos/domain/meta");
 const EKAIROS_ACTIONS = Symbol.for("@ekairos/domain/actions");
 const EKAIROS_ACTION_MAP = Symbol.for("@ekairos/domain/action-map");
-const EKAIROS_ACTION_BINDING = Symbol.for("@ekairos/domain/action-binding");
 const EKAIROS_EVENT_MAP = Symbol.for("@ekairos/domain/event-map");
 declare const DOMAIN_NAME_TYPE: unique symbol;
 declare const DOMAIN_INCLUDED_NAMES_TYPE: unique symbol;
@@ -280,6 +391,12 @@ export type DomainLike = {
   readonly [DOMAIN_ACTION_MAP_TYPE]?: DomainActionMap;
   readonly [DOMAIN_EVENT_MAP_TYPE]?: DomainEventMap;
   readonly [DOMAIN_LINKS_TYPE]?: LinksDef<any>;
+};
+
+export type MaterializedDomainLike = DomainLike & {
+  readonly originalEntities: EntitiesDef;
+  context: (options?: DomainContextOptions) => DomainContext;
+  contextString: (options?: DomainContextOptions) => string;
 };
 
 // No hard-coded base entities here. InstantDB adds base entities at runtime inside i.schema.
@@ -437,28 +554,52 @@ export type DomainDefinitionOf<D> =
       >
     : never;
 
-type BindActionToDomain<Value, OwnerDomain extends DomainSchemaResult> =
-  Value extends DomainActionDefinition<
+type BindActionToDomain<
+  Value,
+  OwnerDomain extends AnyMaterializedDomain,
+  Key extends string,
+> = Value extends DomainActionRegistration<
     infer InputSchema,
     infer OutputSchema,
-    any,
+    infer Runtime,
+    infer OriginalOwner,
+    infer OriginalKey,
+    infer OriginalOwnerName,
+    infer FullInputSchema
+  >
+    ? DomainActionRegistration<
+        InputSchema,
+        OutputSchema,
+        Runtime,
+        OriginalOwner,
+        OriginalKey,
+        OriginalOwnerName,
+        FullInputSchema
+      >
+    : Value extends DomainActionDefinition<
+    infer InputSchema,
+    infer OutputSchema,
+    infer Runtime,
     any
   >
     ? DomainActionRegistration<
         InputSchema,
         OutputSchema,
-        DomainRuntime<OwnerDomain>,
-        OwnerDomain
+        Runtime,
+        OwnerDomain,
+        Key,
+        DomainNameOf<OwnerDomain>,
+        InputSchema
       >
     : DomainActionRegistration;
 
 type ActionMapFromCollection<
   Input,
-  OwnerDomain extends DomainSchemaResult = DomainSchemaResult,
+  OwnerDomain extends AnyMaterializedDomain = AnyMaterializedDomain,
 > =
   Input extends Record<string, any>
     ? {
-        [K in keyof Input & string]: BindActionToDomain<Input[K], OwnerDomain>;
+        [K in keyof Input & string]: BindActionToDomain<Input[K], OwnerDomain, K>;
       }
     : {};
 
@@ -467,18 +608,25 @@ type MergeActionMaps<
   Next extends DomainActionMap,
 > = Simplify<Omit<Current, keyof Next> & Next>;
 
-type BindEventToDomain<Value, OwnerDomain extends DomainSchemaResult> =
-  Value extends DomainEventDefinition<infer InputSchema>
-    ? DomainEventRegistration<InputSchema, OwnerDomain>
+type BindEventToDomain<Value, OwnerDomain, EventName extends string> =
+  Value extends DomainEventDefinition<infer InputSchema, infer Links>
+    ? DomainEventRegistration<
+        InputSchema,
+        Links,
+        OwnerDomain,
+        EventName,
+        DomainNameOf<OwnerDomain>,
+        `${DomainNameOf<OwnerDomain>}.${EventName}`
+      >
     : DomainEventRegistration;
 
 type EventMapFromCollection<
   Input,
-  OwnerDomain extends DomainSchemaResult = DomainSchemaResult,
+  OwnerDomain = DomainSchemaResult,
 > =
   Input extends Record<string, any>
     ? {
-        [K in keyof Input & string]: BindEventToDomain<Input[K], OwnerDomain>;
+        [K in keyof Input & string]: BindEventToDomain<Input[K], OwnerDomain, K>;
       }
     : {};
 
@@ -486,6 +634,58 @@ type MergeEventMaps<
   Current extends DomainEventMap,
   Next extends DomainEventMap,
 > = Simplify<Omit<Current, keyof Next> & Next>;
+
+type EventDomainCharacter =
+  | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
+  | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
+  | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
+
+type NormalizeEventDomain<
+  Value extends string,
+  Result extends string = "",
+  Separator extends boolean = false,
+> = Lowercase<Value> extends `${infer Head}${infer Tail}`
+  ? Head extends EventDomainCharacter
+    ? NormalizeEventDomain<Tail, `${Result}${Separator extends true ? Result extends "" ? "" : "_" : ""}${Head}`, false>
+    : NormalizeEventDomain<Tail, Result, true>
+  : Result;
+
+type EventGeneratedLink<
+  DomainName extends string,
+  Alias extends string,
+  Link extends DomainEventLinkDefinition,
+> = {
+  forward: { on: "context_events"; has: Link["has"]; label: `${NormalizeEventDomain<DomainName>}_${Alias}` };
+  reverse: { on: Link["on"]; has: "many"; label: `${NormalizeEventDomain<DomainName>}_events_as_${Alias}` };
+};
+
+type UnionToIntersection<Union> =
+  (Union extends unknown ? (value: Union) => void : never) extends
+    (value: infer Intersection) => void ? Intersection : never;
+
+type AllEventLinks<Events extends DomainEventMap> = UnionToIntersection<{
+  [EventName in keyof Events]: DomainEventLinksOf<Events[EventName]>;
+}[keyof Events]>;
+
+type GeneratedEventLinks<DomainName extends string, Events extends DomainEventMap> =
+  AllEventLinks<Events> extends infer EventLinks
+    ? [EventLinks] extends [Record<string, DomainEventLinkDefinition>]
+      ? Simplify<{
+          [Alias in keyof EventLinks & string as `event__${NormalizeEventDomain<DomainName>}__${Alias}`]:
+            EventGeneratedLink<DomainName, Alias, Extract<EventLinks[Alias], DomainEventLinkDefinition>>;
+        }> extends infer Generated
+        ? Generated extends LinksDef<any> ? Generated : {}
+        : {}
+      : {}
+    : {};
+
+type MergeGeneratedEventLinks<
+  Links extends LinksDef<any>,
+  DomainName extends string,
+  Events extends DomainEventMap,
+> = Simplify<Links & GeneratedEventLinks<DomainName, Events>> extends infer Merged
+  ? Merged extends LinksDef<any> ? Merged : Links
+  : Links;
 
 export type ActionMapOf<D> =
   D extends { readonly [DOMAIN_ACTION_MAP_TYPE]?: infer Actions }
@@ -501,7 +701,7 @@ export type DomainActionsOf<D> = ActionMapOf<D>;
 export type DomainEventsOf<D> = EventMapOf<D>;
 
 export type DomainActionOwner<Action> =
-  Action extends DomainActionDefinition<any, any, any, infer Owner>
+  Action extends DomainActionRegistration<any, any, any, infer Owner>
     ? Owner
     : never;
 
@@ -532,7 +732,7 @@ export type DomainActionBelongsTo<
 
 type ActionInputOf<Action> =
   Action extends DomainActionDefinition<infer InputSchema, any, any, any>
-    ? z.output<InputSchema>
+    ? z.input<InputSchema>
     : never;
 
 type ActionOutputOf<Action> =
@@ -545,6 +745,23 @@ export type ScopedDomainActionInput<
   Bound extends Partial<ActionInputOf<Action>>,
 > = Simplify<Omit<ActionInputOf<Action>, keyof Bound>>;
 
+export type DomainActionInput<Action> = ActionInputOf<Action>;
+
+export type DomainActionFullInput<Action> =
+  Action extends DomainActionRegistration<
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    infer FullInputSchema
+  >
+    ? z.output<FullInputSchema>
+    : Action extends DomainActionDefinition<infer InputSchema, any, any, any>
+      ? z.output<InputSchema>
+      : never;
+
 export type DomainActionOutput<Action> =
   Action extends DomainActionDefinition<any, infer OutputSchema, any, any>
     ? z.output<OutputSchema>
@@ -556,14 +773,17 @@ export type DomainActionSerializedOutput<Action> =
     : never;
 
 type DomainActionMethodFor<Action> =
-  Action extends DomainActionDefinition<
+  Action extends DomainActionRegistration<
     infer InputSchema,
     infer OutputSchema,
     infer Runtime,
-    infer OwnerDomain
+    infer OwnerDomain,
+    infer Key,
+    infer OwnerDomainName,
+    infer FullInputSchema
   >
     ? ((
-        input: z.output<InputSchema>,
+        input: z.input<InputSchema>,
       ) => Promise<z.output<OutputSchema>>) & {
         scope: <const Bound extends Partial<ObjectInputOfSchema<InputSchema>>>(
           boundInput: Bound,
@@ -572,7 +792,10 @@ type DomainActionMethodFor<Action> =
             z.ZodType<ScopedActionInputFromSchema<InputSchema, Bound>>,
             OutputSchema,
             Runtime,
-            OwnerDomain
+            OwnerDomain,
+            Key,
+            OwnerDomainName,
+            FullInputSchema
           >
         >;
       }
@@ -650,8 +873,8 @@ export type RuntimeDomainScope<
   & ActiveDomain<any, Env>
   & Record<string, unknown>;
 
-type RuntimeCallableForDomain<D> = {
-  use(subdomain: D, options?: unknown): Promise<unknown>;
+type RuntimeCallableForDomain<D extends AnyMaterializedDomain> = {
+  use(subdomain: D, options?: unknown): Promise<ActiveDomain<D, unknown>>;
 };
 
 // Strip link metadata from entity definitions to avoid nested EntityDef links
@@ -798,8 +1021,8 @@ export type DomainSchemaResult<
     meta?: Record<string, unknown>;
     // Raw domain action definitions declared for this domain result.
     readonly actions: Readonly<Actions>;
-    // Raw domain event definitions declared for this domain result.
-    readonly events: Readonly<Events>;
+    // Pure constructors for immutable event drafts.
+    readonly events: DomainEventMethods<Events>;
     // Attach explicit domain actions to this domain result.
     withActions: {
       <Input extends Record<string, DomainActionLike>>(
@@ -819,17 +1042,22 @@ export type DomainSchemaResult<
         IncludedNames,
         Events
       >;
-      (actions: DomainActionLike[] | DomainActionRegistration[]): DomainSchemaResult<E, L, R, Actions, Name, IncludedNames, Events>;
     };
     // Retrieve actions explicitly attached to this domain result.
     getActions: () => DomainActionRegistration[];
     getActionMap: () => Actions;
     withEvents: {
-      <Input extends Record<string, DomainEventDefinition<any> | DomainEventRegistration<any, any>>>(
+      <Input extends Record<string, DomainEventDefinition<any, any> | DomainEventRegistration<any, any, any>>>(
         events: Input,
       ): DomainSchemaResult<
         E,
-        L,
+        MergeGeneratedEventLinks<L, Name, MergeEventMaps<
+          Events,
+          EventMapFromCollection<
+            Input,
+            DomainSchemaResult<E, L, R, Actions, Name, IncludedNames, DomainEventMap>
+          >
+        >>,
         R,
         Actions,
         Name,
@@ -842,24 +1070,23 @@ export type DomainSchemaResult<
           >
         >
       >;
-      (events: Array<DomainEventDefinition<any> | DomainEventRegistration<any, any>>): DomainSchemaResult<E, L, R, Actions, Name, IncludedNames, Events>;
     };
     getEventMap: () => Events;
   };
 
 export type ConcreteDomain<
-  D extends DomainSchemaResult = DomainSchemaResult,
+  D extends AnyMaterializedDomain = AnyMaterializedDomain,
   DB = any,
 > = {
   domain: D;
   db: DB;
-  schema: ReturnType<D["toInstantSchema"]>;
+  schema: ReturnType<D["instantSchema"]>;
   context: (options?: DomainContextOptions) => DomainContext;
   contextString: (options?: DomainContextOptions) => string;
 };
 
 export type ActiveDomain<
-  D extends DomainSchemaResult = DomainSchemaResult,
+  D extends AnyMaterializedDomain = AnyMaterializedDomain,
   Env = unknown,
   Bound extends boolean = true,
 > = ConcreteDomain<D, DomainDbFor<D>> & (Bound extends true
@@ -877,7 +1104,7 @@ export type DomainRuntimeDb = {
 };
 
 export type DomainRuntime<
-  D extends DomainSchemaResult = DomainSchemaResult,
+  D extends AnyMaterializedDomain = AnyMaterializedDomain,
   Env = unknown,
 > = D extends DomainSchemaResult<infer E, infer L, infer R, infer Actions, any, any, infer Events>
   ? {
@@ -952,162 +1179,66 @@ function getMeta(source: unknown): DomainMeta | null {
   return (source as any)[EKAIROS_META] ?? null;
 }
 
-function getActionBinding(source: unknown): { name: string; domain: unknown; key?: string } | null {
-  if (!isObjectLike(source)) return null;
-  const binding = (source as any)[EKAIROS_ACTION_BINDING];
-  if (!binding || typeof binding !== "object") return null;
-  const name = typeof binding.name === "string" ? binding.name.trim() : "";
-  if (!name) return null;
-  const key = typeof binding.key === "string" ? binding.key.trim() : "";
-  return {
-    name,
-    domain: binding.domain,
-    ...(key ? { key } : {}),
-  };
+function getActionBinding(source: unknown) {
+  return getDomainActionBindingView(source);
+}
+
+function requireDomainName(source: unknown): string {
+  const name = String(getMeta(source)?.name ?? "").trim();
+  if (!name) throw new Error("domain_action_owner_required");
+  return name;
 }
 
 function bindAction(
-  action: DomainActionDefinition<any, any, any, any>,
-  params: { name: string; domain: unknown; key?: string },
+  action: DomainActionLike,
+  params: { domain: unknown; key: string },
 ): DomainActionRegistration {
-  const registration: DomainActionRegistration = {
-    ...action,
-    name: params.name,
-  } as DomainActionRegistration;
-  attachActionScope(registration);
-  Object.defineProperty(registration, EKAIROS_ACTION_BINDING, {
-    value: {
-      name: params.name,
-      domain: params.domain,
-      key: params.key,
-    },
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
-  return registration;
-}
-
-function attachActionScope(action: DomainActionRegistration) {
-  Object.defineProperty(action, "scope", {
-    value: (boundInput: Record<string, unknown>) =>
-      scopeAction(action as DomainActionRegistration<any, any, any, any>, boundInput),
-    enumerable: false,
-    configurable: true,
-    writable: false,
-  });
-}
-
-function assertZodObjectInputSchema(
-  schema: DomainActionSchema,
-  actionName: string,
-): asserts schema is z.ZodObject<any> {
-  if (schema instanceof z.ZodObject) return;
-  throw new Error(`domain_action_scope_requires_object_input:${actionName}`);
-}
-
-function getZodObjectShape(schema: z.ZodObject<any>): Record<string, unknown> {
-  const rawShape = (schema as any).shape;
-  if (rawShape && typeof rawShape === "object") return rawShape;
-  const defShape = (schema as any)._def?.shape;
-  if (typeof defShape === "function") return defShape();
-  if (defShape && typeof defShape === "object") return defShape;
-  return {};
-}
-
-function createScopedActionInputSchema(
-  schema: DomainActionSchema,
-  actionName: string,
-  boundInput: Record<string, unknown>,
-) {
-  assertZodObjectInputSchema(schema, actionName);
-  const shape = getZodObjectShape(schema);
-  const boundKeys = Object.keys(boundInput);
-  for (const key of boundKeys) {
-    if (!(key in shape)) {
-      throw new Error(`domain_action_scope_unknown_input:${actionName}.${key}`);
-    }
+  if (isDomainActionRegistration(action)) {
+    return action as DomainActionRegistration;
   }
-
-  const pickShape = Object.fromEntries(boundKeys.map((key) => [key, true]));
-  const omitShape = pickShape;
-  const parsedBound = boundKeys.length > 0
-    ? (schema as any).pick(pickShape).parse(boundInput)
-    : {};
-  const scopedInput = boundKeys.length > 0
-    ? (schema as any).omit(omitShape)
-    : schema;
-
-  return { parsedBound, scopedInput };
+  if (!isDomainActionDefinition(action) || !isObjectLike(params.domain)) {
+    throw new Error(`Invalid domain action definition: ${params.key}`);
+  }
+  return registerDomainAction(action as any, {
+    ownerDomain: requireDomainName(params.domain),
+    key: params.key,
+    ownerDomainObject: params.domain,
+  }) as DomainActionRegistration;
 }
 
 export function scopeAction<
-  Action extends DomainActionRegistration<any, any, any, any>,
+  Action extends DomainActionRegistration<any, any, any, any, any, any, any>,
   const Bound extends Partial<ActionInputOf<Action>>,
 >(
   action: Action,
   boundInput: Bound,
-): Action extends DomainActionRegistration<any, infer OutputSchema, infer Runtime, infer OwnerDomain>
+): Action extends DomainActionRegistration<
+  any,
+  infer OutputSchema,
+  infer Runtime,
+  infer OwnerDomain,
+  infer Key,
+  infer OwnerDomainName,
+  infer FullInputSchema
+>
   ? DomainActionRegistration<
       z.ZodType<ScopedDomainActionInput<Action, Bound>>,
       OutputSchema,
       Runtime,
-      OwnerDomain
+      OwnerDomain,
+      Key,
+      OwnerDomainName,
+      FullInputSchema
     >
   : never {
-  const actionName = String(action?.name || "").trim();
-  if (!actionName || !action || typeof action.execute !== "function") {
-    throw new Error("domain_action_scope_invalid_action");
-  }
-  const boundRecord = isObjectLike(boundInput)
-    ? (boundInput as Record<string, unknown>)
-    : {};
-  const { parsedBound, scopedInput } = createScopedActionInputSchema(
-    action.input,
-    actionName,
-    boundRecord,
-  );
-
-  const scoped = bindAction(
-    {
-      ...action,
-      input: scopedInput,
-      inputSchema: toJsonSchema(scopedInput),
-      outputSchema: action.outputSchema ?? toJsonSchema(action.output),
-      execute: async ({ runtime, input }) => {
-        const parsedInput = scopedInput.parse(input);
-        const mergedInput = action.input.parse({
-          ...(parsedInput as Record<string, unknown>),
-          ...(parsedBound as Record<string, unknown>),
-        });
-        const output = await action.execute({
-          runtime,
-          input: mergedInput,
-        });
-        return action.output.parse(output);
-      },
-    },
-    {
-      name: action.name,
-      domain: getActionBinding(action)?.domain,
-      key: getActionBinding(action)?.key,
-    },
-  );
-
-  return scoped as any;
+  return scopeDomainActionRegistration(action, boundInput) as any;
 }
 
 function getStoredActions(source: unknown): DomainActionRegistration[] {
   if (!isObjectLike(source)) return [];
   const raw = (source as any)[EKAIROS_ACTIONS];
   if (!Array.isArray(raw)) return [];
-  return raw.filter(
-    (entry) =>
-      entry &&
-      typeof entry === "object" &&
-      typeof (entry as any).name === "string" &&
-      typeof (entry as any).execute === "function",
-  ) as DomainActionRegistration[];
+  return raw.filter(isDomainActionRegistration) as DomainActionRegistration[];
 }
 
 function getStoredActionMap(source: unknown): DomainActionMap {
@@ -1133,6 +1264,7 @@ function setStoredActions(source: unknown, actions: DomainActionRegistration[]) 
     configurable: true,
     writable: true,
   });
+  setDomainActionMembership(source, frozenActions);
 }
 
 function setStoredActionMap(source: unknown, actionMap: DomainActionMap) {
@@ -1157,47 +1289,30 @@ function setStoredEventMap(source: unknown, eventMap: DomainEventMap) {
 
 function normalizeActionLike(
   value: DomainActionLike,
-  params: { fallbackName: string; domain: unknown; key?: string },
+  params: { domain: unknown; key: string },
 ): DomainActionRegistration {
-  const action: DomainActionDefinition<any, any, any, any> = value;
-
-  if (
-    !action ||
-    typeof action !== "object" ||
-    typeof action.execute !== "function" ||
-    !action.input ||
-    !action.output
-  ) {
-    throw new Error(`Invalid domain action definition: ${params.fallbackName}`);
-  }
-
-  const explicitName = typeof action.name === "string" ? action.name.trim() : "";
-  const bound = getActionBinding(action);
-  const name = explicitName || bound?.name || params.fallbackName;
-  if (!name) {
-    throw new Error(`Domain action is missing a name: ${params.fallbackName}`);
-  }
-
-  const domain = bound?.domain ?? params.domain;
-  return bindAction(action, { name, domain, key: params.key ?? params.fallbackName });
+  return bindAction(value, params);
 }
 
 function normalizeActionCollection(
   source: unknown,
   input: DomainActionCollection,
 ): { actions: DomainActionRegistration[]; actionMap: DomainActionMap } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("Invalid domain action collection");
+  }
   const current = getStoredActions(source);
   const currentActionMap = getStoredActionMap(source);
-  const byName = new Set(current.map((action) => action.name));
+  const byId = new Set(current.map((action) => action.id));
   const byKey = new Set(Object.keys(currentActionMap));
   const normalized: DomainActionRegistration[] = [];
   const actionMap: DomainActionMap = {};
 
   const push = (candidate: DomainActionRegistration, key?: string) => {
-    if (byName.has(candidate.name)) {
-      throw new Error(`Duplicate domain action name: ${candidate.name}`);
+    if (byId.has(candidate.id)) {
+      throw new Error(`Duplicate domain action id: ${candidate.id}`);
     }
-    const localKey = String(key ?? (candidate as any)?.name ?? "").trim();
+    const localKey = String(key ?? "").trim();
     if (localKey) {
       if (byKey.has(localKey)) {
         throw new Error(`Duplicate domain action key: ${localKey}`);
@@ -1205,27 +1320,12 @@ function normalizeActionCollection(
       byKey.add(localKey);
       actionMap[localKey] = candidate;
     }
-    byName.add(candidate.name);
+    byId.add(candidate.id);
     normalized.push(candidate);
   };
 
-  if (Array.isArray(input)) {
-    for (const entry of input) {
-      const normalizedEntry = normalizeActionLike(entry as DomainActionLike, {
-        fallbackName:
-          typeof (entry as any)?.name === "string"
-            ? String((entry as any).name).trim()
-            : "",
-        domain: source,
-      });
-      push(normalizedEntry, (normalizedEntry as any)?.name);
-    }
-    return { actions: normalized, actionMap };
-  }
-
   for (const [key, value] of Object.entries(input ?? {})) {
     const normalizedEntry = normalizeActionLike(value as DomainActionLike, {
-      fallbackName: key,
       domain: source,
       key,
     });
@@ -1235,14 +1335,14 @@ function normalizeActionCollection(
 }
 
 function normalizeEventLike(
-  value: DomainEventDefinition<any> | DomainEventRegistration<any, any>,
+  value: DomainEventDefinition<any, any> | DomainEventRegistration<any, any, any>,
   params: { fallbackName: string; domain: unknown; domainName?: string },
 ): DomainEventRegistration {
   if (!value || typeof value !== "object" || !value.payload) {
     throw new Error(`Invalid domain event definition: ${params.fallbackName}`);
   }
 
-  const explicitName = typeof value.name === "string" ? value.name.trim() : "";
+  const explicitName = typeof (value as any).name === "string" ? String((value as any).name).trim() : "";
   const name = explicitName || params.fallbackName;
   if (!name) {
     throw new Error(`Domain event is missing a name: ${params.fallbackName}`);
@@ -1254,11 +1354,18 @@ function normalizeEventLike(
     : params.domainName
       ? `${params.domainName}.${name}`
       : name;
+  const domainName = params.domainName?.trim() ?? "";
+  if (!domainName) {
+    throw new Error(`Invalid domain event domain=${domainName || "<missing>"} event=${name}`);
+  }
+  const links = freezeDomainEventLinks(value.links);
 
   return Object.freeze({
     ...value,
+    links,
     name,
     kind,
+    domain: domainName,
     ownerDomain: params.domain,
   }) as DomainEventRegistration;
 }
@@ -1284,21 +1391,6 @@ function normalizeEventCollection(
     eventMap[localKey] = candidate;
   };
 
-  if (Array.isArray(input)) {
-    for (const entry of input) {
-      const normalizedEntry = normalizeEventLike(entry, {
-        fallbackName:
-          typeof entry?.name === "string"
-            ? String(entry.name).trim()
-            : "",
-        domain: source,
-        domainName,
-      });
-      push(normalizedEntry, normalizedEntry.name);
-    }
-    return { eventMap };
-  }
-
   for (const [key, value] of Object.entries(input ?? {})) {
     const normalizedEntry = normalizeEventLike(value, {
       fallbackName: key,
@@ -1309,6 +1401,110 @@ function normalizeEventCollection(
   }
 
   return { eventMap };
+}
+
+function normalizeEventDomainName(name: string): string {
+  const normalized = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!normalized) throw new Error(`Invalid domain event domain=${name || "<missing>"}`);
+  return normalized;
+}
+
+function eventError(params: {
+  domain: string;
+  event: string;
+  alias: string;
+  target: string;
+  has: unknown;
+  message: string;
+}) {
+  return new Error(
+    `${params.message}: domain=${params.domain} event=${params.event} alias=${params.alias} target=${params.target} cardinality=${String(params.has)}`,
+  );
+}
+
+function compileEventLinks(
+  eventMap: DomainEventMap,
+  explicitLinks: LinksDef<any>,
+): { links: PermissiveLinksDef; physicalByEvent: Record<string, Record<string, DomainEventPhysicalLink>> } {
+  const generated: PermissiveLinksDef = {};
+  const physicalByEvent: Record<string, Record<string, DomainEventPhysicalLink>> = {};
+  const aliases = new Map<string, { on: string; has: "one" | "many"; event: string }>();
+  const endpointOwners = new Map<string, string>();
+  for (const [key, linkValue] of Object.entries(explicitLinks)) {
+    const link = linkValue as any;
+    endpointOwners.set(`${link.forward.on}->${link.forward.label}`, key);
+    endpointOwners.set(`${link.reverse.on}->${link.reverse.label}`, key);
+  }
+
+  for (const [eventKey, event] of Object.entries(eventMap)) {
+    const normalizedDomain = normalizeEventDomainName(event.domain);
+    physicalByEvent[eventKey] = {};
+    for (const [alias, rawValue] of Object.entries(event.links ?? {})) {
+      const raw = rawValue as DomainEventLinkDefinition;
+      const target = typeof raw?.on === "string" ? raw.on.trim() : "";
+      const has = raw?.has;
+      const details = { domain: event.domain, event: event.name, alias, target, has };
+      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) {
+        throw eventError({ ...details, message: "Invalid domain event link alias" });
+      }
+      if (!target) throw eventError({ ...details, message: "Invalid domain event link target" });
+      if (has !== "one" && has !== "many") {
+        throw eventError({ ...details, message: "Invalid domain event link cardinality" });
+      }
+      const prior = aliases.get(alias);
+      if (prior && (prior.on !== target || prior.has !== has)) {
+        throw eventError({ ...details, message: `Conflicting domain event link alias (first event=${prior.event} target=${prior.on} cardinality=${prior.has})` });
+      }
+      aliases.set(alias, { on: target, has, event: event.name });
+
+      const key = `event__${normalizedDomain}__${alias}`;
+      const forwardLabel = `${normalizedDomain}_${alias}`;
+      const reverseLabel = `${normalizedDomain}_events_as_${alias}`;
+      const physical = Object.freeze({ alias, key, target, has, forwardLabel, reverseLabel });
+      if (generated[key]) {
+        physicalByEvent[eventKey][alias] = physical;
+        continue;
+      }
+      const endpoints = [`context_events->${forwardLabel}`, `${target}->${reverseLabel}`];
+      const collision = explicitLinks[key] ? key : endpoints.find((endpoint) => endpointOwners.has(endpoint));
+      if (collision) throw eventError({ ...details, message: `Domain event generated link collision key=${key} collision=${collision}` });
+
+      const link = {
+        forward: { on: "context_events", has, label: forwardLabel },
+        reverse: { on: target, has: "many" as const, label: reverseLabel },
+      };
+      generated[key] = link;
+      endpointOwners.set(endpoints[0], key);
+      endpointOwners.set(endpoints[1], key);
+      physicalByEvent[eventKey][alias] = physical;
+    }
+    physicalByEvent[eventKey] = Object.freeze(physicalByEvent[eventKey]);
+  }
+  return { links: generated, physicalByEvent };
+}
+
+function assertEventLinkTargets(eventMap: DomainEventMap, entities: EntitiesDef) {
+  for (const event of Object.values(eventMap)) {
+    for (const [alias, linkValue] of Object.entries(event.links ?? {})) {
+      const link = linkValue as DomainEventLinkDefinition;
+      if (!("context_events" in entities)) {
+        throw eventError({
+          domain: event.domain, event: event.name, alias, target: "context_events", has: link.has,
+          message: "Missing domain event source entity",
+        });
+      }
+      if (!(link.on in entities)) {
+        throw eventError({
+          domain: event.domain,
+          event: event.name,
+          alias,
+          target: link.on,
+          has: link.has,
+          message: "Missing domain event link target entity",
+        });
+      }
+    }
+  }
 }
 
 function attachMeta(target: object, meta: DomainMeta) {
@@ -1514,119 +1710,81 @@ function scopeDbToDomainSchema<DB>(db: DB, schema: unknown): DB {
   }
 }
 
-function createRuntimeId(prefix = "evt") {
-  const cryptoApi = globalThis.crypto;
-  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
-    return cryptoApi.randomUUID();
-  }
-  return `${prefix}_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+function freezeEventValue<Value>(value: Value): Value {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) freezeEventValue(child);
+  return Object.freeze(value);
 }
 
-function normalizeRuntimeDate(value: string | Date | undefined): { date: Date; iso: string } {
-  if (value instanceof Date) return { date: value, iso: value.toISOString() };
-  if (typeof value === "string" && value.trim()) {
-    const date = new Date(value);
-    if (!Number.isNaN(date.getTime())) return { date, iso: date.toISOString() };
-  }
-  const date = new Date();
-  return { date, iso: date.toISOString() };
-}
-
-function normalizeEventContent(params: {
-  event: DomainEventRegistration;
-  key: string;
-  payload: unknown;
-  options?: DomainEventCreateOptions;
-}) {
-  const parsedPayload = params.event.payload.parse(params.payload);
-  const eventDescriptor = {
-    key: params.key,
-    name: params.event.name,
-    kind: params.event.kind,
-    domainName: getMeta(params.event.ownerDomain)?.name,
-  };
-  const generatedContent =
-    typeof params.event.content === "function"
-      ? params.event.content({ payload: parsedPayload, event: eventDescriptor })
-      : {};
-  const generatedParts =
-    typeof params.event.parts === "function"
-      ? params.event.parts({ payload: parsedPayload, event: eventDescriptor })
-      : undefined;
-  const generatedData =
-    typeof params.event.data === "function"
-      ? params.event.data(parsedPayload)
-      : parsedPayload;
-
-  return {
-    parsedPayload,
-    data: generatedData,
-    content: {
-      ...generatedContent,
-      ...(params.options?.content ?? {}),
-      ...(generatedParts && generatedParts.length > 0 ? { parts: generatedParts } : {}),
-    },
-  };
+function freezeDomainEventLinks<Links extends Record<string, DomainEventLinkDefinition>>(
+  links?: Links,
+): Readonly<Links> {
+  const frozenEntries = Object.entries(links ?? {}).map(([alias, link]) => [
+    alias,
+    Object.freeze({ on: link.on, has: link.has }),
+  ] as const);
+  return Object.freeze(Object.fromEntries(frozenEntries)) as Readonly<Links>;
 }
 
 function createDomainEventMethods(
   eventMap: DomainEventMap,
-  db: DomainRuntimeDb,
+  physicalByEvent = compileEventLinks(eventMap, {}).physicalByEvent,
 ): DomainEventMethods<DomainEventMap> {
   return Object.fromEntries(
     Object.entries(eventMap).map(([key, event]) => {
-      const method = async (
-        payload: unknown,
-        options?: DomainEventCreateOptions,
-      ): Promise<DomainEventRecord> => {
-        const createdAt = normalizeRuntimeDate(options?.createdAt);
-        const id = options?.id ?? createRuntimeId("evt");
-        const domainName = getMeta(event.ownerDomain)?.name;
-        const normalized = normalizeEventContent({ event, key, payload, options });
-        const type = options?.type ?? event.type ?? "input";
-        const channel = options?.channel ?? event.channel ?? "web";
-        const status = options?.status ?? event.status;
-        const item = {
-          kind: event.kind,
-          domain: domainName,
-          name: event.name,
-          ...(options?.key ? { key: options.key } : {}),
-          type,
-          channel,
-          createdAt: createdAt.date,
-          data: normalized.data,
-          content: normalized.content,
-          ...(status ? { status } : {}),
+      const physicalLinks = Object.freeze({ ...(physicalByEvent[key] ?? {}) });
+      const definition = Object.freeze({
+        payload: event.payload,
+        links: event.links ?? Object.freeze({}),
+        kind: event.kind,
+        domain: event.domain,
+        name: event.name,
+        physicalLinks,
+      }) as DomainEventConstructorDefinition;
+      const method = (payload: unknown): DomainEventDraft => {
+        const parsedPayload = freezeEventValue(event.payload.parse(payload));
+        const makeDraft = (logicalLinks: Record<string, string | readonly string[]>): DomainEventDraft => {
+          const draft = {
+            payload: parsedPayload,
+            links: Object.freeze({ ...logicalLinks }),
+            kind: event.kind,
+            domain: event.domain,
+            name: event.name,
+            physicalLinks,
+            definition,
+            link(params: Record<string, unknown>) {
+              const next = { ...logicalLinks };
+              for (const [alias, value] of Object.entries(params ?? {})) {
+                const definition = event.links?.[alias];
+                if (!definition) throw eventError({ domain: event.domain, event: event.name, alias, target: "<unknown>", has: "<unknown>", message: "Unknown domain event link" });
+                const valid = definition.has === "one"
+                  ? typeof value === "string"
+                  : typeof value === "string" || (Array.isArray(value) && value.every((item) => typeof item === "string"));
+                if (!valid) throw eventError({ domain: event.domain, event: event.name, alias, target: definition.on, has: definition.has, message: "Invalid domain event link value" });
+                next[alias] = Array.isArray(value) ? Object.freeze([...value]) : value as string;
+              }
+              return makeDraft(next);
+            },
+          };
+          return Object.freeze(draft) as DomainEventDraft;
         };
-
-        const tx = (db as any)?.tx?.event_items?.[id];
-        if (!tx || typeof tx.create !== "function") {
-          throw new Error(
-            `domain_event_store_unavailable:${event.kind}. Include @ekairos/events in the root domain schema.`,
-          );
-        }
-        await db.transact([tx.create(item)]);
-
-        return {
-          id,
-          kind: event.kind,
-          ...(domainName ? { domain: domainName } : {}),
-          name: event.name,
-          ...(options?.key ? { key: options.key } : {}),
-          type,
-          channel,
-          ...(status ? { status } : {}),
-          createdAt: createdAt.iso,
-          data: normalized.data,
-          content: normalized.content,
-        };
+        return makeDraft({});
       };
-      return [key, method];
+      Object.defineProperties(method, {
+        payload: { value: definition.payload, enumerable: true },
+        links: { value: definition.links, enumerable: true },
+        kind: { value: definition.kind, enumerable: true },
+        domain: { value: definition.domain, enumerable: true },
+        name: { value: definition.name, enumerable: true, configurable: true },
+        physicalLinks: { value: definition.physicalLinks, enumerable: true },
+        definition: { value: definition, enumerable: true },
+      });
+      return [key, Object.freeze(method)];
     }),
   ) as DomainEventMethods<DomainEventMap>;
 }
 
-function createConcreteDomain<D extends DomainSchemaResult, DB>(
+function createConcreteDomain<D extends AnyMaterializedDomain, DB>(
   domainInstance: D,
   db: DB,
   fullSchema?: any,
@@ -1635,9 +1793,9 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
   const baseSchema = fullSchema ?? resolveSchema(domainInstance);
   const domainSchema = resolveSchema(domainInstance);
   const scopedDb = scopeDbToDomainSchema(db, domainSchema);
-  const eventDb = scopeDbToDomainSchema(db, baseSchema);
   const actionMap = getStoredActionMap(domainInstance);
   const eventMap = getStoredEventMap(domainInstance);
+  const eventMethods = createDomainEventMethods(eventMap);
   const concrete: ConcreteDomain<D, DB> = {
     domain: domainInstance,
     db: scopedDb,
@@ -1654,7 +1812,7 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
         ...(bindings.env !== undefined ? { env: bindings.env } : {}),
       } as any;
       runtime.actions = buildActions(stack);
-      runtime.events = createDomainEventMethods(eventMap, eventDb as DomainRuntimeDb);
+      runtime.events = eventMethods;
       return runtime;
     };
 
@@ -1664,25 +1822,19 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
       stack: string[],
     ) => {
       const method = async (input: unknown) => {
-        const execute = action?.execute;
-        if (typeof execute !== "function") {
-          throw new Error(`domain_action_not_executable:${key}`);
-        }
-        if (stack.includes(key)) {
-          throw new Error(`domain_action_cycle:${key}`);
-        }
-
-        const nextStack = [...stack, key];
-        const scopedRuntime = createActionRuntime(nextStack);
-
-        const parsedInput = action.input.parse(input);
-        const params: DomainActionExecuteParams<any, any, D> = {
-          input: parsedInput,
-          runtime: scopedRuntime,
-        };
-
-        const output = await execute(params);
-        return action.output.parse(output);
+        const binding = getActionBinding(action);
+        const execution = await executeDomainActionPrivate(
+          bindings.runtime,
+          action,
+          input,
+          {
+            stack,
+            ...(binding?.ownerDomainObject === domainInstance
+              ? { activeDomain: concrete }
+              : {}),
+          },
+        );
+        return execution.output;
       };
 
       Object.defineProperty(method, "scope", {
@@ -1712,7 +1864,10 @@ function createConcreteDomain<D extends DomainSchemaResult, DB>(
       ;(concrete as any).env = bindings.env;
     }
     ;(concrete as any).actions = buildActions(inheritedStack);
-    ;(concrete as any).events = createDomainEventMethods(eventMap, eventDb as DomainRuntimeDb);
+    ;(concrete as any).events = eventMethods;
+    setActiveDomainActionScopeFactory(concrete as object, (stack) =>
+      createActionRuntime([...stack]),
+    );
   }
   return concrete;
 }
@@ -1736,7 +1891,7 @@ function promoteRuntimeDomainScope(scoped: any): any {
   return promoted;
 }
 
-async function callDomainRuntimeScope<D extends AnyDomainSchemaResult>(
+async function callDomainRuntimeScope<D extends AnyMaterializedDomain>(
   domainInstance: D,
   runtime: RuntimeCallableForDomain<D>,
   options?: unknown,
@@ -1747,12 +1902,15 @@ async function callDomainRuntimeScope<D extends AnyDomainSchemaResult>(
   return promoteRuntimeDomainScope(await runtime.use(domainInstance, options));
 }
 
-export function materializeDomain<SubD extends DomainSchemaResult>(params: {
+export function materializeDomain<
+  SubD extends AnyMaterializedDomain,
+  Env = unknown,
+>(params: {
   rootDomain: DomainSchemaResult;
   subdomain: SubD;
   db: DomainDbFor<SubD>;
-  bindings?: { env?: unknown; runtime?: unknown };
-}): ActiveDomain<SubD, unknown> {
+  bindings?: { env?: Env; runtime?: unknown };
+}): ActiveDomain<SubD, Env> {
   const baseSchema = resolveSchema(params.rootDomain);
   const requiredSchema = resolveSchema(params.subdomain);
   assertDomainNamesInclude(params.rootDomain, params.subdomain);
@@ -1762,7 +1920,7 @@ export function materializeDomain<SubD extends DomainSchemaResult>(params: {
     params.db,
     baseSchema,
     params.bindings,
-  ) as ActiveDomain<SubD, unknown>;
+  ) as ActiveDomain<SubD, Env>;
 }
 
 function loadDomainDoc(scope: "root" | "subdomain", meta: DomainMeta | null): DomainDocInfo | null {
@@ -2266,12 +2424,14 @@ export function domain(arg?: unknown): any {
           seedActions: DomainActionRegistration[] = [],
           seedActionMap: Actions = {} as Actions,
           seedEventMap: Events = {} as Events,
+          rebindOwnerFrom?: object,
         ): DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms, Actions, Name, IncludedNames, Events> => {
           type InstantSchemaResult = ReturnType<
             DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms, Actions, Name, IncludedNames, Events>["toInstantSchema"]
           >;
           const capturedEntities = { ...allEntities };
-          const capturedLinks = cloneLinksDef(allLinks);
+          const compiledEvents = compileEventLinks(seedEventMap, allLinks);
+          const capturedLinks = cloneLinksDef({ ...allLinks, ...compiledEvents.links } as MergedLinksType);
           const capturedRooms = cloneRoomsDef(def.rooms);
           let cachedInstantSchema: InstantSchemaResult | null = null;
 
@@ -2334,6 +2494,8 @@ export function domain(arg?: unknown): any {
               ...finalEntities,
             } as WithBase<MergedEntitiesType>;
 
+            assertEventLinkTargets(seedEventMap, allEntitiesWithBase);
+
             const schemaResult = i.schema({
               entities: allEntitiesWithBase,
               links: cloneLinksDef(finalLinks as MergedLinksType) as LinksDef<WithBase<MergedEntitiesType>>,
@@ -2359,7 +2521,7 @@ export function domain(arg?: unknown): any {
             {
               entities: Object.freeze({ ...allEntities }) as MergedEntitiesType,
               // Strip base phantom from public type so it's assignable to i.schema()
-              links: Object.freeze(cloneLinksDef(allLinks)) as MergedLinksType,
+              links: Object.freeze(cloneLinksDef(capturedLinks)) as MergedLinksType,
               rooms: Object.freeze(cloneRoomsDef(def.rooms)),
               // Add originalEntities for type-safe access to original entity definitions
               originalEntities: Object.freeze({ ...allEntities }) as MergedEntitiesType,
@@ -2381,11 +2543,11 @@ export function domain(arg?: unknown): any {
           const reboundByAction = new Map<DomainActionRegistration, DomainActionRegistration>();
           const reboundActionMap = Object.fromEntries(
             Object.entries(seedActionMap).map(([key, action]) => {
-              const rebound = bindAction(action, {
-                name: action.name,
-                domain: result,
-                key,
-              });
+              const binding = getActionBinding(action);
+              const rebound = rebindOwnerFrom &&
+                binding?.ownerDomainObject === rebindOwnerFrom
+                ? rebindDomainActionOwner(action, result as object) as DomainActionRegistration
+                : action;
               reboundByAction.set(action, rebound);
               return [key, rebound] as const;
             }),
@@ -2393,17 +2555,16 @@ export function domain(arg?: unknown): any {
           const reboundActions = seedActions.map((action) => {
             const rebound = reboundByAction.get(action);
             if (rebound) return rebound;
-            return bindAction(action, {
-              name: action.name,
-              domain: result,
-              key: getActionBinding(action)?.key,
-            });
+            const binding = getActionBinding(action);
+            return rebindOwnerFrom && binding?.ownerDomainObject === rebindOwnerFrom
+              ? rebindDomainActionOwner(action, result as object) as DomainActionRegistration
+              : action;
           });
           setStoredActions(result as any, [...reboundActions]);
           setStoredActionMap(result as any, reboundActionMap);
           setStoredEventMap(result as any, seedEventMap);
           (result as any).actions = getStoredActionMap(result as any);
-          (result as any).events = getStoredEventMap(result as any);
+          (result as any).events = createDomainEventMethods(getStoredEventMap(result as any), compiledEvents.physicalByEvent);
           (result as any).withActions = (actionsInput: DomainActionCollection) => {
             const current = getStoredActions(result as any);
             const currentMap = getStoredActionMap(result as any);
@@ -2412,6 +2573,7 @@ export function domain(arg?: unknown): any {
               [...current, ...additions.actions],
               { ...currentMap, ...additions.actionMap },
               getStoredEventMap(result as any),
+              result as object,
             );
           };
           (result as any).getActions = () => [...getStoredActions(result as any)];
@@ -2423,6 +2585,7 @@ export function domain(arg?: unknown): any {
               getStoredActions(result as any),
               getStoredActionMap(result as any),
               { ...currentMap, ...additions.eventMap },
+              result as object,
             );
           };
           (result as any).getEventMap = () => ({ ...getStoredEventMap(result as any) });
@@ -2464,57 +2627,42 @@ export function composeDomain(
   return builder.withSchema({ entities: {}, links: {}, rooms: {} });
 }
 
-export function defineEvent<InputSchema extends DomainEventSchema>(
-  definition: DomainEventDefinition<InputSchema>,
-): DomainEventDefinition<InputSchema> {
+export function defineEvent<
+  InputSchema extends DomainEventSchema,
+  const Links extends Record<string, DomainEventLinkDefinition> = {},
+>(
+  definition: DomainEventDefinition<InputSchema, Links>,
+): DomainEventDefinition<InputSchema, Links> {
   if (!definition || typeof definition !== "object" || !definition.payload) {
     throw new Error("defineEvent requires a payload schema.");
   }
-  return Object.freeze({ ...definition });
-}
-
-/**
- * Define a domain action without changing the public action contract.
- *
- * Convention for new actions:
- *
- * `async execute({ runtime, input }) { await runtime.db.transact([...]); }`
- *
- * Actions receive a runtime already scoped to the declaring domain. Nested
- * action composition is available through `runtime.actions.*`.
- */
-function toJsonSchema(schema: DomainActionSchema): unknown {
-  try {
-    return z.toJSONSchema(schema as never, { target: "draft-7" });
-  } catch {
-    return undefined;
-  }
+  return Object.freeze({
+    payload: definition.payload,
+    links: freezeDomainEventLinks(definition.links),
+  }) as DomainEventDefinition<InputSchema, Links>;
 }
 
 export function defineDomainAction<
   InputSchema extends DomainActionSchema,
   OutputSchema extends DomainActionSchema,
-  Runtime = DomainRuntime<any>,
+  Runtime = DomainActionRuntimeLike,
   Domain = unknown,
 >(
-  action: DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain>,
+  action: DomainActionImplementationDefinition<
+    InputSchema,
+    OutputSchema,
+    Runtime,
+    Domain
+  >,
 ): DomainActionDefinition<InputSchema, OutputSchema, Runtime, Domain>;
 export function defineDomainAction(
-  action: DomainActionDefinition<any, any, any, any>,
+  action: DomainActionImplementationDefinition<any, any, any, any>,
 ): DomainActionDefinition<any, any, any, any> {
-  return Object.freeze({
-    ...action,
-    inputSchema: toJsonSchema(action.input),
-    outputSchema: toJsonSchema(action.output),
-  });
+  return createDomainActionDefinition(action as any) as DomainActionDefinition;
 }
 
 export const defineAction = defineDomainAction;
 
 export function getDomainActions(source: unknown): DomainActionRegistration[] {
   return getStoredActions(source);
-}
-
-export function getDomainActionBinding(source: unknown): { name: string; domain: unknown; key?: string } | null {
-  return getActionBinding(source);
 }

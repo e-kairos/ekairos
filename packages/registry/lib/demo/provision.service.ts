@@ -2,7 +2,7 @@ import "server-only";
 
 import { init as initAdmin } from "@instantdb/admin";
 import { channelDomain } from "@ekairos/channel/schema";
-import { eventsDomain } from "@ekairos/events/schema";
+import { contextDomain } from "@ekairos/events/schema";
 
 import { getPlatformApi } from "./tenant.service";
 
@@ -17,8 +17,8 @@ import { getPlatformApi } from "./tenant.service";
  */
 
 const DOMAIN_SCHEMAS: Record<string, () => unknown> = {
-  events: () => eventsDomain.toInstantSchema(),
-  channel: () => channelDomain.toInstantSchema(),
+  events: () => contextDomain.instantSchema(),
+  channel: () => channelDomain.instantSchema(),
 };
 
 const pushedDomainsByApp = new Map<string, Set<string>>();
@@ -71,7 +71,7 @@ function channelAdminDb(appId: string, adminToken: string) {
   return initAdmin({
     appId,
     adminToken,
-    schema: channelDomain.toInstantSchema() as any,
+    schema: channelDomain.instantSchema() as any,
     useDateObjects: true,
   });
 }
@@ -108,9 +108,9 @@ export async function seedChannelDemo(params: {
   const db = channelAdminDb(params.appId, params.adminToken);
 
   const existing = await db.query({
-    event_contexts: { $: { where: { key: CHANNEL_DEMO_CONTEXT_KEY } } },
+    context_contexts: { $: { where: { key: CHANNEL_DEMO_CONTEXT_KEY } } },
   });
-  const existingContext = (existing as any)?.event_contexts?.[0] ?? null;
+  const existingContext = (existing as any)?.context_contexts?.[0] ?? null;
   const contextId: string = existingContext?.id ?? newId();
 
   if (params.reset && existingContext) {
@@ -129,10 +129,9 @@ export async function seedChannelDemo(params: {
   const transactions: any[] = [];
   if (!existingContext) {
     transactions.push(
-      db.tx.event_contexts[contextId].update({
+      db.tx.context_contexts[contextId].update({
         key: CHANNEL_DEMO_CONTEXT_KEY,
         name: "Channel demo — procurement",
-        status: "open_idle",
         createdAt: new Date(now - 60_000),
       }),
     );

@@ -1,5 +1,4 @@
-import type { StoredContextResource } from "@ekairos/events"
-import type { ContextReactor } from "@ekairos/reactor/context"
+import type { DatasetSourceDescriptor } from "../builder/types.js"
 import type { TransformInputPreviewContext } from "./filepreview.js"
 
 export type { TransformInputPreviewContext } from "./filepreview.js"
@@ -18,7 +17,7 @@ export type TransformDatasetContext = {
     outputPath: string
   }
   inputPreviews?: Array<{ datasetId: string; preview: TransformInputPreviewContext }>
-  contextResources?: StoredContextResource[]
+  sources?: DatasetSourceDescriptor[]
   errors: string[]
   iterationCount: number
   instructions?: string
@@ -31,15 +30,13 @@ export type TransformDatasetAgentParams = {
   datasetId?: string
   model?: string
   sandboxId?: string
-  reactor?: ContextReactor<any, any>
   sandboxState?: TransformSandboxState
   inputPreviews?: Array<{ datasetId: string; preview: TransformInputPreviewContext }>
-  contextResources?: StoredContextResource[]
+  sources?: DatasetSourceDescriptor[]
 }
 
 export type TransformDatasetRunOptions = {
   prompt?: string
-  durable?: boolean
   initialContent?: Record<string, any>
 }
 
@@ -83,6 +80,6 @@ export type TransformPromptContext = {
       }
     }
   }>
-  contextResources?: StoredContextResource[]
+  sources?: DatasetSourceDescriptor[]
   errors: string[]
 }

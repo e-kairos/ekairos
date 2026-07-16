@@ -2,7 +2,7 @@ import { i } from "@instantdb/core"
 import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
 
-import { dataset } from "../dataset"
+import { materializeDataset } from "../dataset"
 import { datasetDomain } from "../schema"
 
 type Env = Record<string, unknown> & {
@@ -41,7 +41,7 @@ const runtime = new AppRuntime({ orgId: "org_1" })
 // when: callers write an InstaQL query through dataset.fromQuery.
 // then: the query parameter accepts the same entity and where-field shape that
 // InstantDB accepts for db.query with this domain schema.
-dataset(runtime).fromQuery(queryDomain, {
+materializeDataset(runtime).fromQuery(queryDomain, {
   query: {
     query_items: {
       $: {
@@ -61,7 +61,7 @@ dataset(runtime).fromQuery(queryDomain, {
 // given: query validation is scoped to queryDomain, not datasetDomain.
 // when: callers query an entity that is not declared by queryDomain.
 // then: TypeScript rejects the query object before it can be passed to InstantDB.
-dataset(runtime).fromQuery(queryDomain, {
+materializeDataset(runtime).fromQuery(queryDomain, {
   // @ts-expect-error unknown_entities is not part of queryDomain
   query: {
     unknown_entities: {},
@@ -72,7 +72,7 @@ dataset(runtime).fromQuery(queryDomain, {
 // when: callers filter query_items by an unknown field.
 // then: the same ValidQuery constraint used by InstantDB rejects the where
 // clause through the dataset builder.
-dataset(runtime).fromQuery(queryDomain, {
+materializeDataset(runtime).fromQuery(queryDomain, {
   query: {
     query_items: {
       $: {

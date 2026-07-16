@@ -1,9 +1,9 @@
-import { defineAction } from "@ekairos/reactor/context"
+import { defineAction, type DomainActionDefinition } from "@ekairos/domain"
 import { z } from "zod"
 
-import { materializeContextResourcesStep } from "./contextResources.js"
+import { materializeDatasetSourcesStep } from "./sourceMaterialization.js"
 import { getDatasetScriptsDir, getDatasetStandardDirs } from "./datasetFiles.js"
-import { getContextExecutionWorkspaceDirs } from "./contextWorkspace.js"
+import { getContextSessionWorkspaceDirs } from "./contextWorkspace.js"
 import {
   runDatasetSandboxCommandStep,
   writeDatasetSandboxTextFilesStep,
@@ -30,38 +30,46 @@ function stableScriptHash(value: string): string {
   return (hash >>> 0).toString(36)
 }
 
-interface ExecuteCommandToolParams {
-  datasetId: string
-  sandboxId: string
-  runtime: any
-}
+export const datasetSourceInputSchema = z
+  .object({
+    key: z.string(),
+    kind: z.enum(["file", "text", "dataset", "query"]),
+    name: z.string(),
+    description: z.string(),
+  })
+  .passthrough()
 
-const executeCommandInputSchema = z.object({
+export const executeCommandInputSchema = z.object({
+  datasetId: z.string(),
+  sandboxId: z.string(),
+  contextId: z.string().optional(),
+  sessionId: z.string().optional(),
+  sources: z.array(datasetSourceInputSchema).optional(),
   commandDescription: z
     .string()
     .min(1)
     .describe(
-      "Required pre-execution description of the command. Describe the inputs/resources it will use, the operation it will perform, the expected output, and why a command is the right tool instead of direct completion. Invalid descriptions include rereading resources whose descriptor/preview already contains the needed evidence, merely formatting JSON, constructing the final object, writing output.jsonl, or making completion easier.",
+      "Required pre-execution description of the command. Describe the sources it will use, the operation it will perform, the expected output, and why a command is the right tool instead of direct completion.",
     ),
   pythonCode: z
     .string()
     .describe(
-      "Python code to execute. Saved to a file before running. MANDATORY: Use print() to report progress and final results. Keep prints concise; avoid dumping rows/JSON. If context resources are materialized, read os.environ['EKAIROS_CONTEXT_RESOURCES_MANIFEST'] to discover files and metadata. Do not install packages, download dependencies, use pip/npm/apt/curl/wget, or access the network. For large outputs, write to files in the workstation directory and print only file paths and brief summaries.",
+      "Python code to execute. Saved to a file before running. Use print() for concise progress and results. If dataset sources are materialized, read os.environ['EKAIROS_DATASET_SOURCES_MANIFEST'] to discover files and metadata. Do not install packages, download dependencies, or access the network.",
     ),
   scriptName: z
     .string()
     .describe(
       "Name for the script file in snake_case (e.g., 'inspect_file', 'parse_csv', 'generate_dataset'). A deterministic suffix will be appended automatically.",
     ),
-  resourceKeys: z
+  sourceKeys: z
     .array(z.string())
     .optional()
-    .describe("Optional context resource keys to materialize before running the script. Omit to materialize every context resource."),
+    .describe("Optional source keys to materialize before running the script. Omit to materialize every source."),
 })
 
-const materializedResourceSchema = z.object({
+export const materializedSourceSchema = z.object({
   key: z.string(),
-  type: z.string(),
+  kind: z.string(),
   status: z.string(),
   dir: z.string(),
   files: z.array(
@@ -74,7 +82,7 @@ const materializedResourceSchema = z.object({
   reason: z.string().optional(),
 })
 
-const executeCommandOutputSchema = z
+export const executeCommandOutputSchema = z
   .object({
     success: z.boolean(),
     fatal: z.boolean().optional(),
@@ -85,9 +93,9 @@ const executeCommandOutputSchema = z
     scriptPath: z.string(),
     message: z.string().optional(),
     error: z.string().optional(),
-    resourcesDir: z.string().optional(),
-    resourcesManifestPath: z.string().optional(),
-    materializedResources: z.array(materializedResourceSchema).optional(),
+    sourcesDir: z.string().optional(),
+    sourcesManifestPath: z.string().optional(),
+    materializedSources: z.array(materializedSourceSchema).optional(),
     stdoutTruncated: z.boolean(),
     stderrTruncated: z.boolean(),
     stdoutOriginalLength: z.number(),
@@ -95,27 +103,34 @@ const executeCommandOutputSchema = z
   })
   .passthrough()
 
-export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: ExecuteCommandToolParams): any {
-  return defineAction({
+export const executeCommand: DomainActionDefinition<
+  typeof executeCommandInputSchema,
+  typeof executeCommandOutputSchema
+> = defineAction({
     description:
-      "Execute Python scripts in the sandbox only when command execution is necessary to inspect, parse, aggregate, join, or compute over context resources that are not sufficiently represented in the visible context, resource descriptors, or previews. This is a high-cost computation tool, not a completion tool. Do not use it merely to reread resources whose descriptor/preview already contains the needed evidence, format JSON, build the final object, write output.jsonl, or make completion easier when completeObject or replaceRows can return the result directly. Before the script runs, requested context resources are materialized into /tmp/ekairos/contexts/{contextId}/resources and a manifest.json is written there. The Python process receives EKAIROS_CONTEXT_RESOURCES_DIR and EKAIROS_CONTEXT_RESOURCES_MANIFEST environment variables when resources are available; manifest entries expose files as resources[].files[].path. Do not install packages, download dependencies, use pip/npm/apt/curl/wget, or access the network; use only the available runtime and standard library unless a dependency is already present. Print concise progress and results only; do not dump large data.",
+      "Execute Python in the sandbox only when deterministic inspection, parsing, aggregation, joins, or computation over dataset sources is required. Requested sources are materialized explicitly under /tmp/ekairos/contexts/{contextId}/sources. The process receives EKAIROS_DATASET_SOURCES_DIR and EKAIROS_DATASET_SOURCES_MANIFEST. Do not install packages, download dependencies, or access the network.",
     input: executeCommandInputSchema,
     output: executeCommandOutputSchema,
-    execute: async ({
-      input,
-      context,
-      contextId,
-      executionId,
-    }: any) => {
-      const { commandDescription, pythonCode, resourceKeys, scriptName } = input
+    execute: async ({ input, runtime }) => {
+      const {
+        datasetId,
+        sandboxId,
+        contextId,
+        sessionId,
+        sources,
+        commandDescription,
+        pythonCode,
+        sourceKeys,
+        scriptName,
+      } = input
       const normalizedScriptName = normalizeScriptName(scriptName)
       const scriptHash = stableScriptHash(`${normalizedScriptName}\0${pythonCode}`)
       const scriptsDir =
-        contextId && executionId
-          ? getContextExecutionWorkspaceDirs({ contextId, executionId }).scriptsDir
+        contextId && sessionId
+          ? getContextSessionWorkspaceDirs({ contextId, sessionId }).scriptsDir
           : getDatasetScriptsDir(datasetId)
       const scriptFile = `${scriptsDir}/${normalizedScriptName}-${scriptHash}.py`
-      let resourcesManifest: Awaited<ReturnType<typeof materializeContextResourcesStep>> | null = null
+      let sourcesManifest: Awaited<ReturnType<typeof materializeDatasetSourcesStep>> | null = null
 
       console.log(`[Dataset ${datasetId}] ========================================`)
       console.log(`[Dataset ${datasetId}] Action: executeCommand`)
@@ -126,15 +141,15 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
       console.log(`[Dataset ${datasetId}] ========================================`)
 
       try {
-        if (contextId && Array.isArray(context?.resources) && context.resources.length > 0) {
-          resourcesManifest = await materializeContextResourcesStep({
+        if (contextId && Array.isArray(sources) && sources.length > 0) {
+          sourcesManifest = await materializeDatasetSourcesStep({
             runtime,
             sandboxId,
             contextId,
-            resources: context.resources,
-            resourceKeys,
+            sources,
+            sourceKeys,
           })
-          console.log(`[Dataset ${datasetId}] Resources manifest: ${resourcesManifest.manifestPath}`)
+          console.log(`[Dataset ${datasetId}] Sources manifest: ${sourcesManifest.manifestPath}`)
         }
 
         await runDatasetSandboxCommandStep({
@@ -171,9 +186,9 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
             stderr: written.stderr || "",
             exitCode: written.exitCode,
             scriptPath: scriptFile,
-            resourcesDir: resourcesManifest?.resourcesDir,
-            resourcesManifestPath: resourcesManifest?.manifestPath,
-            materializedResources: resourcesManifest?.resources,
+            sourcesDir: sourcesManifest?.sourcesDir,
+            sourcesManifestPath: sourcesManifest?.manifestPath,
+            materializedSources: sourcesManifest?.sources,
             stdoutTruncated: false,
             stderrTruncated: false,
             stdoutOriginalLength: 0,
@@ -181,13 +196,13 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
           }
         }
 
-        const pythonArgs = resourcesManifest
+        const pythonArgs = sourcesManifest
           ? [
               "-c",
               [
                 "import os, runpy",
-                `os.environ["EKAIROS_CONTEXT_RESOURCES_DIR"] = ${JSON.stringify(resourcesManifest.resourcesDir)}`,
-                `os.environ["EKAIROS_CONTEXT_RESOURCES_MANIFEST"] = ${JSON.stringify(resourcesManifest.manifestPath)}`,
+                `os.environ["EKAIROS_DATASET_SOURCES_DIR"] = ${JSON.stringify(sourcesManifest.sourcesDir)}`,
+                `os.environ["EKAIROS_DATASET_SOURCES_MANIFEST"] = ${JSON.stringify(sourcesManifest.manifestPath)}`,
                 `runpy.run_path(${JSON.stringify(scriptFile)}, run_name="__main__")`,
               ].join("; "),
             ]
@@ -195,7 +210,7 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
 
         console.log(`[Dataset ${datasetId}] Script written to: ${scriptFile}`)
         console.log(
-          `[Dataset ${datasetId}] Executing: python ${resourcesManifest ? "<with context resources env>" : scriptFile}`,
+          `[Dataset ${datasetId}] Executing: python ${sourcesManifest ? "<with dataset sources env>" : scriptFile}`,
         )
 
         const result = await runDatasetSandboxCommandStep({
@@ -225,9 +240,9 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
             stderr: stderrCapped,
             scriptPath: scriptFile,
             error: `Command failed with exit code ${exitCode}`,
-            resourcesDir: resourcesManifest?.resourcesDir,
-            resourcesManifestPath: resourcesManifest?.manifestPath,
-            materializedResources: resourcesManifest?.resources,
+            sourcesDir: sourcesManifest?.sourcesDir,
+            sourcesManifestPath: sourcesManifest?.manifestPath,
+            materializedSources: sourcesManifest?.sources,
             stdoutTruncated: isStdoutTruncated,
             stderrTruncated: isStderrTruncated,
             stdoutOriginalLength: stdout.length,
@@ -247,9 +262,9 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
             stderr: stderrCapped,
             scriptPath: scriptFile,
             error: "Python error detected in stderr",
-            resourcesDir: resourcesManifest?.resourcesDir,
-            resourcesManifestPath: resourcesManifest?.manifestPath,
-            materializedResources: resourcesManifest?.resources,
+            sourcesDir: sourcesManifest?.sourcesDir,
+            sourcesManifestPath: sourcesManifest?.manifestPath,
+            materializedSources: sourcesManifest?.sources,
             stdoutTruncated: isStdoutTruncated,
             stderrTruncated: isStderrTruncated,
             stdoutOriginalLength: stdout.length,
@@ -273,9 +288,9 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
           stderr: stderrCapped,
           scriptPath: scriptFile,
           message: "Command executed successfully",
-          resourcesDir: resourcesManifest?.resourcesDir,
-          resourcesManifestPath: resourcesManifest?.manifestPath,
-          materializedResources: resourcesManifest?.resources,
+          sourcesDir: sourcesManifest?.sourcesDir,
+          sourcesManifestPath: sourcesManifest?.manifestPath,
+          materializedSources: sourcesManifest?.sources,
           stdoutTruncated: isStdoutTruncated,
           stderrTruncated: isStderrTruncated,
           stdoutOriginalLength: stdout.length,
@@ -293,9 +308,9 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
           stderr: "",
           exitCode: -1,
           scriptPath: scriptFile,
-          resourcesDir: resourcesManifest?.resourcesDir,
-          resourcesManifestPath: resourcesManifest?.manifestPath,
-          materializedResources: resourcesManifest?.resources,
+          sourcesDir: sourcesManifest?.sourcesDir,
+          sourcesManifestPath: sourcesManifest?.manifestPath,
+          materializedSources: sourcesManifest?.sources,
           stdoutTruncated: false,
           stderrTruncated: false,
           stdoutOriginalLength: 0,
@@ -304,4 +319,3 @@ export function createExecuteCommandTool({ datasetId, sandboxId, runtime }: Exec
       }
     },
   })
-}

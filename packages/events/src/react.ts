@@ -1,15 +1,13 @@
-"use client";
+"use client"
 
-export { mergeContextStepPartsForUI, useContext } from "./react.use-context";
-
+export { useContext } from "./react.use-context.js"
 export type {
   AppendArgs,
   ContextEventForUI,
+  ContextEventPartForUI,
   ContextFirstLevel,
-  ContextStepForUI,
-  ContextStepRuntime,
-  ContextStepStreamInfo,
-  ContextStepStreamReaderInfo,
+  ContextReactionForUI,
+  ContextSessionForUI,
   ContextStatus,
   ContextValue,
   ReasoningLevel,
@@ -18,10 +16,8 @@ export type {
   UseContextOptions,
   UseContextState,
   UseContextStateHook,
-} from "./react.types";
-
-export { ASSISTANT_MESSAGE_TYPE, INPUT_TEXT_ITEM_TYPE } from "./react.types";
-
+} from "./react.types.js"
+export { ASSISTANT_MESSAGE_TYPE, INPUT_TEXT_ITEM_TYPE } from "./react.types.js"
 export {
   findNormalizedToolPart,
   getActionPartInfo,
@@ -31,17 +27,5 @@ export {
   getReasoningText,
   getSourceParts,
   normalizeContextEventParts,
-} from "./react.context-event-parts";
-
-export type { ContextActionPartInfo } from "./react.context-event-parts";
-
-export {
-  buildContextStepViews,
-  buildEventStepsIndex,
-  buildLiveEventFromStepChunks,
-  consumePersistedContextStepStream,
-  extractPersistedContextTree,
-  isUserEvent,
-} from "./react.step-stream";
-
-export type { PersistedContextTree } from "./react.step-stream";
+} from "./react.context-event-parts.js"
+export type { ContextActionPartInfo } from "./react.context-event-parts.js"

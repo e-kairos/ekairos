@@ -92,69 +92,69 @@ export const eventsDomainEntry: DomainRegistryEntry = {
   id: "events",
   title: "Events",
   summary:
-    "Context-first runtime for AI product interactions: contexts, turns, executions, steps, parts, and durable replay.",
+    "Durable domain events, pure Context data, Sessions, Reactions, and Event Parts consumed by Reactor and UI.",
   href: "/events",
   componentsHref: "/events/components",
   domainHref: "/events/domain",
   schemaPackage: "@ekairos/events",
   packageDependency: "@ekairos/events@beta",
-  aggregateRoot: "event_contexts",
-  durableSurface: "event_parts",
-  heroLabel: "Context runtime",
-  heroTitle: "The interaction layer for AI workflows.",
+  aggregateRoot: "context_contexts",
+  durableSurface: "context_eventParts",
+  heroLabel: "Causal journal",
+  heroTitle: "Facts and execution history, durably linked.",
   heroBody:
-    "Events owns the durable context and execution trail. UI components render that surface, while @ekairos/reactor keeps model reactions, domain actions, and replay orchestration separate.",
+    "Events owns durable contexts and their causal event graph. UI components render that surface, while @ekairos/reactor executes model calls, domain actions, datasets, workspace operations, and emitted effects.",
   ladder: [
     {
       level: "in one sentence",
-      title: "A durable memory for AI conversations.",
-      body: "Everything the agent saw, said, and did — saved as data you can read back anytime.",
+      title: "One durable graph for events and the reactions they cause.",
+      body: "Domain facts, Context revisions, Sessions, Reactions, Events, and Event Parts remain queryable as one causal record.",
     },
     {
       level: "how it works",
-      title: "Append a message, the agent reacts, every step lands as a record.",
-      body: "You open a context for a conversation and append items to it. The agent reacts with the model and your domain actions, and each piece of its work — text, reasoning, action calls — is persisted as it happens. UI reads that same record reactively, so what you render is always what actually occurred.",
+      title: "Persist an Event, select its history, and run a typed Reaction.",
+      body: "Events stays independent from model execution. Reactor records every operation and emitted effect as an Event connected by a Reaction, while UI subscribes to the canonical graph.",
     },
     {
       level: "under the hood",
-      title: "Contexts, items, executions, steps, and parts on a typed schema.",
-      body: "event_contexts is the aggregate root; event_items hold the turn history while event_executions and event_steps track each reaction run, and event_parts are the canonical replay surface. @ekairos/reactor wires models and typed domain actions into that durable trail.",
+      title: "Five entities, each with one responsibility.",
+      body: "context_contexts stores pure data; context_sessions delimit runs; context_reactions connect causes to effects; context_events store facts and operation results; context_eventParts store ordered model-visible parts.",
     },
   ],
   schemaEntities: [
     {
-      name: "event_contexts",
-      description: "The aggregate root for a durable AI interaction, addressed by id or key.",
+      name: "context_contexts",
+      description: "Pure durable Context content and its immediately previous revision.",
     },
     {
-      name: "event_items",
-      description: "Stored user and assistant items that make up the turn history.",
+      name: "context_sessions",
+      description: "Reaction runs with trigger, root reaction, parent session, sandbox identity, and durable status.",
     },
     {
-      name: "event_executions",
-      description: "Reaction runs attached to a context, including status and runtime metadata.",
+      name: "context_reactions",
+      description: "Ordered causal links from one or more cause events to one or more effect events.",
     },
     {
-      name: "event_steps",
-      description: "Execution-level steps for reasoning, action calls, and observable progress.",
+      name: "context_events",
+      description: "Typed domain Events and effects with metadata, payload, and links.",
     },
     {
-      name: "event_parts",
-      description: "Canonical output and replay surface for text, actions, data, and streamed chunks.",
+      name: "context_eventParts",
+      description: "Ordered message, reasoning, action, data, file, and source parts attached to an Event.",
     },
   ],
   actions: [
     {
       name: "Events",
-      description: "Creates and updates durable event contexts, items, executions, steps, and parts.",
+      description: "Creates and queries durable Contexts, Sessions, Reactions, Events, and Event Parts.",
     },
     {
       name: "EventBuilder / Part",
-      description: "Typed builders for creating canonical event input, steps, and parts.",
+      description: "Typed builders for creating canonical domain events and their parts.",
     },
     {
       name: "ContextHandle",
-      description: "Runtime handle for context CRUD, event append, execution opening, and local materialization.",
+      description: "Runtime handle for pure Context creation, lookup, revision, and reaction execution.",
     },
     {
       name: "@ekairos/reactor",
@@ -162,35 +162,46 @@ export const eventsDomainEntry: DomainRegistryEntry = {
     },
     {
       name: "useContext",
-      description: "React hook from @ekairos/events/react for reading and appending context items.",
+      description: "React hook from @ekairos/events/react for reading sessions, reactions, events, parts, and appending input.",
     },
   ],
   usageTitle: "React with @ekairos/reactor. Render with @ekairos/events/react.",
   usageBody:
-    "Product code defines the context once and registry UI imports the package hook directly. The component stays presentation-focused.",
-  usageCode: `import { createContext } from "@ekairos/reactor/context";
+    "Domain code defines typed Events and Reactions. UI reads the persisted journal without owning model execution.",
+  usageCode: `import { Context } from "@ekairos/context";
+import { ai, defineReaction } from "@ekairos/reactor";
 import { useContext } from "@ekairos/events/react";
+import { z } from "zod";
 
-export const tenderContext = createContext("tender.response")
-  .context(async (stored) => ({
-    tenderId: stored.content?.tenderId,
-    orgId: stored.content?.orgId,
-  }))
-  .narrative(async ({ content }) =>
-    \`Prepare the supplier response for tender \${content.tenderId}.\`,
-  )
-  .actions(async () => ({
-    // domain actions live here
-  }))
-  .model("gpt-4o-mini")
-  .build();
+export const tenderReaction = defineReaction(
+  appDomain.events.responseRequested,
+  {
+    key: "tender.response",
+    scope: appDomain,
+    engine: ai({ model: "openai/gpt-5.2" }),
+    sandbox: false,
+  },
+  async reaction => {
+    const draft = await reaction.given(reaction.trigger).agent({
+      instruction: \`Prepare the supplier response for tender \${reaction.context.content.tenderId}.\`,
+      output: z.object({ text: z.string() }),
+    });
+    return await reaction.given(draft).emit(
+      appDomain.events.responseCompleted(draft.payload),
+    );
+  },
+);
+
+const context = await Context(runtime).get({ key: contextKey });
+if (!context) throw new Error("context_not_found");
+await context.react(triggerEvent, tenderReaction);
 
 export function TenderAgent({ db, contextKey }) {
-  const context = useContext(db, { key: contextKey });
+  const context = useContext(db, { apiUrl: "/api/tender/react", contextKey });
   return <EventContextPanel context={context} />;
 }`,
   componentSurface:
-    "Events is the first published UI surface because product apps already need to render live context state, prompt input, history, and execution progress.",
+    "Events is the first published UI surface because product apps need to render live context state, prompt input, causal history, and reaction progress.",
   componentBacklog: [],
   routes: domainRoutes("events"),
   components: [
@@ -255,21 +266,6 @@ export function TenderAgent({ db, contextKey }) {
       group: "Agent shell",
     },
     {
-      id: "context-step-list",
-      label: "ContextStepList",
-      description:
-        "Step list for rendered context turns, including action parts, reasoning visibility, and domain action output.",
-      href: "/events/components#context-step-list",
-      registryName: "context-step-list",
-      registryPath: "/r/context-step-list.json",
-      target: "components/ekairos/events/context-agent/ui/context-step-list.tsx",
-      dependency: "@ekairos/events@beta",
-      packageImport: "@ekairos/events/react",
-      status: "source",
-      kind: "component",
-      group: "Agent shell",
-    },
-    {
       id: "prompt-bar",
       label: "PromptBar",
       description:
@@ -303,7 +299,7 @@ export function TenderAgent({ db, contextKey }) {
       id: "message-list",
       label: "MessageList",
       description:
-        "Message renderer that maps context events and event steps into conversational output and action renderers.",
+        "Message renderer that maps Events and ordered Event Parts into conversational output and action renderers.",
       href: "/events/components#message-list",
       registryName: "message-list",
       registryPath: "/r/message-list.json",
@@ -373,36 +369,6 @@ export function TenderAgent({ db, contextKey }) {
       status: "source",
       kind: "component",
       group: "Agent shell",
-    },
-    {
-      id: "event-steps",
-      label: "EventSteps",
-      description:
-        "Operational renderer for persisted event_steps, replay state, current event payload, and step-specific action views.",
-      href: "/events/components#event-steps",
-      registryName: "ekairos-events-event-steps",
-      registryPath: "/r/ekairos-events-event-steps.json",
-      target: "components/ekairos/events/event-steps.tsx",
-      dependency: "@ekairos/events@beta",
-      packageImport: "@ekairos/events/react",
-      status: "source",
-      kind: "component",
-      group: "Renderers",
-    },
-    {
-      id: "event-step-terminal-renderer",
-      label: "EventStepTerminalRenderer",
-      description:
-        "Terminal-style renderer for command-like event step output and sandbox-backed process progress.",
-      href: "/events/components#event-step-terminal-renderer",
-      registryName: "event-step-terminal-renderer",
-      registryPath: "/r/event-step-terminal-renderer.json",
-      target: "components/ekairos/events/event-step-terminal-renderer.tsx",
-      dependency: "@ekairos/events@beta",
-      packageImport: "@ekairos/events/react",
-      status: "source",
-      kind: "component",
-      group: "Renderers",
     },
     {
       id: "prompt",
@@ -597,12 +563,12 @@ export const sandboxDomainEntry: DomainRegistryEntry = {
     {
       level: "in one sentence",
       title: "A safe computer your agent can use.",
-      body: "Run commands, edit files, open ports — all inside an isolated environment that can't touch anything else.",
+      body: "Run commands, edit files, open ports â€” all inside an isolated environment that can't touch anything else.",
     },
     {
       level: "how it works",
       title: "Create an environment once, then keep coming back to it by id.",
-      body: "You create a sandbox with a provider and runtime, and get back a durable id. From then on the agent runs commands, writes files, and previews running apps through that id — and can reconnect to the same environment later, even across restarts.",
+      body: "You create a sandbox with a provider and runtime, and get back a durable id. From then on the agent runs commands, writes files, and previews running apps through that id â€” and can reconnect to the same environment later, even across restarts.",
     },
     {
       level: "under the hood",
@@ -682,7 +648,7 @@ export const datasetDomainEntry: DomainRegistryEntry = {
   id: "dataset",
   title: "Dataset",
   summary:
-    "Runtime-first dataset materialization for domain rows, query snapshots, file/text sources, transforms, and sandbox-backed analysis.",
+    "Durable formal datasets produced from explicit causal or domain sources.",
   href: "/dataset",
   componentsHref: "/dataset/components",
   domainHref: "/dataset/domain",
@@ -690,25 +656,25 @@ export const datasetDomainEntry: DomainRegistryEntry = {
   packageDependency: "@ekairos/dataset@beta",
   aggregateRoot: "dataset_datasets",
   durableSurface: "dataset_records",
-  heroLabel: "Materialization runtime",
-  heroTitle: "Domain data packaged for AI work.",
+  heroLabel: "Formal data",
+  heroTitle: "Typed facts that scale beyond a model window.",
   heroBody:
-    "Dataset converts domain state into durable rows and artifacts. It can snapshot queries directly or use sandbox-backed reactors for files, transforms, instructions, and multi-source work.",
+    "Dataset materializes files, rows, prior datasets, and typed domain queries into durable ordered records with schema and notation.",
   ladder: [
     {
       level: "in one sentence",
-      title: "Turn your domain data into tidy rows an AI can actually work with.",
-      body: "Messy queries, files, and text become clean, durable datasets ready for analysis.",
+      title: "Turn explicit evidence into durable, typed records.",
+      body: "A Dataset is a formal data product with identity, schema, notation, ordered rows, and a scalable reader.",
     },
     {
       level: "how it works",
-      title: "Point it at a source, choose a shape, and build.",
-      body: "You start from a domain query, a file, another dataset, or plain text, and decide whether the output should be rows or a single structured object. Simple query snapshots materialize directly; richer parsing and transforms run inside a sandbox. Either way the result lands as a durable dataset you can query and reuse.",
+      title: "Start from a causal Point or an explicit builder source.",
+      body: "Reaction code derives evidence from its Point. Adapter code supplies files, rows, datasets, text, or a typed query directly. No Context scan or implicit resource loading occurs.",
     },
     {
       level: "under the hood",
-      title: "Datasets and records built through a runtime-first builder.",
-      body: "dataset_datasets holds metadata, source analysis, output mode, and linked files while dataset_records stores the materialized rows. The dataset(runtime) builder chains fromQuery, from, fromText, asRows, and build, with materializeDataset exposing the same flow as an agent-callable action.",
+      title: "A parent Point linked to a child materialization Reaction.",
+      body: "reaction.given(point).dataset records the parent operation and stores a typed handle. Model-driven materialization runs as a child Reaction with its own execution, steps, parts, and effects.",
     },
   ],
   schemaEntities: [
@@ -724,14 +690,14 @@ export const datasetDomainEntry: DomainRegistryEntry = {
   actions: [
     {
       name: "dataset(runtime)",
-      description: "Builder entry point for source selection, output mode, sandbox, reactor, and build.",
+      description: "Lower-level builder for adapters that already own explicit sources.",
     },
     {
       name: "fromQuery",
-      description: "Snapshots domain query results into a dataset without requiring a reactor.",
+      description: "Snapshots a query typed against its owning domain.",
     },
     {
-      name: "from / fromDataset / fromText",
+      name: "from / fromFile / fromDataset / fromText",
       description: "Adds file, dataset, and text sources for materialization.",
     },
     {
@@ -739,38 +705,31 @@ export const datasetDomainEntry: DomainRegistryEntry = {
       description: "Controls whether output is row-oriented or a single structured object.",
     },
     {
-      name: "materializeDataset",
-      description: "Action-level wrapper for agents that need to produce datasets.",
+      name: "reaction.given(point).dataset",
+      description: "Primary causal API; returns a Point containing a durable Dataset handle.",
     },
   ],
-  usageTitle: "Materialize a domain query into rows.",
+  usageTitle: "Materialize the current causal evidence.",
   usageBody:
-    "Direct query snapshots stay lightweight; richer parsing and transforms can opt into sandbox/reactor execution.",
-  usageCode: `import { dataset } from "@ekairos/dataset";
+    "The Point carries files, prior Dataset handles, rows, Events, and ancestry. The operation rejects an empty Point instead of scanning Context state.",
+  usageCode: `const items = await reaction.given(filesLoaded).dataset({
+  instruction: "Extract one normalized row per tender item.",
+  schema: z.object({
+    code: z.string(),
+    quantity: z.number(),
+    description: z.string(),
+  }),
+});
 
-const result = await dataset(runtime)
-  .fromQuery(tenderDomain, {
-    query: {
-      tenders: {
-        $: {
-          where: { status: "open" },
-          fields: ["title", "deadline", "buyerName"],
-          limit: 50,
-        },
-      },
-    },
-    title: "open-tenders",
-    explanation: "Open tender snapshot for analysis.",
-  })
-  .build({ datasetId: "open_tenders_v1" });
-
-console.log(result.datasetId);`,
+for await (const rows of items.value.read({ batchSize: 500 })) {
+  await persistBatch(rows);
+}`,
   componentSurface:
     "Dataset UI should make materialization observable: sources, row counts, schema, transform state, and downloadable artifacts.",
   componentBacklog: [
     "Dataset source summary for domain queries and files",
     "Rows/object preview with schema-aware empty states",
-    "Transform run panel linked to sandbox and events",
+    "Child Reaction panel linked to the parent Dataset Point",
   ],
   routes: domainRoutes("dataset"),
   components: [],
@@ -802,12 +761,12 @@ export const tasksDomainEntry: DomainRegistryEntry = {
     {
       level: "how it works",
       title: "Open a task, wait for the outcome, keep going.",
-      body: "A workflow opens a task describing what needs to be decided and what shape the answer must have. It then waits — minutes or days — until someone records an outcome, cancels, or fails it. The moment a decision lands, the workflow picks up exactly where it paused, with a typed result in hand.",
+      body: "A workflow opens a task describing what needs to be decided and what shape the answer must have. It then waits â€” minutes or days â€” until someone records an outcome, cancels, or fails it. The moment a decision lands, the workflow picks up exactly where it paused, with a typed result in hand.",
     },
     {
       level: "under the hood",
       title: "One strict record with a schema-validated outcome.",
-      body: "task_tasks stores kind, key, state, instructions, context, and a zod outcome schema that validates the decision before it closes the task. openTask is idempotent by key, awaitOutcome blocks until a terminal state, and decideTask, cancelTask, and failTask resolve it — assignment and notifications stay in your product domain.",
+      body: "task_tasks stores kind, key, state, instructions, context, and a zod outcome schema that validates the decision before it closes the task. openTask is idempotent by key, awaitOutcome blocks until a terminal state, and decideTask, cancelTask, and failTask resolve it â€” assignment and notifications stay in your product domain.",
     },
   ],
   schemaEntities: [
@@ -876,7 +835,7 @@ export const channelDomainEntry: DomainRegistryEntry = {
   id: "channel",
   title: "Channel",
   summary:
-    "Unified multichannel communication for agent threads: one canonical message model across web, email, whatsapp, slack, teams and more — persisted on InstantDB.",
+    "Unified multichannel communication with one canonical message model linked to Contexts and typed Events.",
   href: "/channel",
   componentsHref: "/channel/components",
   domainHref: "/channel/domain",
@@ -885,9 +844,9 @@ export const channelDomainEntry: DomainRegistryEntry = {
   aggregateRoot: "channel_messages",
   durableSurface: "channel_state",
   heroLabel: "Communication runtime",
-  heroTitle: "Every channel. One thread.",
+  heroTitle: "Every channel. One domain Event.",
   heroBody:
-    "Channel turns platform conversations into domain state: every inbound and outbound message — web, email, whatsapp, slack — lands as a canonical channel_messages record on the agent's context. UI reads it reactively from InstantDB; delivery internals stay contained inside the package.",
+    "Channel turns platform conversations into domain state. Every inbound and outbound message lands as channel_messages linked to its Context and typed Event; delivery internals stay inside the package.",
   ladder: [
     {
       level: "in one sentence",
@@ -897,19 +856,19 @@ export const channelDomainEntry: DomainRegistryEntry = {
     {
       level: "how it works",
       title: "Messages come in from any platform, land in one place, and replies go back out.",
-      body: "Each platform delivers messages through a webhook, and every one of them becomes the same canonical record attached to the agent's conversation. Your agent reacts once, and the reply travels back through whichever channel the person used. The UI just reads the thread — it never cares which platform a message came from.",
+      body: "Each webhook creates the same canonical message record. One typed Reaction handles the inbound Event, and the reply returns through the originating channel.",
     },
     {
       level: "under the hood",
       title: "Canonical messages plus the delivery machinery to keep them ordered.",
-      body: "channel_messages is the cross-platform record — kind, direction, role, parts, status — linked to event_contexts and event_items, while channel_locks, channel_queues, channel_subscriptions, and channel_state keep delivery serialized and durable. createChannels boots the runtime from platform credentials and two callbacks, exposing one webhook handler per platform.",
+      body: "channel_messages links to context_contexts and context_events. channel_locks, channel_queues, channel_subscriptions, and channel_state keep delivery serialized and durable.",
     },
   ],
   schemaEntities: [
     {
       name: "channel_messages",
       description:
-        "Canonical message crossing any channel: kind, direction, role, text/parts, status, externalId, participant — linked to event_contexts and event_items.",
+        "Canonical inbound or outbound message linked to context_contexts and context_events.",
     },
     {
       name: "channel_state",
@@ -935,6 +894,11 @@ export const channelDomainEntry: DomainRegistryEntry = {
         "Boots the multichannel runtime: configured platforms feed one inbound pipeline and expose one webhook handler each.",
     },
     {
+      name: "bindReaction",
+      description:
+        "Maps canonical inbound messages to typed domain Events and runs context.react(event, definition).",
+    },
+    {
       name: "inbound.reply",
       description: "Posts a reply on the same platform conversation and persists the outbound message.",
     },
@@ -949,16 +913,25 @@ export const channelDomainEntry: DomainRegistryEntry = {
     {
       name: "useThread (agent)",
       description:
-        "The agent hook queries channel_messages alongside context items, so timelines span every channel for free.",
+        "The agent projection queries channel_messages with Context Events so timelines span every channel.",
     },
   ],
-  usageTitle: "Configure platforms. Everything else is domain state.",
+  usageTitle: "Bind a typed Reaction once, then configure platforms.",
   usageBody:
     "Apps configure platform credentials and two callbacks; messages, subscriptions, locks and queues persist on InstantDB through the channel domain.",
-  usageCode: `import { createChannels } from "@ekairos/channel";
+  usageCode: `import { bindReaction, createChannels } from "@ekairos/channel";
+
+const react = bindReaction({
+  runtime,
+  reaction: answerMessage,
+  event: inbound => support.events.messageReceived({
+    message: inbound.message.text ?? "",
+  }),
+  replyText: effect => effect.payload.answer,
+});
 
 const channels = await createChannels({
-  db,
+  runtime,
   userName: "ekairos",
   platforms: {
     slack: { botToken: process.env.SLACK_BOT_TOKEN!, signingSecret: process.env.SLACK_SIGNING_SECRET! },
@@ -966,10 +939,7 @@ const channels = await createChannels({
   },
   resolveContextId: async ({ channel, threadKey }) =>
     ensureThreadContext(\`\${channel}:\${threadKey}\`),
-  react: async (inbound) => {
-    const reaction = await agentThread(inbound.contextId).react(inbound.message);
-    return reaction.text;
-  },
+  react,
 });
 
 // app/api/channels/[platform]/route.ts
@@ -1028,7 +998,7 @@ export const POST = (req: Request, { params }) =>
       id: "channel-composer",
       label: "ChannelComposer",
       description:
-        "Outbound composer: picks a channel and posts to your send endpoint — the one piece of custom code an app owns.",
+        "Outbound composer: picks a channel and posts to your send endpoint â€” the one piece of custom code an app owns.",
       href: "/channel/components#channel-composer",
       registryName: "channel-composer",
       registryPath: "/r/channel-composer.json",

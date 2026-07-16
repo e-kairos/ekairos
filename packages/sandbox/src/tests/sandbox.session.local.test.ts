@@ -25,6 +25,10 @@ describe("local sandbox session", () => {
         content: "hello from local",
       })
 
+      await expect(session.exists(filePath)).resolves.toBe(true)
+      await expect(session.exists(join(workspaceRoot, "nested"))).resolves.toBe(true)
+      await expect(session.exists(join(workspaceRoot, "missing.txt"))).resolves.toBe(false)
+
       const bytes = await session.readFile(filePath)
       expect(Buffer.from(bytes).toString("utf8")).toBe("hello from local")
 

@@ -87,7 +87,6 @@ Current Codex reactor state:
 - `@ekairos/openai-reactor` supports remote app-server mode and sandbox mode.
 - Sandbox mode supports Sprites and Vercel Sandbox.
 - The app-server stays internal to the sandbox; a turn runner executes inside the sandbox and streams provider events back through persisted process output.
-- Real test location: `packages/reactors/openai-reactor-real-tests/codex.reactor.sandbox.integration.test.ts`.
-- Script: `pnpm --filter @ekairos/openai-reactor run test:reactor:sandbox`.
+- Sandbox validation should be authored against the new Reactor execution API before it is added back to the package test suite.
 
 Do not mock the Codex sandbox path when the request is to validate it. The accepted proof is a real sandbox, copied `auth.json`, real `codex`, real `npx @ekairos/domain@beta create-app`, app URL reachable, CLI query against that URL, and Codex modifying the remote repo.

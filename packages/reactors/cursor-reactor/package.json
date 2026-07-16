@@ -1,7 +1,7 @@
 {
     "name":  "@ekairos/cursor-reactor",
     "version":  "1.21.83-beta.0",
-    "description":  "Cursor Agent reactor scaffolding for @ekairos/events",
+    "description":  "Cursor Agent ReactionEngine for @ekairos/reactor",
     "type":  "module",
     "main":  "./dist/index.js",
     "types":  "./dist/index.d.ts",
@@ -19,7 +19,8 @@
                     "build":  "tsc -p tsconfig.json",
                     "dev":  "tsc -p tsconfig.json --watch",
                     "clean":  "node -e \"require(\u0027fs\u0027).rmSync(\u0027dist\u0027, {recursive:true, force:true})\"",
-                    "typecheck":  "tsc --noEmit"
+                    "typecheck":  "tsc --noEmit",
+                    "test":  "vitest run"
                 },
     "peerDependencies":  {
     "@ekairos/events":  "workspace:*",

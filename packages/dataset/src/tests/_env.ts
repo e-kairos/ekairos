@@ -1,3 +1,6 @@
+import { resolve } from "node:path"
+
+import { config as dotenvConfig } from "dotenv"
 import { describe, it } from "vitest"
 import { getOrCreateInstantTestApp } from "./instantTestUtils"
 import type {
@@ -8,6 +11,21 @@ import type {
 } from "@instantdb/core"
 
 type AnyInstantSchema = InstantSchemaDef<EntitiesDef, LinksDef<EntitiesDef>, RoomsDef>
+
+const envRoots = [
+  process.cwd(),
+  resolve(process.cwd(), ".."),
+  resolve(process.cwd(), "..", ".."),
+  resolve(process.cwd(), "..", "..", ".."),
+  resolve(process.cwd(), "..", "ekairos-core"),
+  resolve(process.cwd(), "..", "..", "ekairos-core"),
+  resolve(process.cwd(), "..", "..", "..", "ekairos-core"),
+]
+
+for (const root of envRoots) {
+  dotenvConfig({ path: resolve(root, ".env.local"), quiet: true })
+  dotenvConfig({ path: resolve(root, ".env"), quiet: true })
+}
 
 export function hasInstantAdmin(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_INSTANT_APP_ID && process.env.INSTANT_APP_ADMIN_TOKEN)

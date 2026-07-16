@@ -22,7 +22,6 @@ describe("runtime action execution outside workflows", () => {
     let executionDomain: any;
     executionDomain = baseExecutionDomain.withActions({
       inspectExecution: defineDomainAction({
-        name: "action.execution.inspect",
         input: z.object({ title: z.string() }),
         output: z.object({
           title: z.string(),
@@ -32,11 +31,11 @@ describe("runtime action execution outside workflows", () => {
           workflowRunId: z.string().nullable(),
           stepId: z.string().nullable(),
         }),
-        async execute({ input, runtime }) {
+        async execute({ input, domain }) {
           const execution = await readActionExecutionContext();
           return {
             title: String(input.title).trim(),
-            runtimeCall: runtime.db.runtimeCall,
+            runtimeCall: domain.db.runtimeCall,
             inWorkflow: execution.inWorkflow,
             inStep: execution.inStep,
             workflowRunId: execution.workflowRunId,

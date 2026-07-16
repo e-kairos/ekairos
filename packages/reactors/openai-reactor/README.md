@@ -1,41 +1,32 @@
 # @ekairos/openai-reactor
 
-Codex/OpenAI reactor package for `@ekairos/events`.
+Codex engine for the `@ekairos/reactor` Reaction API.
 
 ## Exports
 
-- `createCodexReactor(...)`
-- `mapCodexChunkType(...)`
-- `defaultMapCodexChunk(...)`
+- `CodexEngine`
+- `codexEngine(...)`
+- `CodexEngineConfig`
+- `CodexEngineAuthConfig`
 
 ## Usage
 
 ```ts
-import { createCodexReactor } from "@ekairos/openai-reactor";
+import { codexEngine } from "@ekairos/openai-reactor"
 
-const reactor = createCodexReactor({
-  resolveConfig: async () => {
-    "use step";
-    return { mode: "local" };
-  },
-  executeTurn: async () => {
-    "use step";
-    return {
-      providerContextId: "context_1",
-      turnId: "turn_1",
-      assistantText: "Done.",
-      reasoningText: "",
-      diff: "",
-      toolParts: [],
-    };
-  },
-});
+const engine = codexEngine({
+  model: "gpt-5.5",
+  auth: { source: "preinstalled" },
+})
 ```
+
+`CodexEngine` requires a Reaction sandbox. Agent actions are exposed to Codex
+as dynamic tools under their canonical names and execute through the wrappers
+provided by the Reaction runtime.
 
 ## Tests
 
 ```bash
+pnpm --filter @ekairos/openai-reactor typecheck
 pnpm --filter @ekairos/openai-reactor test
-pnpm --filter @ekairos/openai-reactor test:reactor
-pnpm --filter @ekairos/openai-reactor test:reactor:instant
 ```

@@ -1,62 +1,20 @@
-# Dataset Runtime
+# Dataset Internals
 
-Internal implementation notes for the dataset package.
+The public Reaction operation delegates to `buildReactionDataset` through the
+runtime's `materializeDataset` integration.
 
-## Core idea
+Materialization proceeds as follows:
 
-`@ekairos/dataset` turns query, file, text, and dataset resources into persisted datasets.
+1. derive an explicit source from the Events selected by `given(...)`
+2. create or load the deterministic Dataset identity
+3. create a pure source Context containing descriptors
+4. start a child Session for model-driven materialization
+5. copy linked files to the configured sandbox only when required
+6. execute registered Dataset actions
+7. validate and persist ordered records and the data file
+8. emit `dataset.materialized`
+9. return a small typed handle to the parent Dataset operation Event
 
-It uses:
-
-- InstantDB for canonical dataset records and files
-- `@ekairos/events` for iterative agent loops
-- `@ekairos/sandbox` for command execution and file processing
-
-## Runtime contract
-
-Dataset is runtime-first. Callers pass an `EkairosRuntime` whose root domain includes `datasetDomain`.
-
-```ts
-await dataset(runtime, { datasetId: "products_v1" })
-  .from({ kind: "text", text: "sku,price\nA1,10", mimeType: "text/csv" })
-  .auto()
-  .asRows()
-  .build()
-```
-
-Query resources need a second domain: the domain being queried. The runtime must include both `datasetDomain` and the queried domain. Compatibility is checked by domain name and schema, including transitive subdomains.
-
-```ts
-await dataset(runtime)
-  .fromQuery(sourceDomain, {
-    query: {
-      resource_items: {},
-    },
-  })
-  .build({ datasetId: "resource_snapshot_v1" })
-```
-
-## Structure replacement
-
-The replacement API keeps the structure-style resource and output shape:
-
-- `from({ kind: "file" | "text" | "dataset", ... })`
-- `auto()` / `schema(...)`
-- `asRows()` / `asObject()`
-- `dataset(runtime, { datasetId })` with `build()` at the end of the chain
-
-`asObject()` is represented as a single-row dataset. The build result exposes both `firstRow` and `object`, while persistence stays inside the dataset domain.
-
-## High-level flow
-
-1. Create or update dataset metadata.
-2. Materialize resource data.
-3. Run sandbox-backed transforms when needed.
-4. Validate rows against schema.
-5. Upload JSONL output to InstantDB storage.
-6. Mark the dataset as completed.
-
-## Important rule
-
-Reads and metadata live in InstantDB.
-Heavy file or transform work lives in sandbox commands.
+Direct query snapshots may avoid a model and sandbox. File parsing,
+transformations, and multi-source work require explicitly configured engine and
+sandbox capabilities.

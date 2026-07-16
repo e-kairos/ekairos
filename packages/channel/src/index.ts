@@ -9,12 +9,11 @@ export type {
   CreateChannelsOptions,
 } from "./platforms.js";
 
-export const WEB_CHANNEL = "web";
-export const EMAIL_CHANNEL = "email";
-export const WHATSAPP_CHANNEL = "whatsapp";
-
-/** Open union: known channels get literal types, custom channels are allowed. */
 export type ChannelKind = "web" | "email" | "whatsapp" | (string & {});
+
+export const WEB_CHANNEL = "web" satisfies ChannelKind;
+export const EMAIL_CHANNEL = "email" satisfies ChannelKind;
+export const WHATSAPP_CHANNEL = "whatsapp" satisfies ChannelKind;
 
 export type ChannelDirection = "inbound" | "outbound";
 
@@ -47,7 +46,7 @@ export type ChannelMessage = {
   updatedAt?: string;
   /** Links into the agent context, when attached. */
   contextId?: string;
-  itemId?: string;
+  eventId?: string;
 };
 
 export type ChannelOutboundMessage = Omit<ChannelMessage, "id" | "createdAt" | "direction"> & {
