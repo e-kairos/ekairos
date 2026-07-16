@@ -1,0 +1,25 @@
+*** Begin ECU Patch
+Key: 008-order-publish-package-build
+Title: Order the publish package build graph
+Purpose: Make the release publisher build every package after its workspace dependencies in a clean checkout.
+
+*** Begin Context
+After all three required checks passed remotely, the publish job exposed the same warm-worktree assumption in build:publish-packages. The command started Domain before Platform and built Dataset before OpenAI Reactor. This patch reuses the validated prerequisite build and orders the remaining publish packages causally.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/package.json b/package.json
+index 3b19d15..3777ec6 100644
+--- a/package.json
++++ b/package.json
+@@ -17,7 +17,7 @@
+   "scripts": {
+     "build": "node ./scripts/run-build.cjs",
+     "build:required-check-packages": "pnpm --filter @ekairos/platform run build && pnpm --filter @ekairos/domain run build && pnpm --filter @ekairos/testing run build && pnpm --filter @ekairos/events run build && pnpm --filter @ekairos/sandbox run build && pnpm --filter @ekairos/reactor run build",
+-    "build:publish-packages": "pnpm --filter @ekairos/domain run build && pnpm --filter @ekairos/events run build && pnpm --filter @ekairos/reactor run build && pnpm --filter @ekairos/context run build && pnpm --filter @ekairos/tasks run build && pnpm --filter @ekairos/sandbox run build && pnpm --filter @ekairos/dataset run build && pnpm --filter @ekairos/story-react run build && pnpm --filter @ekairos/openai-reactor run build && pnpm --filter @ekairos/toolbar run build && pnpm --filter @ekairos/testing run build && pnpm --filter @ekairos/cli run build && pnpm --filter ekairos run build",
++    "build:publish-packages": "pnpm run build:required-check-packages && pnpm --filter @ekairos/context run build && pnpm --filter @ekairos/tasks run build && pnpm --filter @ekairos/openai-reactor run build && pnpm --filter @ekairos/dataset run build && pnpm --filter @ekairos/story-react run build && pnpm --filter @ekairos/toolbar run build && pnpm --filter @ekairos/cli run build && pnpm --filter ekairos run build",
+     "dev": "turbo dev --concurrency=20",
+     "clean": "turbo clean",
+     "typecheck": "turbo typecheck",
+*** End Git Diff
+*** End ECU Patch
