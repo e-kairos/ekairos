@@ -74,25 +74,66 @@ export type DomainActionInputResolver = (
   context: DomainActionInputResolverContext,
 ) => void | Promise<void>;
 
-const definitions = new WeakMap<object, DefinitionState>();
-const registrations = new WeakMap<object, RegistrationState>();
-const domainMemberships = new WeakMap<object, readonly object[]>();
-const activeDomainScopeFactories = new WeakMap<
-  object,
-  (stack: readonly string[]) => unknown
->();
-const runtimeRootDomains = new WeakMap<object, object>();
-const actionInputResolvers = new WeakMap<object, DomainActionInputResolver>();
-const executionPreparations = new WeakMap<
-  object,
-  Readonly<{
-    action: RegistrationState;
-    registration: object;
-    runtime: object;
-    executionDomain: unknown;
-    effectiveInput: unknown;
-  }>
->();
+type ExecutionPreparationState = Readonly<{
+  action: RegistrationState;
+  registration: object;
+  runtime: object;
+  executionDomain: unknown;
+  effectiveInput: unknown;
+}>;
+
+type DomainActionRealmState = Readonly<{
+  definitions: WeakMap<object, DefinitionState>;
+  registrations: WeakMap<object, RegistrationState>;
+  domainMemberships: WeakMap<object, readonly object[]>;
+  activeDomainScopeFactories: WeakMap<
+    object,
+    (stack: readonly string[]) => unknown
+  >;
+  runtimeRootDomains: WeakMap<object, object>;
+  actionInputResolvers: WeakMap<object, DomainActionInputResolver>;
+  executionPreparations: WeakMap<object, ExecutionPreparationState>;
+}>;
+
+const DOMAIN_ACTION_REALM_STATE = Symbol.for(
+  "@ekairos/domain/action-realm-state/v1",
+);
+
+function domainActionRealmState(): DomainActionRealmState {
+  const realm = globalThis as Record<PropertyKey, unknown>;
+  const existing = realm[DOMAIN_ACTION_REALM_STATE];
+  if (existing) return existing as DomainActionRealmState;
+
+  const created = Object.freeze({
+    definitions: new WeakMap<object, DefinitionState>(),
+    registrations: new WeakMap<object, RegistrationState>(),
+    domainMemberships: new WeakMap<object, readonly object[]>(),
+    activeDomainScopeFactories: new WeakMap<
+      object,
+      (stack: readonly string[]) => unknown
+    >(),
+    runtimeRootDomains: new WeakMap<object, object>(),
+    actionInputResolvers: new WeakMap<object, DomainActionInputResolver>(),
+    executionPreparations: new WeakMap<object, ExecutionPreparationState>(),
+  });
+  Object.defineProperty(realm, DOMAIN_ACTION_REALM_STATE, {
+    value: created,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return created;
+}
+
+const {
+  definitions,
+  registrations,
+  domainMemberships,
+  activeDomainScopeFactories,
+  runtimeRootDomains,
+  actionInputResolvers,
+  executionPreparations,
+} = domainActionRealmState();
 
 function actionInputResolverKey(schema: object): object {
   const definition = (schema as any)._zod?.def;
