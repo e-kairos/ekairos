@@ -1,0 +1,71 @@
+diff --git a/scripts/release-check.mjs b/scripts/release-check.mjs
+index 2780956..b58c91c 100644
+--- a/scripts/release-check.mjs
++++ b/scripts/release-check.mjs
+@@ -55,6 +55,30 @@ function assertVersionTagCompatibility(version, distTag) {
+   }
+ }
+ 
++function assertReleaseGraph() {
++  const publishable = new Map(
++    config.publishablePackages.map((pkg) => [pkg.name, pkg]),
++  );
++  const prepared = new Set(config.preparePackages ?? []);
++  const linked = config.linkedPackages ?? {};
++
++  for (const pkg of config.publishablePackages) {
++    if (!prepared.has(pkg.dir)) {
++      fail(`Publishable package ${pkg.name} is missing from preparePackages.`);
++    }
++    const packageJson = readJson(path.join(pkg.dir, 'package.json'));
++    for (const [dependency, version] of Object.entries(packageJson.dependencies ?? {})) {
++      if (typeof version !== 'string' || !version.startsWith('workspace:')) continue;
++      if (!publishable.has(dependency)) {
++        fail(`${pkg.name} has unpublished workspace dependency ${dependency}.`);
++      }
++      if (linked[dependency] !== publishable.get(dependency).dir) {
++        fail(`${dependency} must be mapped to ${publishable.get(dependency).dir} in linkedPackages.`);
++      }
++    }
++  }
++}
++
+ function main() {
+   const rootPackage = readJson('package.json');
+   const rootVersion = rootPackage.version;
+@@ -73,6 +97,8 @@ function main() {
+     fail(`Unsupported channel "${distTag}". Allowed: ${Array.from(allowedTags).join(', ')}`);
+   }
+ 
++  assertReleaseGraph();
++
+   const packageVersions = config.publishablePackages.map((pkg) => {
+     const packageJson = readJson(path.join(pkg.dir, 'package.json'));
+     return { name: pkg.name, version: packageJson.version };
+diff --git a/scripts/release-config.json b/scripts/release-config.json
+index af8c58d..dda845f 100644
+--- a/scripts/release-config.json
++++ b/scripts/release-config.json
+@@ -1,5 +1,6 @@
+ {
+   "publishablePackages": [
++    { "name": "@ekairos/platform", "dir": "packages/platform", "publicAccess": true },
+     { "name": "@ekairos/domain", "dir": "packages/domain", "publicAccess": true },
+     { "name": "@ekairos/sandbox", "dir": "packages/sandbox", "publicAccess": true },
+     { "name": "@ekairos/dataset", "dir": "packages/dataset", "publicAccess": true },
+@@ -15,6 +16,7 @@
+     { "name": "ekairos", "dir": "packages/ekairos", "publicAccess": false }
+   ],
+   "preparePackages": [
++    "packages/platform",
+     "packages/domain",
+     "packages/sandbox",
+     "packages/dataset",
+@@ -30,6 +32,7 @@
+     "packages/ekairos"
+   ],
+   "linkedPackages": {
++    "@ekairos/platform": "packages/platform",
+     "@ekairos/domain": "packages/domain",
+     "@ekairos/sandbox": "packages/sandbox",
+     "@ekairos/tasks": "packages/tasks",

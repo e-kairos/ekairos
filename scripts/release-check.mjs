@@ -55,6 +55,30 @@ function assertVersionTagCompatibility(version, distTag) {
   }
 }
 
+function assertReleaseGraph() {
+  const publishable = new Map(
+    config.publishablePackages.map((pkg) => [pkg.name, pkg]),
+  );
+  const prepared = new Set(config.preparePackages ?? []);
+  const linked = config.linkedPackages ?? {};
+
+  for (const pkg of config.publishablePackages) {
+    if (!prepared.has(pkg.dir)) {
+      fail(`Publishable package ${pkg.name} is missing from preparePackages.`);
+    }
+    const packageJson = readJson(path.join(pkg.dir, 'package.json'));
+    for (const [dependency, version] of Object.entries(packageJson.dependencies ?? {})) {
+      if (typeof version !== 'string' || !version.startsWith('workspace:')) continue;
+      if (!publishable.has(dependency)) {
+        fail(`${pkg.name} has unpublished workspace dependency ${dependency}.`);
+      }
+      if (linked[dependency] !== publishable.get(dependency).dir) {
+        fail(`${dependency} must be mapped to ${publishable.get(dependency).dir} in linkedPackages.`);
+      }
+    }
+  }
+}
+
 function main() {
   const rootPackage = readJson('package.json');
   const rootVersion = rootPackage.version;
@@ -72,6 +96,8 @@ function main() {
   if (!allowedTags.has(distTag)) {
     fail(`Unsupported channel "${distTag}". Allowed: ${Array.from(allowedTags).join(', ')}`);
   }
+
+  assertReleaseGraph();
 
   const packageVersions = config.publishablePackages.map((pkg) => {
     const packageJson = readJson(path.join(pkg.dir, 'package.json'));

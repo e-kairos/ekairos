@@ -1,5 +1,6 @@
 {
   "publishablePackages": [
+    { "name": "@ekairos/platform", "dir": "packages/platform", "publicAccess": true },
     { "name": "@ekairos/domain", "dir": "packages/domain", "publicAccess": true },
     { "name": "@ekairos/sandbox", "dir": "packages/sandbox", "publicAccess": true },
     { "name": "@ekairos/dataset", "dir": "packages/dataset", "publicAccess": true },
@@ -15,6 +16,7 @@
     { "name": "ekairos", "dir": "packages/ekairos", "publicAccess": false }
   ],
   "preparePackages": [
+    "packages/platform",
     "packages/domain",
     "packages/sandbox",
     "packages/dataset",
@@ -30,6 +32,7 @@
     "packages/ekairos"
   ],
   "linkedPackages": {
+    "@ekairos/platform": "packages/platform",
     "@ekairos/domain": "packages/domain",
     "@ekairos/sandbox": "packages/sandbox",
     "@ekairos/tasks": "packages/tasks",
