@@ -92,20 +92,94 @@ describeInstant("context causal persistence", () => {
       id: operationReactionId,
       sessionId,
       parentReactionId: rootReactionId,
-      type: "context.agent",
+      type: "agent",
       position: 1,
       depth: 1,
       causeIds: [triggerId],
       instruction: "Responde el mensaje.",
     })
+    const streamClientId = `context-reaction:${operationReactionId}`
+    const stream = (db as any).streams.createWriteStream({ clientId: streamClientId })
+    const streamId = await stream.streamId()
+    await store.attachReactionStream(operationReactionId, {
+      streamId,
+      clientId: streamClientId,
+      startedAt: new Date("2026-07-16T12:00:00.000Z"),
+    })
+    const writer = stream.getWriter()
+    await writer.write("reaction stream\n")
+    await writer.close()
+    await store.finishReactionStream(operationReactionId, {
+      finishedAt: new Date("2026-07-16T12:00:01.000Z"),
+    })
+    const modelStarted = await events.create({
+      id: randomUUID(),
+      type: "context.model",
+      contextId: updatedContext.id,
+      payload: { round: 0 },
+      metadata: { reactionId: operationReactionId },
+    })
+    await store.appendReactionEffect(operationReactionId, modelStarted.id)
+
+    const childTrigger = await events.create({
+      id: randomUUID(),
+      type: "contextPersistenceTest.verificationRequested",
+      contextId: updatedContext.id,
+      payload: { review: true },
+      metadata: { reactionId: operationReactionId, actionCallId: "call-1" },
+    })
+    await store.appendReactionEffect(operationReactionId, childTrigger.id)
+    const childSessionId = randomUUID()
+    const childRootReactionId = randomUUID()
+    await updatedContext.openSession({
+      id: childSessionId,
+      rootReactionId: childRootReactionId,
+      definition: "contextPersistenceTest.verify",
+      triggerId: childTrigger.id,
+      parentSessionId: sessionId,
+      parentReactionId: operationReactionId,
+    })
+    const childResult = await events.create({
+      id: randomUUID(),
+      type: "contextPersistenceTest.verificationCompleted",
+      contextId: updatedContext.id,
+      payload: { valid: true },
+      metadata: { reactionId: childRootReactionId },
+    })
+    await store.completeReaction(childRootReactionId, "completed", [childResult.id])
+    await store.completeSession(childSessionId, "completed")
+    await store.appendReactionEffect(operationReactionId, childResult.id)
+
+    const actionResult = await events.create({
+      id: randomUUID(),
+      type: "context.action",
+      contextId: updatedContext.id,
+      payload: { recorded: true },
+      metadata: { reactionId: operationReactionId, actionCallId: "call-1" },
+    })
+    await store.appendReactionEffect(operationReactionId, actionResult.id)
     const agentResult = await events.create({
       id: randomUUID(),
-      type: "context.agent",
+      type: "context.model",
       contextId: updatedContext.id,
       payload: { message: "Oferta preparada." },
       parts: [Part.message("Oferta preparada.")],
+      metadata: { reactionId: operationReactionId },
     })
-    await store.completeReaction(operationReactionId, "completed", [agentResult.id])
+    await store.appendReactionEffect(operationReactionId, agentResult.id)
+    const orderedEffects = [
+      modelStarted.id,
+      childTrigger.id,
+      childResult.id,
+      actionResult.id,
+      agentResult.id,
+    ]
+    await store.completeReaction(operationReactionId, "completed", orderedEffects)
+    expect((await store.getReaction(operationReactionId))?.effectIds).toEqual(orderedEffects)
+    expect(await store.getSession(childSessionId)).toMatchObject({
+      parentSessionId: sessionId,
+      parentReactionId: operationReactionId,
+    })
 
     const answer = await events.emit(
       testDomain.events.messageAnswered({ message: agentResult.payload.message }),
@@ -122,7 +196,7 @@ describeInstant("context causal persistence", () => {
         rootReaction: {
           causes: {},
           effects: {},
-          children: { causes: {}, effects: { eventParts: {} } },
+          children: { causes: {}, effects: { eventParts: {} }, stream: {} },
         },
       },
     } as any)
@@ -131,7 +205,15 @@ describeInstant("context causal persistence", () => {
     expect(stored.trigger.id).toBe(triggerId)
     expect(stored.rootReaction.causes.map((event: any) => event.id)).toEqual([triggerId])
     expect(stored.rootReaction.effects.map((event: any) => event.id)).toEqual([answer.id])
-    expect(stored.rootReaction.children[0].effects[0].id).toBe(agentResult.id)
+    expect(stored.rootReaction.children[0].effects.map((row: any) => row.id))
+      .toEqual(expect.arrayContaining(orderedEffects))
+    expect(stored.rootReaction.children[0]).toMatchObject({
+      streamId,
+      streamClientId,
+      streamStartedAt: "2026-07-16T12:00:00.000Z",
+      streamFinishedAt: "2026-07-16T12:00:01.000Z",
+    })
+    expect(stored.rootReaction.children[0].stream.id).toBe(streamId)
 
     const secondContext = await ContextHandle.create(runtime, {
       id: randomUUID(),

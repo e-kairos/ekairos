@@ -1,26 +1,48 @@
 /* @vitest-environment node */
 
 import { randomUUID } from "node:crypto"
+import { readdir, readFile } from "node:fs/promises"
+import { resolve } from "node:path"
 import { init } from "@instantdb/admin"
 import { ContextHandle, Events } from "@ekairos/events"
 import { afterAll, beforeAll, expect } from "vitest"
+import { start } from "workflow/api"
 
 import {
   destroyContextTestApp,
   itInstant,
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
-import { executeReaction } from "../reaction.ts"
 import {
   reactorWorkflow,
+  ReactorWorkflowContext,
   reactorWorkflowDomain,
-  reactorWorkflowReaction,
   ReactorWorkflowRuntime,
 } from "./workflow/reaction.workflow-fixtures.ts"
 
 let appId = ""
 let adminToken = ""
 let db: ReturnType<typeof init>
+
+async function workflowStepNames(runId: string) {
+  const directory = resolve(process.cwd(), ".workflow-data", "steps")
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const files = (await readdir(directory))
+      .filter(file => file.startsWith(runId) && file.endsWith(".json"))
+    const rows = await Promise.all(files.map(async file =>
+      JSON.parse(await readFile(resolve(directory, file), "utf8")) as {
+        stepName: string
+        createdAt: string
+      }))
+    if (rows.length >= 4) {
+      return rows
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        .map(row => row.stepName.split("//").at(-1) ?? row.stepName)
+    }
+    await new Promise(resolveWait => setTimeout(resolveWait, 50))
+  }
+  return []
+}
 
 beforeAll(async () => {
   const app = await provisionContextTestApp({
@@ -43,10 +65,11 @@ afterAll(async () => {
 
 itInstant("runs the new Reaction API through Workflow and persists its causal graph", async () => {
   const runtime = new ReactorWorkflowRuntime({ appId, adminToken })
-  const context = await ContextHandle.create(runtime, {
+  const stored = await ContextHandle.create(runtime, {
     key: `reactor-workflow:${randomUUID()}`,
     content: { prefix: "workflow" },
   })
+  const context = new ReactorWorkflowContext(runtime, stored.context)
   const trigger = await Events(runtime).emit(
     reactorWorkflowDomain.events.requested({ message: "hello" }),
     {
@@ -57,15 +80,16 @@ itInstant("runs the new Reaction API through Workflow and persists its causal gr
     },
   )
 
-  const effect = await executeReaction(
-    runtime,
-    context,
-    trigger,
-    reactorWorkflowReaction,
-    { workflow: reactorWorkflow },
-  )
+  const run = await start(reactorWorkflow, [context, trigger])
+  const effect = await run.returnValue
 
   expect(effect.payload).toEqual({ message: "workflow:hello" })
+  expect(await workflowStepNames(run.runId)).toEqual([
+    "startReaction",
+    "agent",
+    "emit",
+    "finishReaction",
+  ])
 
   const result = await db.query({
     context_contexts: {
@@ -88,7 +112,7 @@ itInstant("runs the new Reaction API through Workflow and persists its causal gr
     : session.rootReaction
 
   expect(session.status).toBe("completed")
-  expect(session.workflowRunId).toBeTruthy()
+  expect(session.workflowRunId).toBe(run.runId)
   expect(rootReaction.effects.map((event: any) => event.id)).toContain(effect.id)
   expect(session.reactions
     .sort((left: any, right: any) => left.position - right.position)

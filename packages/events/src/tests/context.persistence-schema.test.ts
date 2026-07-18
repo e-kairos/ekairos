@@ -30,10 +30,23 @@ describe("context persistence schema", () => {
       children: { entityName: "context_reactions", cardinality: "many" },
       causes: { entityName: "context_events", cardinality: "many" },
       effects: { entityName: "context_events", cardinality: "many" },
+      stream: { entityName: "$streams", cardinality: "one" },
+    })
+
+    expect(schema.entities.context_reactions.attrs).toMatchObject({
+      streamId: expect.anything(),
+      streamClientId: expect.anything(),
+      streamStartedAt: expect.anything(),
+      streamFinishedAt: expect.anything(),
+      streamError: expect.anything(),
     })
 
     expect(schema.entities.context_eventParts.links).toEqual({
       event: { entityName: "context_events", cardinality: "one" },
+    })
+    expect(schema.entities.context_events.links.files).toEqual({
+      entityName: "$files",
+      cardinality: "many",
     })
   })
 })

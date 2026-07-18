@@ -1,0 +1,633 @@
+diff --git a/packages/reactor/src/agent.ts b/packages/reactor/src/agent.ts
+index 206f706..3891ff6 100644
+--- a/packages/reactor/src/agent.ts
++++ b/packages/reactor/src/agent.ts
+@@ -100,11 +100,23 @@ async function runAiSdkAgent<TContext, TOutput>(
+       actions: wireActions,
+       toolChoice,
+       contextId: request.context.ref.id,
++      round,
++      ...(request.stream ? { stream: request.stream } : {}),
+     })
+     roundMetadata.push(turn.metadata)
+     lastText = turn.text || lastText
+     let roundParts = [...turn.parts]
+     for (const call of turn.calls) {
++      const canonicalName = call.actionName === RESPOND
++        ? RESPOND
++        : names.wireToCanonical.get(call.actionName) ?? call.actionName
++      await request.stream?.emit({
++        kind: "action.started",
++        round,
++        actionCallId: call.actionCallId,
++        actionName: canonicalName,
++        input: call.input,
++      })
+       if (call.actionName === RESPOND && request.output) {
+         finalOutput = call.input
+         completed = true
+@@ -112,6 +124,13 @@ async function runAiSdkAgent<TContext, TOutput>(
+           ok: true,
+           output: call.input,
+         })
++        await request.stream?.emit({
++          kind: "action.completed",
++          round,
++          actionCallId: call.actionCallId,
++          actionName: RESPOND,
++          output: call.input,
++        })
+         continue
+       }
+ 
+@@ -122,15 +141,37 @@ async function runAiSdkAgent<TContext, TOutput>(
+           ok: false,
+           error: `Unknown action: ${call.actionName}`,
+         })
++        await request.stream?.emit({
++          kind: "action.failed",
++          round,
++          actionCallId: call.actionCallId,
++          actionName: canonicalName,
++          error: { message: `Unknown action: ${call.actionName}` },
++        })
+         continue
+       }
+       try {
+         const output = await action.execute(call.input)
+         roundParts = applyActionResult(roundParts, call, { ok: true, output })
++        await request.stream?.emit({
++          kind: "action.completed",
++          round,
++          actionCallId: call.actionCallId,
++          actionName: canonical,
++          output,
++        })
+       } catch (error) {
++        const message = error instanceof Error ? error.message : String(error)
+         roundParts = applyActionResult(roundParts, call, {
+           ok: false,
+-          error: error instanceof Error ? error.message : String(error),
++          error: message,
++        })
++        await request.stream?.emit({
++          kind: "action.failed",
++          round,
++          actionCallId: call.actionCallId,
++          actionName: canonical,
++          error: { message },
+         })
+       }
+     }
+diff --git a/packages/reactor/src/index.ts b/packages/reactor/src/index.ts
+index 0644462..d60381c 100644
+--- a/packages/reactor/src/index.ts
++++ b/packages/reactor/src/index.ts
+@@ -34,6 +34,8 @@ export type {
+   ReactionEngineActions,
+   ReactionEngineInput,
+   ReactionEngineResult,
++  ReactionEngineStream,
++  ReactionEngineStreamEmission,
+   ReactionModel,
+   ReactionSandbox,
+   ReactionSandboxResolverInput,
+diff --git a/packages/reactor/src/reaction.operation.ts b/packages/reactor/src/reaction.operation.ts
+index 5646918..cc5d49e 100644
+--- a/packages/reactor/src/reaction.operation.ts
++++ b/packages/reactor/src/reaction.operation.ts
+@@ -21,6 +21,10 @@ import { z } from "zod"
+ 
+ import { runReactionEngineAgent } from "./agent.js"
+ import { buildAgentModelMessages } from "./reaction-view.js"
++import {
++  openReactionStream,
++  type ReactionStreamController,
++} from "./reaction.stream.js"
+ import type {
+   AnyReactionEngine,
+   ReactionModel,
+@@ -166,17 +170,32 @@ export async function executeReactionOperation(
+       : {}),
+   })
+ 
++  let stream: ReactionStreamController | undefined
+   try {
+-    const event = await runOperation(request)
++    if (request.operation.kind === "agent") {
++      stream = await openReactionStream({
++        runtime: request.runtime,
++        reactionId: request.reactionId,
++        eventId: request.eventId,
++        eventType: "context.agent",
++        ...(request.trigger.channel ? { channel: request.trigger.channel } : {}),
++      })
++    }
++    const event = await runOperation(request, stream)
++    await stream?.complete()
+     await store.completeReaction(request.reactionId, "completed", [event.id])
+     return Object.freeze({ event })
+   } catch (error) {
++    await stream?.fail(error).catch(() => undefined)
+     await store.completeReaction(request.reactionId, "failed", [], error).catch(() => undefined)
+     throw error
+   }
+ }
+ 
+-async function runOperation(request: ReactionOperationRequest): Promise<ContextEvent> {
++async function runOperation(
++  request: ReactionOperationRequest,
++  stream?: ReactionStreamController,
++): Promise<ContextEvent> {
+   const operation = request.operation
+   if (operation.kind === "emit") {
+     return await Events(request.runtime).emit(operation.draft, {
+@@ -219,12 +238,16 @@ async function runOperation(request: ReactionOperationRequest): Promise<ContextE
+         ...(operation.model ? { model: operation.model } : {}),
+         ...(operation.maxRounds === undefined ? {} : { maxRounds: operation.maxRounds }),
+         actions,
++        ...(stream ? { stream } : {}),
+         ...(sandbox ? { sandbox, workspaceRoot: sandbox.workspaceRoot } : {}),
+       },
+     })
+     return await createOperationEvent(request, result.output, result.parts ?? [], {
+       ...(result.metadata ?? {}),
+       instruction: operation.instruction,
++      ...(stream
++        ? { streamId: stream.streamId, streamClientId: stream.clientId }
++        : {}),
+     })
+   }
+ 
+diff --git a/packages/reactor/src/reactor.ts b/packages/reactor/src/reactor.ts
+index 19c108b..bdedade 100644
+--- a/packages/reactor/src/reactor.ts
++++ b/packages/reactor/src/reactor.ts
+@@ -6,6 +6,8 @@ import type {
+   ContextRuntimeServiceHandle,
+   ContextSandboxHandle,
+   DomainEventItem,
++  ReactionStreamChunk,
++  ReactionStreamChunkInput,
+ } from "@ekairos/events"
+ import type { z } from "zod"
+ 
+@@ -19,6 +21,19 @@ export type ReactionToolAction = Readonly<{
+ }>
+ export type ReactionEngineActions = Readonly<Record<string, ReactionToolAction>>
+ 
++export type ReactionEngineStreamEmission = Omit<
++  ReactionStreamChunkInput,
++  "reactionId" | "eventId" | "sequence"
++>
++
++export type ReactionEngineStream = Readonly<{
++  reactionId: string
++  eventId: string
++  streamId: string
++  clientId: string
++  emit(input: ReactionEngineStreamEmission): Promise<ReactionStreamChunk>
++}>
++
+ export type ReactorInitialContext<TContext> = Readonly<{
+   ref: Readonly<{ id: string; key: string | null }>
+   content: Readonly<TContext>
+@@ -43,6 +58,7 @@ export type ReactionEngineInput<
+   model?: ReactionModel
+   maxRounds?: number
+   actions: TActions
++  stream?: ReactionEngineStream
+   sandbox?: ContextSandboxHandle
+   workspaceRoot?: string
+ }>
+diff --git a/packages/reactor/src/reactors/ai-sdk.agent.ts b/packages/reactor/src/reactors/ai-sdk.agent.ts
+index b463f1a..c13714a 100644
+--- a/packages/reactor/src/reactors/ai-sdk.agent.ts
++++ b/packages/reactor/src/reactors/ai-sdk.agent.ts
+@@ -4,11 +4,16 @@ import {
+   type ContextPartEnvelope,
+ } from "@ekairos/events"
+ 
+-import type { ReactionModel, ReactionToolAction } from "../reactor.js"
++import type {
++  ReactionEngineStream,
++  ReactionModel,
++  ReactionToolAction,
++} from "../reactor.js"
+ import {
+   actionSpecToAiSdkTool,
+   actionsToActionSpecs,
+ } from "../tools-to-model-tools.js"
++import { mapAiSdkStreamChunk } from "./ai-sdk.stream.js"
+ 
+ export type ReactionToolChoice =
+   | "auto"
+@@ -22,6 +27,8 @@ export async function executeAiSdkAgentRound(input: {
+   actions: Readonly<Record<string, ReactionToolAction>>
+   toolChoice: ReactionToolChoice
+   contextId: string
++  round: number
++  stream?: ReactionEngineStream
+ }): Promise<{
+   parts: readonly ContextPartEnvelope[]
+   calls: readonly Readonly<{
+@@ -54,12 +61,20 @@ export async function executeAiSdkAgentRound(input: {
+     providerOptions: { openai: { promptCacheKey: input.contextId } },
+   })
+ 
++  const streamed = (async () => {
++    if (!input.stream || !result.fullStream) return
++    for await (const chunk of result.fullStream) {
++      await input.stream.emit(mapAiSdkStreamChunk(chunk, input.round))
++    }
++  })()
++
+   const [text, toolCalls, usage, providerMetadata] = await Promise.all([
+     Promise.resolve(result.text).catch(() => ""),
+     Promise.resolve(result.toolCalls).catch(() => []),
+     Promise.resolve(result.usage).catch(() => undefined),
+     Promise.resolve(result.providerMetadata ?? result.experimental_providerMetadata)
+       .catch(() => undefined),
++    streamed,
+   ])
+   const calls = (Array.isArray(toolCalls) ? toolCalls : []).map((call: any) => ({
+     actionCallId: String(call.toolCallId ?? call.id ?? globalThis.crypto.randomUUID()),
+diff --git a/packages/reactor/src/tests/reaction.events.instant.test.ts b/packages/reactor/src/tests/reaction.events.instant.test.ts
+index 00c158d..98c1d6f 100644
+--- a/packages/reactor/src/tests/reaction.events.instant.test.ts
++++ b/packages/reactor/src/tests/reaction.events.instant.test.ts
+@@ -17,6 +17,7 @@ import {
+   ContextHandle,
+   Events,
+   Part,
++  consumeReactionStream,
+   contextDomain,
+ } from "@ekairos/events"
+ import {
+@@ -111,6 +112,14 @@ class GraphEngine implements ReactionEngine<Record<string, unknown>> {
+         decision: `${(selected[0] as any).itemCount}:${(selected[1] as any).risk}`,
+       }
+     }
++    await input.stream?.emit({
++      kind: "text.delta",
++      round: 0,
++      partId: "graph-engine-output",
++      delta: JSON.stringify(output),
++      provider: "graph-test",
++      providerType: "result",
++    })
+     return {
+       output,
+       parts: [Part.message(JSON.stringify(output))],
+@@ -220,6 +229,7 @@ describe("Reaction Event graph", () => {
+             eventParts: { $: { order: { index: "asc" } } },
+           },
+           parent: {},
++          stream: {},
+         },
+       },
+     } as any)
+@@ -233,6 +243,24 @@ describe("Reaction Event graph", () => {
+     expect(rootReaction.effects[0].id).toBe(completed.id)
+     expect(session.reactions).toHaveLength(8)
+ 
++    const streamedReactions = session.reactions.filter((row: any) => row.type === "agent")
++    expect(streamedReactions).toHaveLength(4)
++    expect(streamedReactions.every((row: any) =>
++      row.streamId && row.streamClientId && row.stream?.id === row.streamId)).toBe(true)
++    const trace: any[] = []
++    await consumeReactionStream({
++      db,
++      streamId: streamedReactions[0].streamId,
++      clientId: streamedReactions[0].streamClientId,
++      signal: new AbortController().signal,
++      onChunk: chunk => { trace.push(chunk) },
++    })
++    expect(trace.map(chunk => chunk.kind)).toEqual([
++      "reaction.started",
++      "text.delta",
++      "reaction.completed",
++    ])
++
+     const byType = new Map(session.reactions.map((row: any) => [row.type, row]))
+     expect([...byType.keys()]).toEqual(expect.arrayContaining([
+       "agent",
+diff --git a/packages/reactor/src/reaction.stream.ts b/packages/reactor/src/reaction.stream.ts
+new file mode 100644
+index 0000000..3054362
+--- /dev/null
++++ b/packages/reactor/src/reaction.stream.ts
+@@ -0,0 +1,128 @@
++import {
++  createReactionStreamChunk,
++  encodeReactionStreamChunk,
++  getContextRuntimeServices,
++  type ContextRuntimeServiceHandle,
++  type ReactionStreamChunk,
++  type ReactionStreamChunkInput,
++} from "@ekairos/events"
++
++import type {
++  ReactionEngineStream,
++  ReactionEngineStreamEmission,
++} from "./reactor.js"
++
++const REDACT_KEY = /token|authorization|cookie|secret|api[_-]?key|password/i
++
++function sanitize(value: unknown, seen = new WeakSet<object>()): unknown {
++  if (value === undefined || value === null) return value
++  if (typeof value === "string") {
++    return value.length > 40_000 ? `${value.slice(0, 40_000)}[truncated]` : value
++  }
++  if (typeof value !== "object") return value
++  if (seen.has(value as object)) return "[circular]"
++  seen.add(value as object)
++  if (Array.isArray(value)) return value.map(item => sanitize(item, seen))
++  return Object.fromEntries(
++    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
++      key,
++      REDACT_KEY.test(key) ? "[redacted]" : sanitize(item, seen),
++    ]),
++  )
++}
++
++function errorMessage(error: unknown) {
++  return error instanceof Error ? error.message : String(error)
++}
++
++export type ReactionStreamController = ReactionEngineStream & Readonly<{
++  complete(): Promise<void>
++  fail(error: unknown): Promise<void>
++}>
++
++export async function openReactionStream(input: {
++  runtime: ContextRuntimeServiceHandle
++  reactionId: string
++  eventId: string
++  eventType: string
++  channel?: string
++}): Promise<ReactionStreamController> {
++  const { db, store } = await getContextRuntimeServices(input.runtime)
++  const streams = db?.streams
++  if (!streams?.createWriteStream) throw new Error("reaction_streams_unavailable")
++  const clientId = `context-reaction:${input.reactionId}`
++  const writable = streams.createWriteStream({ clientId }) as WritableStream<string> & {
++    streamId?: () => Promise<string>
++  }
++  const streamId = typeof writable.streamId === "function"
++    ? await writable.streamId()
++    : clientId
++  const startedAt = new Date()
++  await store.attachReactionStream(input.reactionId, {
++    streamId,
++    clientId,
++    startedAt,
++  })
++  const writer = writable.getWriter()
++  let sequence = Date.now() * 1_000
++  let terminal = false
++
++  const emit = async (
++    emission: ReactionEngineStreamEmission,
++  ): Promise<ReactionStreamChunk> => {
++    if (terminal) throw new Error(`reaction_stream_already_finished:${input.reactionId}`)
++    sequence += 1
++    const full: ReactionStreamChunkInput = {
++      ...emission,
++      reactionId: input.reactionId,
++      eventId: input.eventId,
++      sequence,
++      ...(emission.input === undefined ? {} : { input: sanitize(emission.input) }),
++      ...(emission.output === undefined ? {} : { output: sanitize(emission.output) }),
++      ...(emission.error === undefined ? {} : { error: sanitize(emission.error) }),
++      ...(emission.data === undefined ? {} : { data: sanitize(emission.data) }),
++      ...(emission.raw === undefined ? {} : { raw: sanitize(emission.raw) }),
++    }
++    const chunk = createReactionStreamChunk(full)
++    await writer.write(encodeReactionStreamChunk(chunk))
++    return chunk
++  }
++
++  const finish = async (error?: unknown) => {
++    if (terminal) return
++    await emit(error === undefined
++      ? { kind: "reaction.completed" }
++      : {
++          kind: "reaction.failed",
++          error: { message: errorMessage(error) },
++        })
++    terminal = true
++    try {
++      await writer.close()
++    } finally {
++      writer.releaseLock()
++    }
++    await store.finishReactionStream(input.reactionId, {
++      finishedAt: new Date(),
++      ...(error === undefined ? {} : { error: errorMessage(error) }),
++    })
++  }
++
++  const controller: ReactionStreamController = Object.freeze({
++    reactionId: input.reactionId,
++    eventId: input.eventId,
++    streamId,
++    clientId,
++    emit,
++    async complete() { await finish() },
++    async fail(error: unknown) { await finish(error) },
++  })
++  await controller.emit({
++    kind: "reaction.started",
++    data: {
++      eventType: input.eventType,
++      ...(input.channel ? { channel: input.channel } : {}),
++    },
++  })
++  return controller
++}
+diff --git a/packages/reactor/src/reactors/ai-sdk.stream.ts b/packages/reactor/src/reactors/ai-sdk.stream.ts
+new file mode 100644
+index 0000000..a4f36f3
+--- /dev/null
++++ b/packages/reactor/src/reactors/ai-sdk.stream.ts
+@@ -0,0 +1,139 @@
++import type { ReactionEngineStreamEmission } from "../reactor.js"
++
++function record(value: unknown): Record<string, unknown> {
++  return value && typeof value === "object" && !Array.isArray(value)
++    ? value as Record<string, unknown>
++    : {}
++}
++
++function text(value: unknown): string | undefined {
++  return typeof value === "string" && value.length > 0 ? value : undefined
++}
++
++function common(
++  chunk: Record<string, unknown>,
++  round: number,
++): Pick<ReactionEngineStreamEmission, "round" | "provider" | "providerType" | "raw"> {
++  return {
++    round,
++    provider: "ai-sdk",
++    providerType: text(chunk.type) ?? "unknown",
++    raw: chunk,
++  }
++}
++
++export function mapAiSdkStreamChunk(
++  value: unknown,
++  round: number,
++): ReactionEngineStreamEmission {
++  const chunk = record(value)
++  const type = text(chunk.type) ?? "unknown"
++  const base = common(chunk, round)
++  const partId = text(chunk.id)
++  const actionCallId = text(chunk.toolCallId) ?? partId
++  const actionName = text(chunk.toolName) ?? text(chunk.name)
++
++  if (type === "start-step") {
++    return { ...base, kind: "model.round.started", data: chunk }
++  }
++  if (type === "finish-step") {
++    return { ...base, kind: "model.round.completed", data: chunk }
++  }
++  if (type === "text-delta") {
++    return {
++      ...base,
++      kind: "text.delta",
++      ...(partId ? { partId } : {}),
++      delta: text(chunk.text) ?? text(chunk.delta) ?? text(chunk.textDelta) ?? "",
++    }
++  }
++  if (type === "reasoning-delta") {
++    return {
++      ...base,
++      kind: "reasoning.delta",
++      ...(partId ? { partId } : {}),
++      delta: text(chunk.text) ?? text(chunk.delta) ?? text(chunk.textDelta) ?? "",
++    }
++  }
++  if (type === "reasoning-end") {
++    return {
++      ...base,
++      kind: "reasoning.completed",
++      ...(partId ? { partId } : {}),
++    }
++  }
++  if (type === "tool-input-delta" || type === "tool-call-delta") {
++    return {
++      ...base,
++      kind: "action.input.delta",
++      actionCallId: actionCallId ?? `round-${round}-unknown-action`,
++      ...(actionName ? { actionName } : {}),
++      delta: text(chunk.delta) ?? text(chunk.inputTextDelta) ?? text(chunk.argsTextDelta) ?? "",
++    }
++  }
++  if (
++    type === "tool-input-start" ||
++    type === "tool-call-start" ||
++    type === "tool-input-available" ||
++    type === "tool-call"
++  ) {
++    return {
++      ...base,
++      kind: "action.started",
++      actionCallId: actionCallId ?? `round-${round}-unknown-action`,
++      ...(actionName ? { actionName } : {}),
++      input: chunk.input ?? chunk.args ?? {},
++    }
++  }
++  if (type === "tool-output-available") {
++    return {
++      ...base,
++      kind: "action.completed",
++      actionCallId: actionCallId ?? `round-${round}-unknown-action`,
++      ...(actionName ? { actionName } : {}),
++      output: chunk.output,
++    }
++  }
++  if (type === "tool-output-error") {
++    return {
++      ...base,
++      kind: "action.failed",
++      actionCallId: actionCallId ?? `round-${round}-unknown-action`,
++      ...(actionName ? { actionName } : {}),
++      error: chunk.error ?? { message: "Action failed." },
++    }
++  }
++  if (type === "source-url") {
++    return {
++      ...base,
++      kind: "source.available",
++      data: {
++        source: {
++          type: "source-url",
++          sourceId: text(chunk.sourceId) ?? partId ?? `source-${round}`,
++          url: text(chunk.url) ?? "",
++          ...(text(chunk.title) ? { title: text(chunk.title) } : {}),
++        },
++      },
++    }
++  }
++  if (type === "source-document") {
++    return {
++      ...base,
++      kind: "source.available",
++      data: {
++        source: {
++          type: "source-document",
++          sourceId: text(chunk.sourceId) ?? partId ?? `source-${round}`,
++          mediaType: text(chunk.mediaType) ?? "application/octet-stream",
++          title: text(chunk.title) ?? text(chunk.filename) ?? "Document",
++          ...(text(chunk.filename) ? { filename: text(chunk.filename) } : {}),
++        },
++      },
++    }
++  }
++  if (type === "error") {
++    return { ...base, kind: "provider.error", error: chunk.error ?? chunk }
++  }
++  return { ...base, kind: "provider.event", data: chunk }
++}
+diff --git a/packages/reactor/src/tests/ai-sdk.stream.test.ts b/packages/reactor/src/tests/ai-sdk.stream.test.ts
+new file mode 100644
+index 0000000..6cc1099
+--- /dev/null
++++ b/packages/reactor/src/tests/ai-sdk.stream.test.ts
+@@ -0,0 +1,34 @@
++/* @vitest-environment node */
++
++import { describe, expect, it } from "vitest"
++
++import { mapAiSdkStreamChunk } from "../reactors/ai-sdk.stream.js"
++
++describe("AI SDK Reaction stream mapping", () => {
++  it("maps content and action chunks without leaking provider semantics into the reader", () => {
++    expect(mapAiSdkStreamChunk({
++      type: "text-delta",
++      id: "text-1",
++      text: "hello",
++    }, 2)).toMatchObject({
++      kind: "text.delta",
++      round: 2,
++      partId: "text-1",
++      delta: "hello",
++      provider: "ai-sdk",
++      providerType: "text-delta",
++    })
++    expect(mapAiSdkStreamChunk({
++      type: "tool-call",
++      toolCallId: "call-1",
++      toolName: "catalog_find",
++      input: { sku: "A-1" },
++    }, 2)).toMatchObject({
++      kind: "action.started",
++      round: 2,
++      actionCallId: "call-1",
++      actionName: "catalog_find",
++      input: { sku: "A-1" },
++    })
++  })
++})

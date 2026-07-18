@@ -1,11 +1,15 @@
 import { init } from "@instantdb/admin"
 import { defineEvent, domain, EkairosRuntime } from "@ekairos/domain"
-import { contextDomain } from "@ekairos/events"
+import {
+  ContextHandle,
+  contextDomain,
+  type ContextEvent,
+  type StoredContext,
+} from "@ekairos/events"
 import {
   defineReaction,
-  runReactionWorkflow,
-  type ReactionWorkflowPayload,
 } from "@ekairos/reactor"
+import { executeReaction } from "@ekairos/reactor/internal"
 import { sandboxDomain } from "@ekairos/sandbox/schema"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { z } from "zod"
@@ -77,6 +81,37 @@ export class ReactionDatasetWorkflowRuntime extends EkairosRuntime<
   }
 }
 
+export class ReactionDatasetWorkflowContextHandle extends ContextHandle<
+  ReactionDatasetWorkflowContext
+> {
+  declare readonly runtime: ReactionDatasetWorkflowRuntime
+
+  constructor(
+    runtime: ReactionDatasetWorkflowRuntime,
+    context: StoredContext<ReactionDatasetWorkflowContext>,
+  ) {
+    super(runtime, context)
+  }
+
+  static [WORKFLOW_SERIALIZE](instance: ReactionDatasetWorkflowContextHandle) {
+    return { runtime: instance.runtime, context: instance.context }
+  }
+
+  static [WORKFLOW_DESERIALIZE](data: {
+    runtime: ReactionDatasetWorkflowRuntime
+    context: StoredContext<ReactionDatasetWorkflowContext>
+  }) {
+    return new ReactionDatasetWorkflowContextHandle(data.runtime, data.context)
+  }
+
+  async react(
+    trigger: ContextEvent,
+    definition: typeof reactionDatasetWorkflowDefinition,
+  ) {
+    return await executeReaction(this.runtime, this, trigger, definition)
+  }
+}
+
 const pythonCode = [
   "import json",
   "import os",
@@ -134,8 +169,11 @@ export const reactionDatasetWorkflowDefinition = defineReaction<
   },
 )
 
-export async function reactionDatasetWorkflow(payload: ReactionWorkflowPayload) {
+export async function reactionDatasetWorkflow(
+  context: ReactionDatasetWorkflowContextHandle,
+  trigger: ContextEvent,
+) {
   "use workflow"
 
-  return await runReactionWorkflow(payload, [reactionDatasetWorkflowDefinition])
+  return await context.react(trigger, reactionDatasetWorkflowDefinition)
 }

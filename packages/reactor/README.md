@@ -137,6 +137,14 @@ const response = await context.react(trigger, answerMessage)
 a Zod output schema, its payload is typed structured data. It may execute only
 the scoped domain actions explicitly supplied to it.
 
+Each `agent` operation is one Reaction and owns at most one InstantDB `$stream`.
+Every real model round becomes an ordered `context.model` effect Event and every
+executed action becomes an ordered `context.action` effect Event. Provider
+chunks, sources, action progress, and errors are projected through the same
+Reaction stream with the id of the Event they belong to. The terminal model
+Event is the return value. Non-streaming operations do not create an empty
+stream.
+
 ```ts
 const classification = await reaction.given(reaction.trigger).agent({
   instruction: "Classify the request.",
@@ -156,6 +164,11 @@ const recorded = await reaction.given(classification).action(
 The operation Event contains separate `action` Parts for started and
 completed/failed states.
 
+An action invoked by Reactor receives one optional `reactionId`. Actions that
+need to emit an Event and start a nested Reaction resolve the owning Context
+through `Context(runtime).fromReaction(reactionId)`; Reactor does not inject an
+execution facade or callbacks into domain code.
+
 ### Dataset
 
 ```ts
@@ -172,25 +185,37 @@ items.payload.count
 ### Workspace, shell, and git
 
 ```ts
-const files = await reaction.given(reaction.trigger).workspace({
-  files: reaction.trigger.links.files ?? [],
-  directory: "inbound",
-  conflict: "verify",
-})
+const files = await reaction.given(reaction.trigger).loadFiles()
 
 const repository = await reaction.given(files).git({
   operation: "clone",
-  target: "project",
+  key: "project",
   url: "https://github.com/e-kairos/example",
   ref: "main",
+})
+
+const review = await reaction.given([repository, files]).agent({
+  path: repository.payload.path,
+  instruction: "Review the repository against the attached request.",
 })
 
 const tests = await reaction.given(repository).shell({
   command: "pnpm",
   args: ["test"],
-  cwd: repository.payload.path,
+  path: repository.payload.path,
+})
+
+const artifacts = await reaction.given([review, tests]).storeFiles({
+  path: repository.payload.path,
+  files: "review.md",
 })
 ```
+
+`loadFiles()` discovers every `$files` reference in the selected causal closure,
+deduplicates by immutable file id, and materializes each file at its canonical
+Context path. Git returns a branded logical `path`; callers pass that value to
+agent, shell, commit, push, and `storeFiles` instead of constructing provider
+directories. Provider `cwd` values remain an internal adapter concern.
 
 These operations require a configured sandbox. The durable sandbox id is
 reopened for each operation; no live provider object crosses Workflow steps.
@@ -266,16 +291,46 @@ For isolation use `reaction.react(otherContext, requested, definition)`.
 ## Workflow
 
 ```ts
-export async function supportWorkflow(payload: ReactionWorkflowPayload) {
+export async function supportWorkflow(context, trigger) {
   "use workflow"
-  return await runReactionWorkflow(payload, [answerMessage])
+
+  return await context.react(trigger, answerMessage)
 }
 
-await context.react(trigger, answerMessage, {
-  workflow: supportWorkflow,
-})
+const run = await start(supportWorkflow, [context, trigger])
 ```
 
-Workflow execution reuses the prepared Session and idempotent operation ids.
-The public surface exports `defineReaction`, `ai`, Workflow helpers, and Reaction
-types. The execution bridge lives under `@ekairos/reactor/internal`.
+`context.react(...)` always executes in its caller's boundary. Inside a
+`"use workflow"` function its Reaction operations become durable Workflow
+steps; outside Workflow the same code runs directly. Reactor never starts or
+waits for a Workflow implicitly.
+
+## React
+
+`useContext` subscribes to the durable Context graph and to every linked
+Reaction stream. While an `agent` is running, its reduced stream is exposed as
+Event-shaped `liveEffects`, one projection per current Event id. When each Event
+becomes durable, only its matching provisional projection disappears.
+
+```tsx
+import { useContext } from "@ekairos/events/react"
+
+const state = useContext(db, {
+  apiUrl: "/api/context",
+  initialContextId: contextId,
+})
+
+state.events          // durable + optimistic + provisional Events, deduplicated
+state.sessions        // Session and Reaction graph
+state.reactions       // Reactions in the active Session
+state.sendStatus      // idle | submitting | streaming | error
+
+const stream = state.reactions[0]?.stream
+state.reactions[0]?.liveEffects // current model/action Event projections
+stream?.chunks        // complete ordered Reaction journal
+stream?.reader        // status, byteOffset, chunkCount, reconnect attempt
+```
+
+Stream readers resume from the last complete NDJSON byte offset. Reloading the
+UI does not require replaying already consumed chunks, and an interrupted reader
+can reconnect while the provider continues writing.

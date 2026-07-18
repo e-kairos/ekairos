@@ -1,0 +1,136 @@
+diff --git a/packages/reactor/src/action-name.ts b/packages/reactor/src/action-name.ts
+new file mode 100644
+index 0000000..12dee64
+--- /dev/null
++++ b/packages/reactor/src/action-name.ts
+@@ -0,0 +1,26 @@
++const MODEL_ACTION_NAME = /^[a-zA-Z0-9_-]+$/
++const MODEL_ACTION_NAME_MAX_LENGTH = 64
++
++export function toModelActionName(canonicalName: string): string {
++  if (
++    canonicalName.length <= MODEL_ACTION_NAME_MAX_LENGTH &&
++    MODEL_ACTION_NAME.test(canonicalName)
++  ) {
++    return canonicalName
++  }
++
++  const suffix = `_${stableHash(canonicalName)}`
++  const base = canonicalName
++    .replace(/[^a-zA-Z0-9_-]+/g, "_")
++    .replace(/^_+|_+$/g, "") || "action"
++  return `${base.slice(0, MODEL_ACTION_NAME_MAX_LENGTH - suffix.length)}${suffix}`
++}
++
++function stableHash(value: string): string {
++  let hash = 0xcbf29ce484222325n
++  for (let index = 0; index < value.length; index += 1) {
++    hash ^= BigInt(value.charCodeAt(index))
++    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
++  }
++  return hash.toString(36)
++}
+diff --git a/packages/reactor/src/agent.ts b/packages/reactor/src/agent.ts
+index 3891ff6..fe88097 100644
+--- a/packages/reactor/src/agent.ts
++++ b/packages/reactor/src/agent.ts
+@@ -5,6 +5,7 @@ import {
+ } from "@ekairos/events"
+ 
+ import { applyActionResult } from "./context.action-calls.js"
++import { toModelActionName } from "./action-name.js"
+ import {
+   actionPartsToModelMessages,
+   buildAgentSystemPrompt,
+@@ -218,14 +219,12 @@ function canonicalizePart(
+ function createActionNameMap(canonicalNames: readonly string[]) {
+   const canonicalToWire = new Map<string, string>()
+   const wireToCanonical = new Map<string, string>()
+-  canonicalNames.forEach((canonical, index) => {
+-    const base = canonical
+-      .replace(/[^a-zA-Z0-9_-]+/g, "_")
+-      .replace(/^_+|_+$/g, "")
+-      .slice(0, 48) || `action_${index}`
+-    let wire = base
+-    let suffix = 1
+-    while (wireToCanonical.has(wire)) wire = `${base}_${suffix++}`
++  canonicalNames.forEach(canonical => {
++    const wire = toModelActionName(canonical)
++    const existing = wireToCanonical.get(wire)
++    if (existing && existing !== canonical) {
++      throw new Error(`reaction_action_wire_name_collision:${wire}`)
++    }
+     canonicalToWire.set(canonical, wire)
+     wireToCanonical.set(wire, canonical)
+   })
+diff --git a/packages/reactor/src/reaction-view.ts b/packages/reactor/src/reaction-view.ts
+index e61a5e9..d32706b 100644
+--- a/packages/reactor/src/reaction-view.ts
++++ b/packages/reactor/src/reaction-view.ts
+@@ -6,6 +6,7 @@ import type {
+ } from "@ekairos/events"
+ 
+ import type { ReactorInitialContext } from "./reactor.js"
++import { toModelActionName } from "./action-name.js"
+ 
+ export function buildAgentSystemPrompt(input: {
+   reactionKey: string
+@@ -59,7 +60,7 @@ export async function eventToModelMessages(
+ 
+ export function actionPartsToModelMessages(
+   parts: readonly ContextEventPart[] | readonly { type: string; content: any }[],
+-  mapName: (name: string) => string = name => name,
++  mapName: (name: string) => string = toModelActionName,
+ ): ModelMessage[] {
+   const started = new Map<string, { name: string; input: unknown; index: number }>()
+   const settled = new Map<string, any>()
+diff --git a/packages/reactor/src/tests/reaction.action-name.test.ts b/packages/reactor/src/tests/reaction.action-name.test.ts
+new file mode 100644
+index 0000000..edf9881
+--- /dev/null
++++ b/packages/reactor/src/tests/reaction.action-name.test.ts
+@@ -0,0 +1,44 @@
++import { describe, expect, it } from "vitest"
++
++import { toModelActionName } from "../action-name.js"
++import { actionPartsToModelMessages } from "../reaction-view.js"
++
++describe("Reaction action names at the model boundary", () => {
++  it("preserves valid names and deterministically encodes canonical domain actions", () => {
++    expect(toModelActionName("catalog_find")).toBe("catalog_find")
++
++    const encoded = toModelActionName("workbench.review.record")
++    expect(encoded).toMatch(/^[a-zA-Z0-9_-]+$/)
++    expect(encoded).toBe(toModelActionName("workbench.review.record"))
++    expect(encoded).not.toBe(toModelActionName("workbench_review_record"))
++    expect(encoded.length).toBeLessThanOrEqual(64)
++  })
++
++  it("encodes replayed durable action parts before sending them to the model", () => {
++    const messages = actionPartsToModelMessages([
++      {
++        type: "action",
++        content: {
++          status: "started",
++          actionName: "workbench.review.record",
++          actionCallId: "call-1",
++          input: { reviewId: "review-1" },
++        },
++      },
++      {
++        type: "action",
++        content: {
++          status: "completed",
++          actionName: "workbench.review.record",
++          actionCallId: "call-1",
++          output: { ok: true },
++        },
++      },
++    ]) as any[]
++
++    const assistantName = (messages[0] as any).content[0].toolName
++    const resultName = (messages[1] as any).content[0].toolName
++    expect(assistantName).toBe(toModelActionName("workbench.review.record"))
++    expect(resultName).toBe(assistantName)
++  })
++})

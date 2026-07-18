@@ -10,6 +10,7 @@ import {
   getDomainActionBindingView,
   prepareDomainActionExecutionPrivate,
   registerDomainActionInputResolverPrivate,
+  type DomainActionExecutionOptions,
   type DomainActionInputResolver,
 } from "./domain-action.internal.js";
 
@@ -80,10 +81,12 @@ export async function executeDomainAction<
   remainingInputOrPreparation:
     | DomainActionInput<Action>
     | PreparedDomainActionExecution<Action>,
+  options: DomainActionExecutionOptions = {},
 ): Promise<ExecuteDomainActionResult<Action>> {
   return await executeDomainActionPrivate(
     runtime,
     registration,
     remainingInputOrPreparation,
+    options,
   ) as ExecuteDomainActionResult<Action>;
 }

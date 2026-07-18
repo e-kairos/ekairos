@@ -1,0 +1,1436 @@
+*** Begin ECU Patch
+Key: 012-workbench-v3-stream-trace
+Title: Prove streaming with Workbench v3
+Purpose: Provide a usable React surface that runs Azure AI through the real Reactor and exposes the full durable and provisional causal trace.
+
+*** Begin Context
+Workbench v3 is a domain-first local package rather than an adapter hidden inside Workbench v2. It composes `contextDomain`, defines typed messageReceived/messageAnswered Events, provisions a temporary InstantDB app with `$streams` read permission, runs Azure gpt-5.2 through `defineReaction`, and renders the result through the production `useContext` hook.
+
+The UI separates Context/Sessions/Events, Event-shaped conversation, and Reaction trace inspection. It automatically follows the active streaming Reaction and retains all canonical and raw provider chunks after completion. The real browser proof observed 55 chunks, provisional text before HTTP completion, stable replacement by the durable Event, responsive desktop/mobile layouts, and no browser warnings or errors.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index a6cfea7..5272f7a 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -516,7 +516,7 @@ importers:
+         version: 5.0.0-beta.1
+       '@workflow/vitest':
+         specifier: 5.0.0-beta.5
+-        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
++        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
+       dotenv:
+         specifier: ^17.2.3
+         version: 17.2.3
+@@ -1363,7 +1363,7 @@ importers:
+         version: 24.5.0
+       '@workflow/vitest':
+         specifier: 5.0.0-beta.5
+-        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
++        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
+       typescript:
+         specifier: ^5.9.2
+         version: 5.9.3
+@@ -1454,6 +1454,64 @@ importers:
+ 
+   packages/tsconfig: {}
+ 
++  packages/workbench-v3:
++    dependencies:
++      '@ai-sdk/openai':
++        specifier: ^2.0.68
++        version: 2.0.68(zod@4.3.6)
++      '@ekairos/domain':
++        specifier: workspace:*
++        version: link:../domain
++      '@ekairos/events':
++        specifier: workspace:*
++        version: link:../events
++      '@ekairos/reactor':
++        specifier: workspace:*
++        version: link:../reactor
++      '@ekairos/testing':
++        specifier: workspace:*
++        version: link:../ekairos-test
++      '@instantdb/admin':
++        specifier: 0.22.158
++        version: 0.22.158
++      '@instantdb/react':
++        specifier: 0.22.158
++        version: 0.22.158(react@19.2.1)
++      lucide-react:
++        specifier: ^0.554.0
++        version: 0.554.0(react@19.2.1)
++      next:
++        specifier: 16.0.10
++        version: 16.0.10(@babel/core@7.28.5)(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0)
++      react:
++        specifier: 19.2.1
++        version: 19.2.1
++      react-dom:
++        specifier: 19.2.1
++        version: 19.2.1(react@19.2.1)
++      server-only:
++        specifier: ^0.0.1
++        version: 0.0.1
++      streamdown:
++        specifier: ^2.5.0
++        version: 2.5.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
++      zod:
++        specifier: ^4.3.6
++        version: 4.3.6
++    devDependencies:
++      '@types/node':
++        specifier: ^24.5.0
++        version: 24.5.0
++      '@types/react':
++        specifier: 19.2.2
++        version: 19.2.2
++      '@types/react-dom':
++        specifier: ^19.2.2
++        version: 19.2.3(@types/react@19.2.2)
++      typescript:
++        specifier: ^5.9.3
++        version: 5.9.3
++
+   packages/workflow-compiler:
+     dependencies:
+       '@swc/core':
+@@ -6741,9 +6799,6 @@ packages:
+   confbox@0.1.8:
+     resolution: {integrity: sha512-RMtmw0iFkeR4YV+fUOSucriAQNb9g8zFR52MWCtl+cCZOFRNL6zeB395vPzFhEjjn4fMxXudmELnl/KF/WrK6w==}
+ 
+-  confbox@0.2.2:
+-    resolution: {integrity: sha512-1NB+BKqhtNipMsov4xI/NnhCKp9XG9NamYp5PVm9klAT0fsrNPjaFICsCFhNhwZJKNh7zB/3q8qXz0E9oaMNtQ==}
+-
+   confbox@0.2.4:
+     resolution: {integrity: sha512-ysOGlgTFbN2/Y6Cg3Iye8YKulHw+R2fNXHrgSmXISQdMnomY6eNDprVdW9R5xBguEqI954+S6709UyiO7B+6OQ==}
+ 
+@@ -8108,6 +8163,9 @@ packages:
+   hast-util-raw@9.1.0:
+     resolution: {integrity: sha512-Y8/SBAHkZGoNkpzqqfCldijcuUKh7/su31kEBp67cFY09Wy0mTRgtsLYsiIxMJxlu0f6AA5SUTbDR8K0rxnbUw==}
+ 
++  hast-util-sanitize@5.0.2:
++    resolution: {integrity: sha512-3yTWghByc50aGS7JlGhk61SPenfE/p1oaFeNwkOOyrscaOkMGrcW9+Cy/QAIOBpZxP1yqDIzFMR0+Np0i0+usg==}
++
+   hast-util-to-html@9.0.5:
+     resolution: {integrity: sha512-OguPdidb+fbHQSU4Q4ZiLKnzWo8Wwsf5bZfbvu7//a9oTYoqD/fWpe96NuHkoS9h0ccGOTe0C4NGXdtS0iObOw==}
+ 
+@@ -9010,6 +9068,11 @@ packages:
+     engines: {node: '>= 20'}
+     hasBin: true
+ 
++  marked@17.0.6:
++    resolution: {integrity: sha512-gB0gkNafnonOw0obSTEGZTT86IuhILt2Wfx0mWH/1Au83kybTayroZ/V6nS25mN7u8ASy+5fMhgB3XPNrOZdmA==}
++    engines: {node: '>= 20'}
++    hasBin: true
++
+   math-intrinsics@1.1.0:
+     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
+     engines: {node: '>= 0.4'}
+@@ -10554,12 +10617,18 @@ packages:
+   rehype-harden@1.1.5:
+     resolution: {integrity: sha512-JrtBj5BVd/5vf3H3/blyJatXJbzQfRT9pJBmjafbTaPouQCAKxHwRyCc7dle9BXQKxv4z1OzZylz/tNamoiG3A==}
+ 
++  rehype-harden@1.1.8:
++    resolution: {integrity: sha512-Qn7vR1xrf6fZCrkm9TDWi/AB4ylrHy+jqsNm1EHOAmbARYA6gsnVJBq/sdBh6kmT4NEZxH5vgIjrscefJAOXcw==}
++
+   rehype-katex@7.0.1:
+     resolution: {integrity: sha512-OiM2wrZ/wuhKkigASodFoo8wimG3H12LWQaH8qSPVJn9apWKFSH3YOCtbKpBorTVw/eI7cuT21XBbvwEswbIOA==}
+ 
+   rehype-raw@7.0.0:
+     resolution: {integrity: sha512-/aE8hCfKlQeA8LmyeyQvQF3eBiLRGNlfBJEvWH7ivp9sBqs7TNqBL5X3v157rM4IFETqDnIOO+z5M/biZbo9Ww==}
+ 
++  rehype-sanitize@6.0.0:
++    resolution: {integrity: sha512-CsnhKNsyI8Tub6L4sm5ZFsme4puGfc6pYylvXo1AeqaGbjOYyzNv3qZPwvs0oMJ39eryyeOdmxwUIo94IpEhqg==}
++
+   remark-cjk-friendly-gfm-strikethrough@1.2.3:
+     resolution: {integrity: sha512-bXfMZtsaomK6ysNN/UGRIcasQAYkC10NtPmP0oOHOV8YOhA2TXmwRXCku4qOzjIFxAPfish5+XS0eIug2PzNZA==}
+     engines: {node: '>=16'}
+@@ -11045,6 +11114,12 @@ packages:
+     peerDependencies:
+       react: 19.2.1
+ 
++  streamdown@2.5.0:
++    resolution: {integrity: sha512-/tTnURfIOxZK/pqJAxsfCvETG/XCJHoWnk3jq9xLcuz6CSpnjjuxSRBTTL4PKGhxiZQf0lqPxGhImdpwcZ2XwA==}
++    peerDependencies:
++      react: 19.2.1
++      react-dom: 19.2.1
++
+   streamsearch@1.1.0:
+     resolution: {integrity: sha512-Mcc5wHehp9aXz1ax6bZUyY5afg9u2rv5cqQI3mRrYkGC8rW2hM02jWuwjtL++LS5qinSyhj2QfLyNsuc+VsExg==}
+     engines: {node: '>=10.0.0'}
+@@ -11561,9 +11636,6 @@ packages:
+   uc.micro@1.0.6:
+     resolution: {integrity: sha512-8Y75pvTYkLJW2hWQHXxoqRgV7qb9B+9vFEtidML+7koHUFapnVJAZ6cKs+Qjz5Aw3aZWHMC6u0wJE3At+nSGwA==}
+ 
+-  ufo@1.6.1:
+-    resolution: {integrity: sha512-9a4/uxlTWJ4+a5i0ooc1rU7C7YOw3wT+UGqdeNNHWnOF9qcMBgLRS+4IYUqbczewFx4mLEig6gawh7X6mFlEkA==}
+-
+   ufo@1.6.3:
+     resolution: {integrity: sha512-yDJTmhydvl5lJzBmy/hyOAA0d+aqCBuwl818haVdYCRrWV84o7YyeVm4QlVHStqNrrJSTb6jKuFAVqAFsr+K3Q==}
+ 
+@@ -12278,7 +12350,7 @@ snapshots:
+ 
+   '@antfu/install-pkg@1.1.0':
+     dependencies:
+-      package-manager-detector: 1.5.0
++      package-manager-detector: 1.6.0
+       tinyexec: 1.0.2
+ 
+   '@antfu/ni@25.0.0':
+@@ -17542,23 +17614,6 @@ snapshots:
+       - supports-color
+       - zod
+ 
+-  '@workflow/vitest@5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)':
+-    dependencies:
+-      '@workflow/builders': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
+-      '@workflow/core': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
+-      '@workflow/rollup': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
+-      '@workflow/world': 5.0.0-beta.2(zod@4.3.6)
+-      '@workflow/world-local': 5.0.0-beta.4(@opentelemetry/api@1.9.0)
+-      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+-    optionalDependencies:
+-      vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+-    transitivePeerDependencies:
+-      - '@opentelemetry/api'
+-      - '@swc/helpers'
+-      - aws-crt
+-      - supports-color
+-      - zod
+-
+   '@workflow/vitest@5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)':
+     dependencies:
+       '@workflow/builders': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
+@@ -18554,8 +18609,6 @@ snapshots:
+ 
+   confbox@0.1.8: {}
+ 
+-  confbox@0.2.2: {}
+-
+   confbox@0.2.4: {}
+ 
+   config-chain@1.1.13:
+@@ -20199,6 +20252,12 @@ snapshots:
+       web-namespaces: 2.0.1
+       zwitch: 2.0.4
+ 
++  hast-util-sanitize@5.0.2:
++    dependencies:
++      '@types/hast': 3.0.4
++      '@ungap/structured-clone': 1.3.0
++      unist-util-position: 5.0.0
++
+   hast-util-to-html@9.0.5:
+     dependencies:
+       '@types/hast': 3.0.4
+@@ -21115,6 +21174,8 @@ snapshots:
+ 
+   marked@16.4.2: {}
+ 
++  marked@17.0.6: {}
++
+   math-intrinsics@1.1.0: {}
+ 
+   mcp-handler@1.0.3(@modelcontextprotocol/sdk@1.29.0(zod@4.3.6))(next@15.5.7(@opentelemetry/api@1.9.0)(@playwright/test@1.56.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(sass@1.51.0)):
+@@ -21718,10 +21779,10 @@ snapshots:
+ 
+   mlly@1.8.0:
+     dependencies:
+-      acorn: 8.15.0
++      acorn: 8.16.0
+       pathe: 2.0.3
+       pkg-types: 1.3.1
+-      ufo: 1.6.1
++      ufo: 1.6.3
+ 
+   mlly@1.8.2:
+     dependencies:
+@@ -21933,7 +21994,7 @@ snapshots:
+     dependencies:
+       '@next/env': 16.0.10
+       '@swc/helpers': 0.5.15
+-      caniuse-lite: 1.0.30001769
++      caniuse-lite: 1.0.30001791
+       postcss: 8.4.31
+       react: 19.2.1
+       react-dom: 19.2.1(react@19.2.1)
+@@ -22488,7 +22549,7 @@ snapshots:
+ 
+   pkg-types@2.3.0:
+     dependencies:
+-      confbox: 0.2.2
++      confbox: 0.2.4
+       exsolve: 1.0.8
+       pathe: 2.0.3
+ 
+@@ -22914,6 +22975,10 @@ snapshots:
+ 
+   rehype-harden@1.1.5: {}
+ 
++  rehype-harden@1.1.8:
++    dependencies:
++      unist-util-visit: 5.0.0
++
+   rehype-katex@7.0.1:
+     dependencies:
+       '@types/hast': 3.0.4
+@@ -22930,6 +22995,11 @@ snapshots:
+       hast-util-raw: 9.1.0
+       vfile: 6.0.3
+ 
++  rehype-sanitize@6.0.0:
++    dependencies:
++      '@types/hast': 3.0.4
++      hast-util-sanitize: 5.0.2
++
+   remark-cjk-friendly-gfm-strikethrough@1.2.3(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2)(unified@11.0.5):
+     dependencies:
+       micromark-extension-cjk-friendly-gfm-strikethrough: 1.2.3(micromark-util-types@2.0.2)(micromark@4.0.2)
+@@ -23629,6 +23699,29 @@ snapshots:
+       - supports-color
+       - unified
+ 
++  streamdown@2.5.0(react-dom@19.2.1(react@19.2.1))(react@19.2.1):
++    dependencies:
++      clsx: 2.1.1
++      hast-util-to-jsx-runtime: 2.3.6
++      html-url-attributes: 3.0.1
++      marked: 17.0.6
++      mermaid: 11.12.2
++      react: 19.2.1
++      react-dom: 19.2.1(react@19.2.1)
++      rehype-harden: 1.1.8
++      rehype-raw: 7.0.0
++      rehype-sanitize: 6.0.0
++      remark-gfm: 4.0.1
++      remark-parse: 11.0.0
++      remark-rehype: 11.1.2
++      remend: 1.3.0
++      tailwind-merge: 3.4.0
++      unified: 11.0.5
++      unist-util-visit: 5.0.0
++      unist-util-visit-parents: 6.0.2
++    transitivePeerDependencies:
++      - supports-color
++
+   streamsearch@1.1.0: {}
+ 
+   streamx@2.25.0:
+@@ -24181,8 +24274,6 @@ snapshots:
+ 
+   uc.micro@1.0.6: {}
+ 
+-  ufo@1.6.1: {}
+-
+   ufo@1.6.3: {}
+ 
+   uglify-js@3.19.3:
+diff --git a/packages/workbench-v3/.gitignore b/packages/workbench-v3/.gitignore
+new file mode 100644
+index 0000000..d3316e8
+--- /dev/null
++++ b/packages/workbench-v3/.gitignore
+@@ -0,0 +1,4 @@
++.next/
++node_modules/
++.env.local
++*.tsbuildinfo
+diff --git a/packages/workbench-v3/DOMAIN.md b/packages/workbench-v3/DOMAIN.md
+new file mode 100644
+index 0000000..7fb8577
+--- /dev/null
++++ b/packages/workbench-v3/DOMAIN.md
+@@ -0,0 +1,13 @@
++# Workbench Domain
++
++`workbench` is a local review surface for the Context causal graph.
++
++It owns no durable entities. It composes `contextDomain` and defines two facts:
++
++- `workbench.messageReceived`: a user message entered the Context.
++- `workbench.messageAnswered`: a Reaction completed with an answer.
++
++The application writes those facts through `Events(runtime).emit(...)`. Reactor
++creates Sessions, Reactions, operation Events, Event Parts, and the optional
++InstantDB stream owned by each streaming Reaction. A Reaction has zero or one
++stream; non-streaming Reactions do not create placeholder streams.
+diff --git a/packages/workbench-v3/README.md b/packages/workbench-v3/README.md
+new file mode 100644
+index 0000000..82ef274
+--- /dev/null
++++ b/packages/workbench-v3/README.md
+@@ -0,0 +1,24 @@
++# Ekairos Workbench v3
++
++Live React workbench for the Context / Session / Reaction / Event graph.
++
++It provisions a temporary InstantDB app, invokes Azure OpenAI through the real
++Reactor, and renders both durable Event Parts and the provisional Reaction
++stream consumed by `@ekairos/events/react`.
++
++The left column shows the Context, Sessions, and durable Events. The center
++column uses the Event-shaped projection returned by `useContext`. The right
++column follows the active streaming Reaction and exposes its complete ordered
++chunk journal; after consolidation the same trace remains inspectable through
++the Reaction-to-stream link.
++
++Required environment variables:
++
++- `INSTANT_PERSONAL_ACCESS_TOKEN`
++- `AZURE_API_KEY`
++- `AZURE_RESOURCE_NAME` (or `AZURE_OPENAI_ENDPOINT`)
++- optional `AZURE_API_VERSION` and `WORKBENCH_AZURE_MODEL`
++
++```bash
++pnpm --filter ekairos-workbench-v3 dev
++```
+diff --git a/packages/workbench-v3/app/api/bootstrap/route.ts b/packages/workbench-v3/app/api/bootstrap/route.ts
+new file mode 100644
+index 0000000..255f4d8
+--- /dev/null
++++ b/packages/workbench-v3/app/api/bootstrap/route.ts
+@@ -0,0 +1,23 @@
++import { NextResponse } from "next/server"
++
++import { azureModelName } from "@/src/azure"
++import { ensureWorkbenchContext } from "@/src/runtime"
++
++export const dynamic = "force-dynamic"
++
++export async function GET() {
++  try {
++    const state = await ensureWorkbenchContext()
++    return NextResponse.json({
++      appId: state.appId,
++      contextId: state.context.id,
++      contextKey: state.context.key,
++      model: azureModelName(),
++    })
++  } catch (error) {
++    return NextResponse.json(
++      { error: error instanceof Error ? error.message : String(error) },
++      { status: 500 },
++    )
++  }
++}
+diff --git a/packages/workbench-v3/app/api/context/route.ts b/packages/workbench-v3/app/api/context/route.ts
+new file mode 100644
+index 0000000..122873f
+--- /dev/null
++++ b/packages/workbench-v3/app/api/context/route.ts
+@@ -0,0 +1,52 @@
++import { NextResponse } from "next/server"
++
++import { answerMessage } from "@/src/chat-reaction"
++import { ensureWorkbenchContext } from "@/src/runtime"
++
++export const maxDuration = 120
++
++function text(value: unknown) {
++  return typeof value === "string" ? value.trim() : ""
++}
++
++function message(body: Record<string, unknown>) {
++  const messages = Array.isArray(body.messages) ? body.messages : []
++  const latest = messages[messages.length - 1] as Record<string, unknown> | undefined
++  const parts = Array.isArray(latest?.parts) ? latest.parts : []
++  const value = parts.map(part => {
++    if (!part || typeof part !== "object") return ""
++    const row = part as Record<string, unknown>
++    return text(row.text) || text((row.content as any)?.text)
++  }).filter(Boolean).join("\n")
++  return {
++    id: text(latest?.id) || globalThis.crypto.randomUUID(),
++    text: value || text(body.message),
++    parts,
++  }
++}
++
++export async function POST(request: Request) {
++  try {
++    const body = await request.json().catch(() => ({})) as Record<string, unknown>
++    const input = message(body)
++    if (!input.text) return NextResponse.json({ error: "message_required" }, { status: 400 })
++    const state = await ensureWorkbenchContext(text(body.contextId) || undefined)
++    const event = await answerMessage({
++      runtime: state.runtime,
++      context: state.context,
++      eventId: input.id,
++      text: input.text,
++      parts: input.parts,
++    })
++    return NextResponse.json({
++      appId: state.appId,
++      contextId: state.context.id,
++      event,
++    })
++  } catch (error) {
++    return NextResponse.json(
++      { error: error instanceof Error ? error.message : String(error) },
++      { status: 500 },
++    )
++  }
++}
+diff --git a/packages/workbench-v3/app/globals.css b/packages/workbench-v3/app/globals.css
+new file mode 100644
+index 0000000..0306d19
+--- /dev/null
++++ b/packages/workbench-v3/app/globals.css
+@@ -0,0 +1,167 @@
++:root {
++  color-scheme: dark;
++  --bg: #0b0c0d;
++  --panel: #111315;
++  --panel-raised: #17191b;
++  --line: #2c3033;
++  --line-soft: #202326;
++  --text: #f1f3f2;
++  --muted: #929a99;
++  --green: #65d688;
++  --amber: #e8b65c;
++  --cyan: #46c9d4;
++  --red: #ef7772;
++  --violet: #a99af4;
++  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
++  letter-spacing: 0;
++}
++
++* { box-sizing: border-box; letter-spacing: 0; }
++html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
++body { overflow: hidden; }
++button, textarea { font: inherit; }
++button { color: inherit; }
++code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
++
++.workbench-shell { height: 100vh; display: grid; grid-template-rows: 48px minmax(0, 1fr) 24px; background: var(--bg); }
++.topbar { display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--line); background: #0f1112; min-width: 0; }
++.brand-mark { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid #414648; background: #181b1c; font: 800 12px/1 monospace; color: var(--green); }
++.brand-mark span { color: var(--amber); }
++.brand-copy { display: grid; min-width: 0; }
++.brand-copy strong { font-size: 13px; }
++.brand-copy span { color: var(--muted); font-size: 10px; }
++.topbar-spacer { flex: 1; }
++.topbar-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 5px 7px; border: 1px solid var(--line-soft); color: #bbc1c0; background: #141617; font-size: 10px; white-space: nowrap; }
++
++.workspace-grid { min-height: 0; display: grid; grid-template-columns: minmax(210px, 0.62fr) minmax(390px, 1.18fr) minmax(430px, 1.25fr); }
++.panel { min-width: 0; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
++.panel:last-child { border-right: 0; }
++.panel-title { height: 39px; flex: 0 0 39px; padding: 0 11px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); color: #d7dbda; font-size: 11px; font-weight: 700; text-transform: uppercase; }
++.section-title { margin-top: 8px; border-top: 1px solid var(--line-soft); }
++
++.navigator { display: flex; flex-direction: column; overflow: hidden; }
++.context-identity { display: grid; gap: 5px; padding: 12px; }
++.context-identity strong { font-size: 13px; }
++.context-identity code { color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; }
++.metric-grid { display: grid; grid-template-columns: 1fr 1fr; border-block: 1px solid var(--line-soft); }
++.metric-grid div { display: grid; gap: 2px; padding: 9px 11px; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
++.metric-grid div:nth-child(2n) { border-right: 0; }
++.metric-grid div:nth-last-child(-n + 2) { border-bottom: 0; }
++.metric-grid strong { color: var(--cyan); font: 700 15px/1 monospace; }
++.metric-grid span { color: var(--muted); font-size: 9px; text-transform: uppercase; }
++.session-list { max-height: 170px; overflow: auto; }
++.session-row, .event-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 11px; border-bottom: 1px solid var(--line-soft); }
++.session-row > div, .event-row > div { display: grid; gap: 2px; min-width: 0; }
++.session-row strong, .event-row strong { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.session-row span, .event-row span { color: var(--muted); font-size: 8px; }
++.event-list { min-height: 0; overflow: auto; }
++.event-marker { flex: 0 0 4px; height: 20px; margin-top: 1px; background: #707777; }
++.event-marker.streaming { background: var(--cyan); }
++.event-marker.optimistic { background: var(--amber); }
++
++.conversation { display: flex; flex-direction: column; overflow: hidden; background: #0f1112; }
++.conversation-title { background: #121415; }
++.send-state { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; text-transform: none; }
++.send-streaming { color: var(--cyan); }
++.send-error { color: var(--red); }
++.messages { flex: 1; min-height: 0; overflow-y: auto; padding: 18px clamp(14px, 4vw, 42px) 24px; scrollbar-gutter: stable; }
++.message { max-width: 760px; margin: 0 auto 20px; }
++.message header { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; color: var(--muted); font-size: 9px; }
++.message header strong { color: #dce0df; font-size: 11px; }
++.message-user .message-author { color: var(--amber); }
++.message-assistant .message-author { color: var(--green); }
++.durability { margin-left: auto; padding: 2px 5px; border: 1px solid var(--line); font-size: 8px; text-transform: uppercase; }
++.durability-streaming { color: var(--cyan); border-color: #246168; }
++.durability-optimistic { color: var(--amber); border-color: #68542d; }
++.markdown { color: #e5e8e7; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
++.markdown > :first-child { margin-top: 0; }
++.markdown > :last-child { margin-bottom: 0; }
++.markdown pre { overflow: auto; padding: 10px; border: 1px solid var(--line); background: #090a0b; font-size: 10px; }
++.markdown code { color: #c6efcf; }
++.part-detail { margin: 8px 0; border: 1px solid var(--line); background: #101214; }
++.part-detail summary { cursor: pointer; padding: 6px 8px; color: var(--muted); font-size: 9px; }
++.part-detail pre { margin: 0; padding: 8px; border-top: 1px solid var(--line-soft); color: #c8cdcc; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 9px; line-height: 1.5; }
++.reasoning-part { border-left: 2px solid var(--violet); }
++.action-part { border-left: 2px solid var(--amber); }
++.raw-part { white-space: pre-wrap; overflow-wrap: anywhere; }
++.chat-empty { height: 100%; min-height: 240px; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--muted); text-align: center; }
++.chat-empty svg { color: var(--green); }
++.chat-empty strong { color: #dfe3e2; font-size: 13px; }
++.chat-empty span { max-width: 340px; font-size: 11px; line-height: 1.5; }
++.error-banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid #6e302d; background: #2a1515; color: #ffc3be; font-size: 10px; }
++.composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; margin: 0 clamp(12px, 3vw, 32px) 14px; padding: 8px; border: 1px solid #3b4042; background: #17191a; box-shadow: 0 8px 28px #0008; }
++.composer textarea { width: 100%; min-height: 40px; max-height: 130px; resize: vertical; border: 0; outline: 0; padding: 9px; background: transparent; color: var(--text); font-size: 12px; line-height: 1.45; }
++.composer textarea::placeholder { color: #737a79; }
++.composer button { width: 36px; height: 36px; border: 1px solid #4b7b5a; background: #21432c; color: #c8fbd6; display: grid; place-items: center; cursor: pointer; }
++.composer button:disabled { cursor: not-allowed; opacity: .4; }
++
++.traces { display: grid; grid-template-rows: 39px minmax(96px, 30%) minmax(0, 1fr); overflow: hidden; background: #101213; }
++.reaction-list { overflow: auto; border-bottom: 1px solid var(--line); }
++.reaction-row { width: 100%; min-height: 48px; display: grid; grid-template-columns: 25px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 10px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; text-align: left; cursor: pointer; }
++.reaction-row:hover { background: #181b1c; }
++.reaction-row.selected { background: #1b2220; box-shadow: inset 2px 0 var(--green); }
++.reaction-position { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid #39403e; color: var(--muted); font: 700 9px/1 monospace; }
++.reaction-copy { display: grid; gap: 3px; min-width: 0; }
++.reaction-copy strong { font-size: 10px; }
++.reaction-copy small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
++.reaction-state { display: grid; justify-items: end; gap: 3px; color: var(--muted); font-size: 8px; }
++.reaction-state > span:first-child { justify-self: end; }
++.status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #737a79; box-shadow: 0 0 0 2px #737a7920; }
++.status-running { background: var(--cyan); box-shadow: 0 0 0 2px #46c9d428; }
++.status-completed, .status-idle { background: var(--green); box-shadow: 0 0 0 2px #65d68828; }
++.status-failed { background: var(--red); box-shadow: 0 0 0 2px #ef777228; }
++
++.trace-detail { min-height: 0; overflow-y: auto; padding: 12px; }
++.trace-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
++.trace-heading h2 { margin: 3px 0 0; font-size: 16px; overflow-wrap: anywhere; }
++.eyebrow { color: var(--cyan); font: 700 8px/1.2 monospace; text-transform: uppercase; }
++.status-label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; }
++.trace-metadata { display: grid; grid-template-columns: 1fr 1fr; margin: 13px 0; border: 1px solid var(--line-soft); }
++.trace-metadata div { min-width: 0; padding: 7px; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
++.trace-metadata div:nth-child(2n) { border-right: 0; }
++.trace-metadata div:nth-last-child(-n + 2) { border-bottom: 0; }
++.trace-metadata dt { color: var(--muted); font-size: 8px; text-transform: uppercase; }
++.trace-metadata dd { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; color: #d5d9d8; font: 9px/1.4 monospace; }
++.instruction { margin: 0 0 12px; padding: 8px; border-left: 2px solid var(--violet); background: #17161d; color: #c9c3e7; font-size: 9px; line-height: 1.5; }
++.chunks { display: grid; gap: 5px; }
++.chunk { border: 1px solid var(--line-soft); background: #0c0e0f; }
++.chunk[open] { border-color: #3b4243; }
++.chunk summary { display: grid; grid-template-columns: 84px minmax(110px, auto) minmax(80px, 1fr) auto; align-items: center; gap: 7px; padding: 7px; cursor: pointer; color: var(--muted); font-size: 8px; }
++.chunk summary strong { color: #d6dad9; font-size: 9px; }
++.chunk summary time { text-align: right; }
++.chunk-sequence { overflow: hidden; text-overflow: ellipsis; color: #6f7775; font: 8px/1 monospace; }
++.chunk > pre, .provider-raw pre { max-height: 260px; overflow: auto; margin: 0; padding: 8px; border-top: 1px solid var(--line-soft); color: #bfc7c5; background: #08090a; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 8px; line-height: 1.5; }
++.chunk-delta { color: #e6e9e8 !important; font-size: 10px !important; }
++.chunk-action { padding: 7px 8px; border-top: 1px solid var(--line-soft); color: var(--amber); font: 9px/1.4 monospace; }
++.provider-raw { border-top: 1px solid var(--line-soft); }
++.provider-raw summary { display: block; padding: 6px 8px; color: #727978; font-size: 8px; }
++.chunk-text-delta { border-left: 2px solid var(--green); }
++.chunk-reasoning-delta { border-left: 2px solid var(--violet); }
++.chunk-action-started, .chunk-action-completed { border-left: 2px solid var(--amber); }
++.chunk-provider-error, .chunk-reaction-failed { border-left: 2px solid var(--red); }
++.empty { min-height: 120px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 10px; }
++.empty.compact { min-height: 60px; border: 1px dashed var(--line); }
++
++.terminal-status { display: flex; align-items: center; gap: 7px; padding: 0 10px; border-top: 1px solid var(--line); background: #121415; color: #7f8785; font-size: 8px; }
++.boot-screen { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 8px; background: var(--bg); color: var(--muted); }
++.boot-screen strong { color: var(--text); font-size: 14px; }
++.boot-screen span { font-size: 10px; }
++.boot-screen.error { color: var(--red); }
++.boot-screen pre { max-width: min(680px, 90vw); white-space: pre-wrap; color: #ffc9c6; }
++.spin { animation: spin .8s linear infinite; }
++@keyframes spin { to { transform: rotate(360deg); } }
++
++@media (max-width: 1100px) {
++  .workspace-grid { grid-template-columns: 200px minmax(360px, 1fr) minmax(360px, 1fr); }
++  .topbar-chip:first-of-type { display: none; }
++}
++
++@media (max-width: 820px) {
++  body { overflow: auto; }
++  .workbench-shell { height: auto; min-height: 100vh; grid-template-rows: 48px auto 24px; }
++  .workspace-grid { grid-template-columns: 1fr; }
++  .navigator { display: none; }
++  .conversation { min-height: 70vh; border-bottom: 1px solid var(--line); }
++  .traces { min-height: 72vh; grid-template-rows: 39px 220px minmax(420px, 1fr); }
++  .topbar-chip { display: none; }
++}
+diff --git a/packages/workbench-v3/app/layout.tsx b/packages/workbench-v3/app/layout.tsx
+new file mode 100644
+index 0000000..ecf3e24
+--- /dev/null
++++ b/packages/workbench-v3/app/layout.tsx
+@@ -0,0 +1,16 @@
++import type { Metadata } from "next"
++
++import "./globals.css"
++
++export const metadata: Metadata = {
++  title: "Ekairos Workbench v3",
++  description: "Live Context, Reaction, Event, Part, and InstantDB stream traces.",
++}
++
++export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
++  return (
++    <html lang="en">
++      <body>{children}</body>
++    </html>
++  )
++}
+diff --git a/packages/workbench-v3/app/page.tsx b/packages/workbench-v3/app/page.tsx
+new file mode 100644
+index 0000000..4eef68e
+--- /dev/null
++++ b/packages/workbench-v3/app/page.tsx
+@@ -0,0 +1,5 @@
++import { Workbench } from "@/src/components/workbench"
++
++export default function Page() {
++  return <Workbench />
++}
+diff --git a/packages/workbench-v3/next.config.ts b/packages/workbench-v3/next.config.ts
+new file mode 100644
+index 0000000..35bc2d2
+--- /dev/null
++++ b/packages/workbench-v3/next.config.ts
+@@ -0,0 +1,12 @@
++import type { NextConfig } from "next"
++
++const nextConfig: NextConfig = {
++  transpilePackages: [
++    "@ekairos/domain",
++    "@ekairos/events",
++    "@ekairos/reactor",
++    "@ekairos/testing",
++  ],
++}
++
++export default nextConfig
+diff --git a/packages/workbench-v3/package.json b/packages/workbench-v3/package.json
+new file mode 100644
+index 0000000..26dcfa2
+--- /dev/null
++++ b/packages/workbench-v3/package.json
+@@ -0,0 +1,34 @@
++{
++  "name": "ekairos-workbench-v3",
++  "version": "0.1.0",
++  "private": true,
++  "type": "module",
++  "scripts": {
++    "dev": "next dev --webpack -H 0.0.0.0 -p 4741",
++    "build": "next build --webpack",
++    "start": "next start -H 0.0.0.0 -p 4741",
++    "typecheck": "tsc --noEmit"
++  },
++  "dependencies": {
++    "@ai-sdk/openai": "^2.0.68",
++    "@ekairos/domain": "workspace:*",
++    "@ekairos/events": "workspace:*",
++    "@ekairos/reactor": "workspace:*",
++    "@ekairos/testing": "workspace:*",
++    "@instantdb/admin": "0.22.158",
++    "@instantdb/react": "0.22.158",
++    "lucide-react": "^0.554.0",
++    "next": "16.0.10",
++    "react": "19.2.0",
++    "react-dom": "19.2.0",
++    "server-only": "^0.0.1",
++    "streamdown": "^2.5.0",
++    "zod": "^4.3.6"
++  },
++  "devDependencies": {
++    "@types/node": "^24.5.0",
++    "@types/react": "19.2.2",
++    "@types/react-dom": "^19.2.2",
++    "typescript": "^5.9.3"
++  }
++}
+diff --git a/packages/workbench-v3/src/azure.ts b/packages/workbench-v3/src/azure.ts
+new file mode 100644
+index 0000000..c6e0d3d
+--- /dev/null
++++ b/packages/workbench-v3/src/azure.ts
+@@ -0,0 +1,70 @@
++import "server-only"
++
++import { createOpenAI } from "@ai-sdk/openai"
++
++let provider: ReturnType<typeof createOpenAI> | null = null
++
++function env(name: string) {
++  return String(process.env[name] ?? "").trim()
++}
++
++function required(name: string) {
++  const value = env(name)
++  if (!value) throw new Error(`Missing required environment variable: ${name}`)
++  return value
++}
++
++function baseURL() {
++  const endpoint = env("AZURE_OPENAI_ENDPOINT")
++  if (endpoint) {
++    const normalized = endpoint.replace(/\/+$/, "")
++    return normalized.endsWith("/openai") ? normalized : `${normalized}/openai`
++  }
++  return `https://${required("AZURE_RESOURCE_NAME")}.openai.azure.com/openai`
++}
++
++function azureFetch(apiVersion: string) {
++  return async (input: RequestInfo | URL, init?: RequestInit) => {
++    const raw = typeof input === "string"
++      ? input
++      : input instanceof URL
++        ? input.toString()
++        : input.url
++    const url = new URL(raw)
++    if (!url.searchParams.has("api-version")) url.searchParams.set("api-version", apiVersion)
++    let request = init
++    if (typeof init?.body === "string") {
++      try {
++        const body = JSON.parse(init.body)
++        if (Array.isArray(body.tools)) {
++          body.tools = body.tools.map((tool: any) => {
++            if (tool?.type !== "function" || !tool.function) return tool
++            const { strict: _strict, ...fn } = tool.function
++            return { ...tool, function: fn }
++          })
++        }
++        body.store = true
++        request = { ...init, body: JSON.stringify(body) }
++      } catch {}
++    }
++    return fetch(url, request)
++  }
++}
++
++export function azureModelName() {
++  return env("WORKBENCH_AZURE_MODEL") || "gpt-5.2"
++}
++
++export function getAzureModel() {
++  if (!provider) {
++    const apiKey = env("AZURE_API_KEY") || env("AZURE_OPENAI_API_KEY")
++    if (!apiKey) throw new Error("AZURE_API_KEY is required")
++    provider = createOpenAI({
++      apiKey,
++      baseURL: baseURL(),
++      headers: { Authorization: `Bearer ${apiKey}` },
++      fetch: azureFetch(env("AZURE_API_VERSION") || "2025-04-01-preview"),
++    })
++  }
++  return provider.responses(azureModelName() as any)
++}
+diff --git a/packages/workbench-v3/src/chat-reaction.ts b/packages/workbench-v3/src/chat-reaction.ts
+new file mode 100644
+index 0000000..2dc55ae
+--- /dev/null
++++ b/packages/workbench-v3/src/chat-reaction.ts
+@@ -0,0 +1,77 @@
++import "server-only"
++
++import {
++  Events,
++  Part,
++  type ContextEvent,
++  type ContextHandle,
++} from "@ekairos/events"
++import {
++  ai,
++  defineReaction,
++} from "@ekairos/reactor"
++import { executeReaction } from "@ekairos/reactor/internal"
++
++import { getAzureModel } from "./azure"
++import { workbenchDomain } from "./domain"
++import type { WorkbenchContext, WorkbenchRuntime } from "./runtime"
++
++function createChatReaction(history: readonly ContextEvent[]) {
++  return defineReaction(
++    workbenchDomain.events.messageReceived,
++    {
++      key: "workbench.answer-message",
++      scope: workbenchDomain,
++      engine: ai({ model: async () => getAzureModel(), maxRounds: 6 }),
++      sandbox: false,
++    },
++    async reaction => {
++      const answer = await reaction.given(history).agent({
++        instruction: [
++          "Answer the latest user message as a concise, technically precise assistant.",
++          "Use the preceding messageReceived and messageAnswered Events as conversation history.",
++          "Return only the answer intended for the user.",
++        ].join(" "),
++      })
++      return await reaction.given(answer).emit(
++        workbenchDomain.events.messageAnswered({ text: answer.payload }),
++      )
++    },
++  )
++}
++
++export async function answerMessage(input: {
++  runtime: WorkbenchRuntime
++  context: ContextHandle<WorkbenchContext> | null
++  eventId: string
++  text: string
++  parts: readonly unknown[]
++}) {
++  if (!input.context) throw new Error("workbench_context_not_found")
++  const trigger = await Events(input.runtime).emit(
++    workbenchDomain.events.messageReceived({ text: input.text }),
++    {
++      id: input.eventId,
++      channel: "web",
++      contextId: input.context.id,
++      parts: [Part.message({
++        blocks: input.parts as any,
++      })],
++    },
++  )
++  const history = (await Events(input.runtime).query({
++    $: {
++      where: { context: input.context.id, domain: "workbench" },
++      order: { createdAt: "asc" },
++      limit: 200,
++    },
++  })).filter(event =>
++    event.type === workbenchDomain.events.messageReceived.kind ||
++    event.type === workbenchDomain.events.messageAnswered.kind)
++  return await executeReaction(
++    input.runtime,
++    input.context,
++    trigger,
++    createChatReaction(history),
++  )
++}
+diff --git a/packages/workbench-v3/src/components/workbench.tsx b/packages/workbench-v3/src/components/workbench.tsx
+new file mode 100644
+index 0000000..4654296
+--- /dev/null
++++ b/packages/workbench-v3/src/components/workbench.tsx
+@@ -0,0 +1,372 @@
++"use client"
++
++import {
++  useContext as useEkairosContext,
++  type ContextEventForUI,
++  type ContextEventPartForUI,
++  type ContextReactionForUI,
++} from "@ekairos/events/react"
++import { init } from "@instantdb/react"
++import {
++  Activity,
++  ArrowUp,
++  Bot,
++  Braces,
++  CircleAlert,
++  Clock3,
++  Database,
++  GitFork,
++  LoaderCircle,
++  Radio,
++  TerminalSquare,
++  User,
++} from "lucide-react"
++import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
++import { Streamdown } from "streamdown"
++
++import { workbenchSchema } from "@/src/domain"
++
++type Bootstrap = Readonly<{
++  appId: string
++  contextId: string
++  contextKey: string
++  model: string
++}>
++
++function short(value: string | null | undefined, size = 8) {
++  return value ? value.slice(0, size) : "-"
++}
++
++function time(value: string | Date | undefined) {
++  if (!value) return "-"
++  return new Intl.DateTimeFormat(undefined, {
++    hour: "2-digit",
++    minute: "2-digit",
++    second: "2-digit",
++  }).format(new Date(value))
++}
++
++function json(value: unknown) {
++  try { return JSON.stringify(value, null, 2) }
++  catch { return String(value) }
++}
++
++function partText(part: ContextEventPartForUI) {
++  const content = part.content as any
++  if (typeof content?.text === "string") return content.text
++  if (Array.isArray(content?.blocks)) {
++    return content.blocks
++      .filter((block: any) => block?.type === "text")
++      .map((block: any) => block.text)
++      .join("\n")
++  }
++  return ""
++}
++
++function eventText(event: ContextEventForUI) {
++  const messages = event.eventParts.filter(part => part.type === "message")
++    .map(partText).filter(Boolean)
++  if (messages.length) return messages.join("\n\n")
++  if (typeof event.payload === "string") return event.payload
++  const payload = event.payload as any
++  return typeof payload?.text === "string" ? payload.text : ""
++}
++
++function StatusDot({ status }: { status: string }) {
++  return <span className={`status-dot status-${status}`} aria-label={status} />
++}
++
++function PartView({ part }: { part: ContextEventPartForUI }) {
++  if (part.type === "message") {
++    return (
++      <div className="markdown">
++        <Streamdown>{partText(part)}</Streamdown>
++      </div>
++    )
++  }
++  if (part.type === "reasoning") {
++    return (
++      <details className="part-detail reasoning-part" open>
++        <summary>Reasoning - {(part.content as any)?.state ?? "done"}</summary>
++        <pre>{(part.content as any)?.text ?? ""}</pre>
++      </details>
++    )
++  }
++  if (part.type === "action") {
++    const content = part.content as any
++    return (
++      <details className="part-detail action-part" open>
++        <summary>{content.actionName} - {content.status}</summary>
++        <pre>{json(content.input ?? content.output ?? content.error)}</pre>
++      </details>
++    )
++  }
++  return <pre className="raw-part">{json(part.content)}</pre>
++}
++
++function Message({ event }: { event: ContextEventForUI }) {
++  const user = event.type === "workbench.messageReceived" || event.type === "user.message"
++  const text = eventText(event)
++  if (!text && event.eventParts.length === 0) return null
++  return (
++    <article className={`message ${user ? "message-user" : "message-assistant"}`}>
++      <header>
++        <span className="message-author">{user ? <User size={14} /> : <Bot size={14} />}</span>
++        <strong>{user ? "You" : "Reaction"}</strong>
++        <span>{time(event.createdAt)}</span>
++        <span className={`durability durability-${event.durability ?? "durable"}`}>
++          {event.durability ?? "durable"}
++        </span>
++      </header>
++      {event.eventParts.length > 0
++        ? event.eventParts.map(part => <PartView key={part.id} part={part} />)
++        : <div className="markdown"><Streamdown>{text}</Streamdown></div>}
++    </article>
++  )
++}
++
++function ReactionRow({
++  reaction,
++  selected,
++  onSelect,
++}: {
++  reaction: ContextReactionForUI
++  selected: boolean
++  onSelect(): void
++}) {
++  const reader = reaction.stream?.reader
++  return (
++    <button className={`reaction-row ${selected ? "selected" : ""}`} onClick={onSelect}>
++      <span className="reaction-position">{reaction.position}</span>
++      <span className="reaction-copy">
++        <strong>{reaction.type}</strong>
++        <small>{reaction.instruction || `${reaction.causeIds.length} cause - ${reaction.effectIds.length} effect`}</small>
++      </span>
++      <span className="reaction-state">
++        <StatusDot status={reaction.status} />
++        {reader ? <small>{reader.chunkCount} chunks</small> : <small>durable</small>}
++      </span>
++    </button>
++  )
++}
++
++function ChunkTrace({ reaction }: { reaction: ContextReactionForUI | null }) {
++  if (!reaction) return <div className="empty"><GitFork size={20} />Select a Reaction.</div>
++  const stream = reaction.stream
++  return (
++    <section className="trace-detail">
++      <div className="trace-heading">
++        <div>
++          <span className="eyebrow">Reaction {short(reaction.id, 12)}</span>
++          <h2>{reaction.type}</h2>
++        </div>
++        <span className="status-label"><StatusDot status={reaction.status} />{reaction.status}</span>
++      </div>
++      <dl className="trace-metadata">
++        <div><dt>causes</dt><dd>{reaction.causeIds.map(id => short(id)).join(", ") || "-"}</dd></div>
++        <div><dt>effects</dt><dd>{reaction.effectIds.map(id => short(id)).join(", ") || "pending"}</dd></div>
++        <div><dt>stream</dt><dd>{stream ? short(stream.id, 12) : "none"}</dd></div>
++        <div><dt>reader</dt><dd>{stream?.reader.status ?? "not streaming"}</dd></div>
++        <div><dt>offset</dt><dd>{stream?.reader.byteOffset ?? 0} B</dd></div>
++        <div><dt>depth</dt><dd>{reaction.depth}</dd></div>
++      </dl>
++      {reaction.instruction ? <p className="instruction">{reaction.instruction}</p> : null}
++      {!stream ? (
++        <div className="empty compact">This Reaction has no provisional stream.</div>
++      ) : (
++        <div className="chunks">
++          {stream.chunks.map(chunk => (
++            <details className={`chunk chunk-${chunk.kind.replaceAll(".", "-")}`} key={chunk.sequence}>
++              <summary>
++                <span className="chunk-sequence">{chunk.sequence}</span>
++                <strong>{chunk.kind}</strong>
++                <span>{chunk.providerType ?? chunk.provider ?? "reactor"}</span>
++                <time>{time(chunk.at)}</time>
++              </summary>
++              {chunk.delta ? <pre className="chunk-delta">{chunk.delta}</pre> : null}
++              {chunk.actionName ? (
++                <div className="chunk-action">{chunk.actionName} - {short(chunk.actionCallId, 12)}</div>
++              ) : null}
++              {chunk.input !== undefined ? <pre>{json(chunk.input)}</pre> : null}
++              {chunk.output !== undefined ? <pre>{json(chunk.output)}</pre> : null}
++              {chunk.error !== undefined ? <pre>{json(chunk.error)}</pre> : null}
++              {chunk.data !== undefined ? <pre>{json(chunk.data)}</pre> : null}
++              {chunk.raw !== undefined ? (
++                <details className="provider-raw">
++                  <summary>provider raw</summary>
++                  <pre>{json(chunk.raw)}</pre>
++                </details>
++              ) : null}
++            </details>
++          ))}
++          {stream.chunks.length === 0 ? (
++            <div className="empty compact"><Radio size={16} />Waiting for the first chunk.</div>
++          ) : null}
++        </div>
++      )}
++    </section>
++  )
++}
++
++function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
++  const db = useMemo(() => init({
++    appId: bootstrap.appId,
++    schema: workbenchSchema,
++    useDateObjects: true,
++  } as any), [bootstrap.appId])
++  const context = useEkairosContext(db, {
++    apiUrl: "/api/context",
++    contextKey: bootstrap.contextKey,
++    initialContextId: bootstrap.contextId,
++  })
++  const [draft, setDraft] = useState("")
++  const [selectedId, setSelectedId] = useState<string | null>(null)
++  const bottom = useRef<HTMLDivElement>(null)
++  const chatEvents = useMemo(() => context.events.filter(event =>
++    event.type === "workbench.messageReceived" ||
++    event.type === "user.message" ||
++    event.type === "context.agent"), [context.events])
++  const selected = context.reactions.find(reaction => reaction.id === selectedId)
++    ?? context.reactions.find(reaction => reaction.status === "running")
++    ?? [...context.reactions].reverse().find(reaction => reaction.stream)
++    ?? context.reactions[0]
++    ?? null
++
++  useEffect(() => {
++    const runningStream = context.reactions.find(reaction =>
++      reaction.status === "running" && reaction.stream)
++    if (runningStream && runningStream.id !== selectedId) {
++      setSelectedId(runningStream.id)
++      return
++    }
++    if (!selectedId && selected) setSelectedId(selected.id)
++  }, [context.reactions, selected, selectedId])
++  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }) }, [chatEvents])
++
++  async function submit(event: FormEvent) {
++    event.preventDefault()
++    const value = draft.trim()
++    if (!value || context.sendStatus !== "idle") return
++    setDraft("")
++    await context.append({ parts: [{ type: "text", text: value }] }).catch(() => undefined)
++  }
++
++  return (
++    <main className="workbench-shell">
++      <header className="topbar">
++        <div className="brand-mark">E<span>K</span></div>
++        <div className="brand-copy"><strong>Workbench v3</strong><span>Reaction stream inspector</span></div>
++        <div className="topbar-spacer" />
++        <span className="topbar-chip"><Database size={13} />{short(bootstrap.appId, 12)}</span>
++        <span className="topbar-chip"><Bot size={13} />{bootstrap.model}</span>
++        <span className="topbar-chip"><StatusDot status={context.contextStatus} />{context.contextStatus}</span>
++      </header>
++
++      <div className="workspace-grid">
++        <aside className="navigator panel">
++          <div className="panel-title"><span>Context</span><Braces size={15} /></div>
++          <div className="context-identity">
++            <strong>{context.context?.name ?? bootstrap.contextKey}</strong>
++            <code>{context.contextId}</code>
++          </div>
++          <div className="metric-grid">
++            <div><strong>{context.sessions.length}</strong><span>sessions</span></div>
++            <div><strong>{context.events.length}</strong><span>events</span></div>
++            <div><strong>{context.reactions.length}</strong><span>reactions</span></div>
++            <div><strong>{context.reactions.reduce((sum, row) => sum + (row.stream?.reader.chunkCount ?? 0), 0)}</strong><span>chunks</span></div>
++          </div>
++          <div className="panel-title section-title"><span>Sessions</span><Clock3 size={14} /></div>
++          <div className="session-list">
++            {context.sessions.map(session => (
++              <div className="session-row" key={session.id}>
++                <StatusDot status={session.status} />
++                <div><strong>{session.definition}</strong><span>{time(session.createdAt)} - {session.reactions.length} reactions</span></div>
++              </div>
++            ))}
++          </div>
++          <div className="panel-title section-title"><span>Events</span><Activity size={14} /></div>
++          <div className="event-list">
++            {[...context.events].reverse().slice(0, 30).map(event => (
++              <div className="event-row" key={event.id}>
++                <span className={`event-marker ${event.durability ?? "durable"}`} />
++                <div><strong>{event.type}</strong><span>{short(event.id)} - {event.eventParts.length} parts</span></div>
++              </div>
++            ))}
++          </div>
++        </aside>
++
++        <section className="conversation panel">
++          <div className="panel-title conversation-title">
++            <span>Conversation</span>
++            <span className={`send-state send-${context.sendStatus}`}>
++              {context.sendStatus === "streaming" ? <Radio size={13} /> : null}
++              {context.sendStatus}
++            </span>
++          </div>
++          <div className="messages">
++            {chatEvents.length === 0 ? (
++              <div className="chat-empty"><Bot size={28} /><strong>Start a real Reaction</strong><span>The response will stream through InstantDB while its durable Event is being built.</span></div>
++            ) : chatEvents.map(event => <Message event={event} key={`${event.id}:${event.durability}`} />)}
++            <div ref={bottom} />
++          </div>
++          {context.sendError ? <div className="error-banner"><CircleAlert size={15} />{context.sendError}</div> : null}
++          <form className="composer" onSubmit={submit}>
++            <textarea
++              aria-label="Message"
++              placeholder="Ask something that produces a trace..."
++              value={draft}
++              onChange={event => setDraft(event.target.value)}
++              onKeyDown={event => {
++                if (event.key === "Enter" && !event.shiftKey) {
++                  event.preventDefault()
++                  event.currentTarget.form?.requestSubmit()
++                }
++              }}
++            />
++            <button aria-label="Send message" disabled={!draft.trim() || context.sendStatus !== "idle"}>
++              {context.sendStatus === "idle" ? <ArrowUp size={18} /> : <LoaderCircle className="spin" size={18} />}
++            </button>
++          </form>
++        </section>
++
++        <aside className="traces panel">
++          <div className="panel-title"><span>Reactions</span><GitFork size={15} /></div>
++          <div className="reaction-list">
++            {context.reactions.map(reaction => (
++              <ReactionRow
++                key={reaction.id}
++                reaction={reaction}
++                selected={reaction.id === selected?.id}
++                onSelect={() => setSelectedId(reaction.id)}
++              />
++            ))}
++          </div>
++          <ChunkTrace reaction={selected} />
++        </aside>
++      </div>
++      <div className="terminal-status"><TerminalSquare size={13} />InstantDB is the live transport; Events remain the durable source of truth.</div>
++    </main>
++  )
++}
++
++export function Workbench() {
++  const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null)
++  const [error, setError] = useState<string | null>(null)
++  useEffect(() => {
++    void fetch("/api/bootstrap", { cache: "no-store" })
++      .then(async response => {
++        const body = await response.json()
++        if (!response.ok) throw new Error(body.error || "Bootstrap failed")
++        setBootstrap(body)
++      })
++      .catch(reason => setError(errorText(reason)))
++  }, [])
++
++  if (error) return <main className="boot-screen error"><CircleAlert size={26} /><strong>Workbench could not start</strong><pre>{error}</pre></main>
++  if (!bootstrap) return <main className="boot-screen"><LoaderCircle className="spin" size={26} /><strong>Provisioning InstantDB</strong><span>Creating the domain graph and stream permissions.</span></main>
++  return <LiveWorkbench bootstrap={bootstrap} />
++}
++
++function errorText(value: unknown) {
++  return value instanceof Error ? value.message : String(value)
++}
+diff --git a/packages/workbench-v3/src/domain.ts b/packages/workbench-v3/src/domain.ts
+new file mode 100644
+index 0000000..7a154bf
+--- /dev/null
++++ b/packages/workbench-v3/src/domain.ts
+@@ -0,0 +1,17 @@
++import { defineEvent, domain } from "@ekairos/domain"
++import { contextDomain } from "@ekairos/events"
++import { z } from "zod"
++
++export const workbenchDomain = domain("workbench")
++  .includes(contextDomain)
++  .withSchema({ entities: {}, links: {}, rooms: {} })
++  .withEvents({
++    messageReceived: defineEvent({
++      payload: z.object({ text: z.string().min(1) }),
++    }),
++    messageAnswered: defineEvent({
++      payload: z.object({ text: z.string() }),
++    }),
++  })
++
++export const workbenchSchema = workbenchDomain.instantSchema()
+diff --git a/packages/workbench-v3/src/runtime.ts b/packages/workbench-v3/src/runtime.ts
+new file mode 100644
+index 0000000..90d3377
+--- /dev/null
++++ b/packages/workbench-v3/src/runtime.ts
+@@ -0,0 +1,92 @@
++import "server-only"
++
++import { EkairosRuntime } from "@ekairos/domain"
++import { ContextHandle } from "@ekairos/events"
++import { createTestApp } from "@ekairos/testing/provision"
++import { init } from "@instantdb/admin"
++
++import { workbenchDomain, workbenchSchema } from "./domain"
++
++export type WorkbenchContext = Readonly<{
++  purpose: string
++  createdBy: "workbench-v3"
++}>
++
++type RuntimeEnv = Readonly<{ appId: string; adminToken: string }>
++
++export class WorkbenchRuntime extends EkairosRuntime<
++  RuntimeEnv,
++  typeof workbenchDomain,
++  ReturnType<typeof init>
++> {
++  protected getDomain() { return workbenchDomain }
++
++  protected async resolveDb(env: RuntimeEnv) {
++    return init({
++      appId: env.appId,
++      adminToken: env.adminToken,
++      schema: workbenchSchema,
++      useDateObjects: true,
++    } as any)
++  }
++}
++
++type RuntimeState = Readonly<{
++  appId: string
++  adminToken: string
++  runtime: WorkbenchRuntime
++}>
++
++const STATE = Symbol.for("ekairos.workbench-v3.runtime")
++type RuntimeGlobal = typeof globalThis & { [STATE]?: Promise<RuntimeState> }
++
++function personalAccessToken() {
++  return String(process.env.INSTANT_PERSONAL_ACCESS_TOKEN ?? "").trim()
++}
++
++async function provision(): Promise<RuntimeState> {
++  const token = personalAccessToken()
++  if (!token) throw new Error("INSTANT_PERSONAL_ACCESS_TOKEN is required")
++  const app = await createTestApp({
++    token,
++    name: `ekairos-workbench-v3-${Date.now()}`,
++    schema: workbenchSchema as any,
++    perms: {
++      $default: { allow: { $default: "true" } },
++      $streams: { allow: { view: "true" } },
++    } as any,
++  })
++  return Object.freeze({
++    ...app,
++    runtime: new WorkbenchRuntime({
++      appId: app.appId,
++      adminToken: app.adminToken,
++    }),
++  })
++}
++
++export async function getWorkbenchRuntime() {
++  const root = globalThis as RuntimeGlobal
++  root[STATE] ??= provision()
++  return await root[STATE]
++}
++
++export async function ensureWorkbenchContext(contextId?: string) {
++  const state = await getWorkbenchRuntime()
++  if (contextId) {
++    const existing = await ContextHandle.get<WorkbenchContext>(state.runtime, { id: contextId })
++    if (existing) return { ...state, context: existing }
++  }
++  const byKey = await ContextHandle.get<WorkbenchContext>(state.runtime, {
++    key: "workbench-v3-chat",
++  })
++  const context = byKey ?? await ContextHandle.create(state.runtime, {
++    key: "workbench-v3-chat",
++    name: "Azure streaming trace",
++    content: {
++      purpose: "Inspect a real conversational Reaction and its complete stream trace.",
++      createdBy: "workbench-v3",
++    },
++  })
++  return { ...state, context }
++}
+diff --git a/packages/workbench-v3/tsconfig.json b/packages/workbench-v3/tsconfig.json
+new file mode 100644
+index 0000000..5ed21df
+--- /dev/null
++++ b/packages/workbench-v3/tsconfig.json
+@@ -0,0 +1,30 @@
++{
++  "compilerOptions": {
++    "target": "ES2020",
++    "lib": ["dom", "dom.iterable", "esnext"],
++    "allowJs": false,
++    "skipLibCheck": true,
++    "strict": true,
++    "noEmit": true,
++    "esModuleInterop": true,
++    "module": "esnext",
++    "moduleResolution": "bundler",
++    "resolveJsonModule": true,
++    "isolatedModules": true,
++    "jsx": "react-jsx",
++    "incremental": true,
++    "plugins": [{ "name": "next" }],
++    "baseUrl": ".",
++    "paths": { "@/*": ["./*"] }
++  },
++  "include": [
++    "next-env.d.ts",
++    "app/**/*.ts",
++    "app/**/*.tsx",
++    "src/**/*.ts",
++    "src/**/*.tsx",
++    ".next/types/**/*.ts",
++    ".next/dev/types/**/*.ts"
++  ],
++  "exclude": ["node_modules", ".next"]
++}
+*** End Git Diff
+*** End ECU Patch

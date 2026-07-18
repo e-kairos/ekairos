@@ -1,6 +1,15 @@
 import { domain } from "@ekairos/domain"
 import { i } from "@instantdb/core"
 
+export const contextEventFilesPhysicalLink = Object.freeze({
+  alias: "files",
+  key: "contextEventFiles",
+  target: "$files",
+  has: "many" as const,
+  forwardLabel: "files",
+  reverseLabel: "contextEvents",
+})
+
 const contextSchema = {
   entities: {
     context_contexts: i.entity({
@@ -39,6 +48,11 @@ const contextSchema = {
       causeIds: i.json(),
       effectIds: i.json(),
       instruction: i.string().optional(),
+      streamId: i.string().optional().indexed(),
+      streamClientId: i.string().optional().indexed(),
+      streamStartedAt: i.date().optional().indexed(),
+      streamFinishedAt: i.date().optional().indexed(),
+      streamError: i.string().optional(),
       error: i.any().optional(),
       createdAt: i.date().indexed(),
       updatedAt: i.date().optional().indexed(),
@@ -94,9 +108,17 @@ const contextSchema = {
       forward: { on: "context_reactions", has: "many", label: "effects" },
       reverse: { on: "context_events", has: "many", label: "effectOf" },
     },
+    contextReactionStream: {
+      forward: { on: "context_reactions", has: "one", label: "stream" },
+      reverse: { on: "$streams", has: "many", label: "reactions" },
+    },
     contextEventPartsEvent: {
       forward: { on: "context_eventParts", has: "one", label: "event" },
       reverse: { on: "context_events", has: "many", label: "eventParts" },
+    },
+    contextEventFiles: {
+      forward: { on: "context_events", has: "many", label: "files" },
+      reverse: { on: "$files", has: "many", label: "contextEvents" },
     },
   },
   rooms: {},

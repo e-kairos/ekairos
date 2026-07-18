@@ -1,0 +1,205 @@
+diff --git a/packages/sandbox/src/action-steps.ts b/packages/sandbox/src/action-steps.ts
+index 4e61651..7861352 100644
+--- a/packages/sandbox/src/action-steps.ts
++++ b/packages/sandbox/src/action-steps.ts
+@@ -11,9 +11,20 @@ import {
+ import type { SandboxConfig } from "./types.js"
+ 
+ type ServiceResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string }
+-type SandboxRuntime = { db: unknown }
++type SandboxRuntime = { db: unknown | (() => unknown | Promise<unknown>) }
+ type SandboxFileInput = { path: string; contentBase64: string }
+ 
++async function getRuntimeDb(runtime: SandboxRuntime): Promise<any> {
++  const candidate = runtime.db
++  const db = typeof candidate === "function" ? await candidate.call(runtime) : candidate
++  if (!db) throw new Error("sandbox_runtime_db_required")
++  return db
++}
++
++async function getSandboxService(runtime: SandboxRuntime): Promise<SandboxService> {
++  return new SandboxService(await getRuntimeDb(runtime))
++}
++
+ function shSingleQuote(value: string): string {
+   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`
+ }
+@@ -27,7 +38,7 @@ export async function createSandboxStep({
+ }): Promise<ServiceResult<{ sandboxId: string }>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).createSandbox(input)
++  return await (await getSandboxService(runtime)).createSandbox(input)
+ }
+ 
+ export async function stopSandboxStep({
+@@ -39,7 +50,7 @@ export async function stopSandboxStep({
+ }): Promise<ServiceResult<void>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).stopSandbox(input.sandboxId)
++  return await (await getSandboxService(runtime)).stopSandbox(input.sandboxId)
+ }
+ 
+ export async function runCommandStep({
+@@ -51,7 +62,7 @@ export async function runCommandStep({
+ }): Promise<ServiceResult<CommandResult>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).runCommand(
++  return await (await getSandboxService(runtime)).runCommand(
+     input.sandboxId,
+     input.command,
+     input.args ?? [],
+@@ -76,7 +87,7 @@ export async function runCommandProcessStep({
+ }): Promise<ServiceResult<SandboxProcessRunResult>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).runCommandWithProcessStream(
++  return await (await getSandboxService(runtime)).runCommandWithProcessStream(
+     input.sandboxId,
+     input.command,
+     input.args ?? [],
+@@ -99,7 +110,7 @@ export async function readProcessStreamStep({
+ }): Promise<ServiceResult<{ chunks: SandboxProcessStreamChunk[]; byteOffset: number }>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).readProcessStream(input.processId)
++  return await (await getSandboxService(runtime)).readProcessStream(input.processId)
+ }
+ 
+ export async function startObservedProcessStep({
+@@ -121,7 +132,7 @@ export async function startObservedProcessStep({
+ }): Promise<ServiceResult<SandboxProcessRunResult>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).startObservedProcess(input.sandboxId, input)
++  return await (await getSandboxService(runtime)).startObservedProcess(input.sandboxId, input)
+ }
+ 
+ export async function appendObservedProcessChunkStep({
+@@ -137,7 +148,7 @@ export async function appendObservedProcessChunkStep({
+ }): Promise<ServiceResult<void>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).appendObservedProcessChunk(
++  return await (await getSandboxService(runtime)).appendObservedProcessChunk(
+     input.processId,
+     input.type,
+     input.data,
+@@ -159,7 +170,7 @@ export async function finishObservedProcessStep({
+ }): Promise<ServiceResult<void>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).finishObservedProcess(input.processId, {
++  return await (await getSandboxService(runtime)).finishObservedProcess(input.processId, {
+     status: input.status,
+     exitCode: input.exitCode,
+     errorText: input.errorText,
+@@ -176,7 +187,7 @@ export async function writeFilesStep({
+ }): Promise<ServiceResult<void>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).writeFiles(input.sandboxId, input.files)
++  return await (await getSandboxService(runtime)).writeFiles(input.sandboxId, input.files)
+ }
+ 
+ export async function readFileStep({
+@@ -188,7 +199,7 @@ export async function readFileStep({
+ }): Promise<ServiceResult<{ contentBase64: string }>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).readFile(input.sandboxId, input.path)
++  return await (await getSandboxService(runtime)).readFile(input.sandboxId, input.path)
+ }
+ 
+ export async function installCodexAuthStep({
+@@ -241,7 +252,7 @@ export async function installCodexAuthStep({
+     return { ok: false, error: "codex_auth_file_not_found" }
+   }
+ 
+-  const wrote = await new SandboxService(runtime.db as any).writeFiles(input.sandboxId, files)
++  const wrote = await (await getSandboxService(runtime)).writeFiles(input.sandboxId, files)
+   if (!wrote.ok) return wrote
+   return { ok: true, data: copied }
+ }
+@@ -255,7 +266,8 @@ export async function getSandboxStep({
+ }): Promise<ServiceResult<Record<string, unknown>>> {
+   "use step"
+ 
+-  const result = await (runtime.db as any).query({
++  const db = await getRuntimeDb(runtime)
++  const result = await db.query({
+     sandbox_sandboxes: { $: { where: { id: input.sandboxId } as any, limit: 1 } },
+   })
+   const row = result?.sandbox_sandboxes?.[0]
+@@ -272,7 +284,7 @@ export async function createCheckpointStep({
+ }): Promise<ServiceResult<{ checkpointId: string }>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).createCheckpoint(input.sandboxId, {
++  return await (await getSandboxService(runtime)).createCheckpoint(input.sandboxId, {
+     comment: input.comment,
+   })
+ }
+@@ -286,7 +298,7 @@ export async function getPortUrlStep({
+ }): Promise<ServiceResult<{ url: string }>> {
+   "use step"
+ 
+-  return await new SandboxService(runtime.db as any).getPortUrl(input.sandboxId, input.port)
++  return await (await getSandboxService(runtime)).getPortUrl(input.sandboxId, input.port)
+ }
+ 
+ export async function createEkairosAppStep({
+@@ -303,7 +315,7 @@ export async function createEkairosAppStep({
+ }): Promise<ServiceResult<SandboxProcessRunResult>> {
+   "use step"
+ 
+-  const service = new SandboxService(runtime.db as any)
++  const service = await getSandboxService(runtime)
+   const appDir = String(input.appDir ?? "").trim() || "/workspace/ekairos-app"
+   const tokenEnv = String(input.instantTokenEnvName ?? "INSTANT_PERSONAL_ACCESS_TOKEN").trim()
+   const instantToken = String(process.env[tokenEnv] ?? "").trim()
+diff --git a/packages/sandbox/src/tests/sandbox.action-steps.test.ts b/packages/sandbox/src/tests/sandbox.action-steps.test.ts
+new file mode 100644
+index 0000000..705adde
+--- /dev/null
++++ b/packages/sandbox/src/tests/sandbox.action-steps.test.ts
+@@ -0,0 +1,37 @@
++import { describe, expect, it, vi } from "vitest"
++
++import { getSandboxStep } from "../action-steps.js"
++
++describe("sandbox action runtime adapter", () => {
++  it("resolves the scoped database from EkairosRuntime.db()", async () => {
++    const query = vi.fn(async () => ({
++      sandbox_sandboxes: [{ id: "sandbox-1", provider: "daytona" }],
++    }))
++    const db = vi.fn(async () => ({ query }))
++
++    const result = await getSandboxStep({
++      runtime: { db },
++      input: { sandboxId: "sandbox-1" },
++    })
++
++    expect(db).toHaveBeenCalledOnce()
++    expect(query).toHaveBeenCalledWith({
++      sandbox_sandboxes: { $: { where: { id: "sandbox-1" }, limit: 1 } },
++    })
++    expect(result).toEqual({
++      ok: true,
++      data: { id: "sandbox-1", provider: "daytona" },
++    })
++  })
++
++  it("continues to accept an already resolved database", async () => {
++    const query = vi.fn(async () => ({ sandbox_sandboxes: [] }))
++
++    const result = await getSandboxStep({
++      runtime: { db: { query } },
++      input: { sandboxId: "missing" },
++    })
++
++    expect(result).toEqual({ ok: false, error: "sandbox_not_found" })
++  })
++})

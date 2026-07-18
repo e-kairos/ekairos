@@ -17,6 +17,7 @@ import {
   ContextHandle,
   Events,
   Part,
+  consumeReactionStream,
   contextDomain,
 } from "@ekairos/events"
 import {
@@ -107,10 +108,22 @@ class GraphEngine implements ReactionEngine<Record<string, unknown>> {
     } else if (input.instruction === "risks") {
       output = { risk: "low" }
     } else {
+      const itemFacts = selected.find(value =>
+        typeof value === "object" && value !== null && "itemCount" in value)
+      const riskFacts = selected.find(value =>
+        typeof value === "object" && value !== null && "risk" in value)
       output = {
-        decision: `${(selected[0] as any).itemCount}:${(selected[1] as any).risk}`,
+        decision: `${(itemFacts as any).itemCount}:${(riskFacts as any).risk}`,
       }
     }
+    await input.stream?.emit({
+      kind: "text.delta",
+      round: 0,
+      partId: "graph-engine-output",
+      delta: JSON.stringify(output),
+      provider: "graph-test",
+      providerType: "result",
+    })
     return {
       output,
       parts: [Part.message(JSON.stringify(output))],
@@ -202,6 +215,22 @@ describe("Reaction Event graph", () => {
       accepted: true,
       datasetCount: 2,
     })
+    const decisionCall = engine.calls.find(call => call.instruction === "decide")
+    expect(decisionCall?.given.map(event => event.payload)).toEqual([
+      { message: "quote this" },
+      { normalized: "QUOTE THIS" },
+      { itemCount: 2 },
+      { risk: "low" },
+      {
+        datasetId: expect.any(String),
+        mode: "built",
+        preview: [
+          { sku: "A-1", quantity: 2 },
+          { sku: "B-2", quantity: 1 },
+        ],
+        count: 2,
+      },
+    ])
     expect(runtime.datasetCalls).toHaveLength(1)
     expect(runtime.datasetCalls[0].sessionId).toBeTruthy()
     expect(runtime.datasetCalls[0].reactionId).toBeTruthy()
@@ -220,6 +249,7 @@ describe("Reaction Event graph", () => {
             eventParts: { $: { order: { index: "asc" } } },
           },
           parent: {},
+          stream: {},
         },
       },
     } as any)
@@ -232,6 +262,28 @@ describe("Reaction Event graph", () => {
     expect(sessionTrigger.id).toBe(trigger.id)
     expect(rootReaction.effects[0].id).toBe(completed.id)
     expect(session.reactions).toHaveLength(8)
+
+    const streamedReactions = session.reactions.filter((row: any) => row.type === "agent")
+    expect(streamedReactions).toHaveLength(4)
+    expect(streamedReactions.every((row: any) =>
+      row.streamId && row.streamClientId && row.stream?.id === row.streamId)).toBe(true)
+    const trace: any[] = []
+    await consumeReactionStream({
+      db,
+      streamId: streamedReactions[0].streamId,
+      clientId: streamedReactions[0].streamClientId,
+      signal: new AbortController().signal,
+      onChunk: chunk => { trace.push(chunk) },
+    })
+    expect(trace.map(chunk => chunk.kind)).toEqual([
+      "reaction.started",
+      "model.round.started",
+      "text.delta",
+      "model.round.completed",
+      "reaction.completed",
+    ])
+    expect(streamedReactions.every((row: any) =>
+      row.effects.every((event: any) => event.type === "context.model"))).toBe(true)
 
     const byType = new Map(session.reactions.map((row: any) => [row.type, row]))
     expect([...byType.keys()]).toEqual(expect.arrayContaining([

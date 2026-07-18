@@ -10,9 +10,7 @@ describe("@ekairos/reactor public surface", () => {
       "ai",
       "defineReaction",
       "isAiEngine",
-      "runReactionWorkflow",
     ])
-
   })
 
   it("keeps internal as a narrow cross-package bridge", () => {

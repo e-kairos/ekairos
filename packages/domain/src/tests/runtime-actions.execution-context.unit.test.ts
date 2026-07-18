@@ -10,7 +10,7 @@ import {
 } from "./runtime-actions.test-fixtures.ts";
 
 describe("runtime action execution outside workflows", () => {
-  it("executes actions outside workflow context as normal functions", async () => {
+  it("does not invent a Reaction origin for direct runtime calls", async () => {
     // given: a domain action that inspects the workflow execution context
     // before touching the scoped domain runtime.
     const baseExecutionDomain = domain("action-execution").schema({
@@ -30,16 +30,18 @@ describe("runtime action execution outside workflows", () => {
           inStep: z.boolean(),
           workflowRunId: z.string().nullable(),
           stepId: z.string().nullable(),
+          reactionId: z.string().nullable(),
         }),
-        async execute({ input, domain }) {
-          const execution = await readActionExecutionContext();
+        async execute({ input, domain, reactionId }) {
+          const workflowExecution = await readActionExecutionContext();
           return {
             title: String(input.title).trim(),
             runtimeCall: domain.db.runtimeCall,
-            inWorkflow: execution.inWorkflow,
-            inStep: execution.inStep,
-            workflowRunId: execution.workflowRunId,
-            stepId: execution.stepId,
+            inWorkflow: workflowExecution.inWorkflow,
+            inStep: workflowExecution.inStep,
+            workflowRunId: workflowExecution.workflowRunId,
+            stepId: workflowExecution.stepId,
+            reactionId: reactionId ?? null,
           };
         },
       }),
@@ -63,6 +65,7 @@ describe("runtime action execution outside workflows", () => {
       inStep: false,
       workflowRunId: null,
       stepId: null,
+      reactionId: null,
     });
   });
 });

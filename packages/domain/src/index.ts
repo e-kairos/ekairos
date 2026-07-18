@@ -110,6 +110,8 @@ export type DomainActionExecuteParams<
     ActionOwnerDomain<Domain>,
     RuntimeEnvOfActionRuntime<Runtime>
   >;
+  /** The durable Reaction that invoked this action, when Reactor is the caller. */
+  reactionId?: string;
 };
 
 export type DomainActionDefinition<

@@ -22,11 +22,22 @@ import { z } from "zod"
 
 import {
   deriveDatasetSource,
-  executeReactionOperation,
   toReactionOperationActionRef,
   type ReactionGitInput,
   type ReactionOperation,
-} from "./reaction.operation.js"
+  type ReactionOperationRequest,
+  type ReactionOperationResult,
+} from "./reaction.operation.contract.js"
+import {
+  action as actionStep,
+  agent as agentStep,
+  dataset as datasetStep,
+  emit as emitStep,
+  git as gitStep,
+  loadFiles as loadFilesStep,
+  shell as shellStep,
+  storeFiles as storeFilesStep,
+} from "./reaction.steps.js"
 import type {
   AnyReactionEngine,
   ReactionModel,
@@ -35,24 +46,14 @@ import type {
   ReactorGitCommitOutput,
   ReactorGitPushOutput,
   ReactorInitialContext,
+  ReactorLoadFilesOutput,
   ReactorShellRunInput,
   ReactorShellRunOutput,
-  ReactorWorkspaceInput,
-  ReactorWorkspaceOutput,
+  ReactorStoreFilesInput,
+  ReactorStoreFilesOutput,
   TriggerEventItem,
 } from "./reactor.js"
-import {
-  persistReactionWorkflowRun,
-  readReactionWorkflowReturnValue,
-  resumeReactionReturnHook,
-  serializeReactionError,
-  startReactionWorkflow,
-  unwrapReactionReturnHook,
-  type ReactionCompletion,
-  type ReactionReturnHookPayload,
-  type ReactionWorkflow,
-  type ReactionWorkflowPayload,
-} from "./reactor.durable.js"
+import type { ReactorPath } from "./workspace-path.js"
 
 type AnyDomainEventConstructor = DomainEventConstructor<any, any, any, any, any>
 type AnyDomainAction = DomainActionRegistration<any, any, any, any>
@@ -83,6 +84,7 @@ export type ReactionAgentInput<
   TScope,
 > = Readonly<{
   instruction: string
+  path?: ReactorPath
   output: z.ZodType<TOutput>
   actions?: { readonly [Index in keyof TActions]: ActionAllowedInScope<TActions[Index], TScope> }
   model?: ReactionModel
@@ -94,6 +96,7 @@ export type ReactionTextAgentInput<
   TScope,
 > = Readonly<{
   instruction: string
+  path?: ReactorPath
   output?: never
   actions?: { readonly [Index in keyof TActions]: ActionAllowedInScope<TActions[Index], TScope> }
   model?: ReactionModel
@@ -125,7 +128,8 @@ export interface GivenOperations<TScope extends DomainLike> {
   dataset<TRecord>(
     input: ReactionDatasetInput<TRecord>,
   ): Promise<ContextEvent<ReactionDatasetHandle<TRecord>>>
-  workspace(input: ReactorWorkspaceInput): Promise<ContextEvent<ReactorWorkspaceOutput>>
+  loadFiles(): Promise<ContextEvent<ReactorLoadFilesOutput>>
+  storeFiles(input: ReactorStoreFilesInput): Promise<ContextEvent<ReactorStoreFilesOutput>>
   shell(input: ReactorShellRunInput): Promise<ContextEvent<ReactorShellRunOutput>>
   git<const TInput extends ReactionGitInput>(
     input: TInput,
@@ -206,9 +210,9 @@ export type ReactionDefinition<
   readonly [REACTION_DEFINITION]: ReactionDefinitionInternals<TContext, TScope, TTrigger, TEffect>
 }>
 
-export type ReactOptions = Readonly<{
-  workflow?: ReactionWorkflow
+type ReactionParent = Readonly<{
   parentSessionId?: string
+  parentReactionId?: string
 }>
 
 export function defineReaction<
@@ -292,6 +296,7 @@ class ActiveReaction<
         return await this.operation(events, {
           kind: "agent",
           instruction: requiredInstruction(config.instruction),
+          ...(config.path ? { path: config.path } : {}),
           ...(config.output
             ? { outputSchema: z.toJSONSchema(config.output, { target: "draft-7" }) }
             : {}),
@@ -318,9 +323,13 @@ class ActiveReaction<
           source: deriveDatasetSource(events),
         })
       },
-      workspace: async (config: ReactorWorkspaceInput) => {
+      loadFiles: async () => {
         this.assertSandbox()
-        return await this.operation(events, { kind: "workspace", input: config })
+        return await this.operation(events, { kind: "loadFiles" })
+      },
+      storeFiles: async (config: ReactorStoreFilesInput) => {
+        this.assertSandbox()
+        return await this.operation(events, { kind: "storeFiles", input: config })
       },
       shell: async (config: ReactorShellRunInput) => {
         this.assertSandbox()
@@ -360,7 +369,7 @@ class ActiveReaction<
       `${this.id}:${position}:child:${definition.key}`,
       OPERATION_REACTION_NAMESPACE,
     )
-    await openChildBoundary({
+    await startChildReaction({
       runtime: this.input.runtime,
       id: boundaryId,
       sessionId: this.id,
@@ -375,9 +384,9 @@ class ActiveReaction<
         childContext,
         trigger,
         definition,
-        { parentSessionId: this.id },
+        { parentSessionId: this.id, parentReactionId: boundaryId },
       )
-      await completeChildBoundary(
+      await finishChildReaction(
         this.input.runtime,
         boundaryId,
         "completed",
@@ -385,7 +394,7 @@ class ActiveReaction<
       )
       return result
     } catch (error) {
-      await completeChildBoundary(this.input.runtime, boundaryId, "failed", [], error)
+      await finishChildReaction(this.input.runtime, boundaryId, "failed", [], error)
         .catch(() => undefined)
       throw error
     }
@@ -442,6 +451,21 @@ class ActiveReaction<
   }
 }
 
+async function executeReactionOperation(
+  request: ReactionOperationRequest,
+): Promise<ReactionOperationResult> {
+  switch (request.operation.kind) {
+    case "agent": return await agentStep(request)
+    case "action": return await actionStep(request)
+    case "dataset": return await datasetStep(request)
+    case "loadFiles": return await loadFilesStep(request)
+    case "storeFiles": return await storeFilesStep(request)
+    case "shell": return await shellStep(request)
+    case "git": return await gitStep(request)
+    case "emit": return await emitStep(request)
+  }
+}
+
 export async function executeReaction<
   TContext,
   TScope extends DomainLike,
@@ -452,103 +476,27 @@ export async function executeReaction<
   contextHandle: ContextHandle<TContext>,
   trigger: ContextEvent,
   definition: ReactionDefinition<TContext, TScope, TTrigger, TEffect>,
-  options: ReactOptions = {},
+  parent: ReactionParent = {},
 ): Promise<TEffect> {
   assertContextEvent(trigger)
   assertTrigger(trigger, definition)
-  const refreshedContext = await loadReactionContext<TContext>(runtime, contextHandle.id)
-  const refreshed = new ContextHandle(runtime, refreshedContext)
   const sandboxId = await resolveSandboxId(
     definition[REACTION_DEFINITION].options.sandbox,
     runtime,
-    refreshed.context.content as TContext,
+    contextHandle.context.content as TContext,
     trigger,
     definition.key,
   )
-  const prepared = await prepareSession({
+  const prepared = await startReaction({
     runtime,
-    contextId: refreshed.id,
-    triggerId: trigger.id,
+    context: contextHandle.context,
+    trigger,
     definition: definition.key,
     sandboxId,
-    parentSessionId: options.parentSessionId,
+    parentSessionId: parent.parentSessionId,
+    parentReactionId: parent.parentReactionId,
   })
-
-  if (!options.workflow) {
-    return (await executePreparedReaction(
-      runtime,
-      new ContextHandle(runtime, refreshed.context),
-      prepared,
-      definition,
-    )).result
-  }
-
-  const pendingHook = await createReactionReturnHook(prepared.sessionId)
-  const payload: ReactionWorkflowPayload = Object.freeze({
-    reactionKey: definition.key,
-    runtime,
-    contextId: prepared.context.ref.id,
-    triggerId: prepared.trigger.id,
-    sessionId: prepared.sessionId,
-    rootReactionId: prepared.rootReactionId,
-    ...(prepared.sandboxId === false ? {} : { sandboxId: prepared.sandboxId }),
-    ...(options.parentSessionId ? { parentSessionId: options.parentSessionId } : {}),
-    ...(pendingHook ? { returnHookToken: pendingHook.token } : {}),
-  })
-  let runId = ""
-  try {
-    runId = (await startReactionWorkflow({ workflow: options.workflow, payload })).runId
-    await persistReactionWorkflowRun({ runtime, sessionId: prepared.sessionId, runId })
-    const completion = pendingHook
-      ? await pendingHook.completion
-      : await readReactionWorkflowReturnValue(runId)
-    return await hydrateReturnedEvents(runtime, completion) as TEffect
-  } catch (error) {
-    await failSession(runtime, prepared, error).catch(() => undefined)
-    throw error
-  }
-}
-
-export async function runReactionWorkflow(
-  payload: ReactionWorkflowPayload,
-  catalog: readonly ReactionDefinition[],
-): Promise<ReactionCompletion> {
-  try {
-    const definition = resolveDefinition(payload.reactionKey, catalog)
-    const { context, trigger } = await loadReactionInvocation({
-      runtime: payload.runtime,
-      contextId: payload.contextId,
-      triggerId: payload.triggerId,
-    })
-    const prepared: PreparedSession = Object.freeze({
-      context: contextSnapshot(context),
-      trigger,
-      sessionId: payload.sessionId,
-      rootReactionId: payload.rootReactionId,
-      sandboxId: payload.sandboxId ?? false,
-    })
-    const invocation = await executePreparedReaction(
-      payload.runtime as ReactionRuntime,
-      new ContextHandle(payload.runtime, context),
-      prepared,
-      definition as any,
-    )
-    if (payload.returnHookToken) {
-      await resumeReactionReturnHook({
-        token: payload.returnHookToken,
-        payload: { ok: true, completion: invocation.completion },
-      })
-    }
-    return invocation.completion
-  } catch (error) {
-    if (payload.returnHookToken) {
-      await resumeReactionReturnHook({
-        token: payload.returnHookToken,
-        payload: { ok: false, error: serializeReactionError(error) },
-      })
-    }
-    throw error
-  }
+  return await executePreparedReaction(runtime, contextHandle, prepared, definition)
 }
 
 async function executePreparedReaction<
@@ -566,50 +514,45 @@ async function executePreparedReaction<
   try {
     const result = await definition[REACTION_DEFINITION].handler(active)
     const returned = normalizeEvents(result)
-    await assertPersistedEvents(runtime, returned)
-    const completion: ReactionCompletion = Object.freeze({
-      contextId: prepared.context.ref.id,
-      sessionId: prepared.sessionId,
-      returned: Object.freeze({
-        cardinality: Array.isArray(result) ? "many" : "one",
-        eventIds: Object.freeze(returned.map(event => event.id)),
-      }),
-    })
-    await completeSession(runtime, prepared, returned.map(event => event.id))
-    return Object.freeze({ result, completion })
+    await finishReaction(runtime, prepared, returned)
+    return result
   } catch (error) {
-    await failSession(runtime, prepared, error).catch(() => undefined)
+    await failReaction(runtime, prepared, error).catch(() => undefined)
     throw error
   }
 }
 
-async function prepareSession(input: {
+async function startReaction(input: {
   runtime: ReactionRuntime
-  contextId: string
-  triggerId: string
+  context: StoredContext<unknown>
+  trigger: ContextEvent
   definition: string
   sandboxId: string | false
   parentSessionId?: string
+  parentReactionId?: string
 }): Promise<PreparedSession> {
   "use step"
   const { store } = await getContextRuntimeServices(input.runtime)
-  const context = await store.getContext({ id: input.contextId })
-  const trigger = await store.getEvent(input.triggerId)
-  if (!context) throw new Error(`reaction_context_not_found:${input.contextId}`)
-  if (!trigger) throw new Error(`reaction_trigger_not_found:${input.triggerId}`)
+  const context = await store.getContext({ id: input.context.id })
+  const trigger = await store.getEvent(input.trigger.id)
+  if (!context) throw new Error(`reaction_context_not_found:${input.context.id}`)
+  if (!trigger) throw new Error(`reaction_trigger_not_found:${input.trigger.id}`)
   const sessionId = globalThis.crypto.randomUUID()
   const rootReactionId = globalThis.crypto.randomUUID()
+  const workflowRunId = await currentWorkflowRunId()
   await store.openSession({
     id: sessionId,
     rootReactionId,
-    contextId: context.id,
+    contextId: input.context.id,
     definition: input.definition,
     triggerId: trigger.id,
     ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+    ...(input.parentReactionId ? { parentReactionId: input.parentReactionId } : {}),
     ...(input.sandboxId === false ? {} : { sandboxId: input.sandboxId }),
+    ...(workflowRunId ? { workflowRunId } : {}),
   })
   return Object.freeze({
-    context: contextSnapshot(context),
+    context: contextSnapshot(input.context),
     trigger,
     sessionId,
     rootReactionId,
@@ -617,18 +560,24 @@ async function prepareSession(input: {
   })
 }
 
-async function completeSession(
+async function finishReaction(
   runtime: ReactionRuntime,
   prepared: PreparedSession,
-  effectIds: readonly string[],
+  effects: readonly ContextEvent[],
 ) {
   "use step"
   const { store } = await getContextRuntimeServices(runtime)
+  for (const event of effects) {
+    if (!(await store.getEvent(event.id))) {
+      throw new Error(`reaction_must_return_persisted_event:${event.id}`)
+    }
+  }
+  const effectIds = effects.map(event => event.id)
   await store.completeReaction(prepared.rootReactionId, "completed", effectIds)
   await store.completeSession(prepared.sessionId, "completed")
 }
 
-async function failSession(
+async function failReaction(
   runtime: ReactionRuntime,
   prepared: PreparedSession,
   error: unknown,
@@ -639,7 +588,7 @@ async function failSession(
   await store.completeSession(prepared.sessionId, "failed", error)
 }
 
-async function openChildBoundary(input: {
+async function startChildReaction(input: {
   runtime: ReactionRuntime
   id: string
   sessionId: string
@@ -662,7 +611,7 @@ async function openChildBoundary(input: {
   })
 }
 
-async function completeChildBoundary(
+async function finishChildReaction(
   runtime: ReactionRuntime,
   reactionId: string,
   status: "completed" | "failed",
@@ -672,61 +621,6 @@ async function completeChildBoundary(
   "use step"
   const { store } = await getContextRuntimeServices(runtime)
   await store.completeReaction(reactionId, status, effectIds, error)
-}
-
-async function hydrateReturnedEvents(
-  runtime: ContextRuntimeServiceHandle,
-  completion: ReactionCompletion,
-) {
-  const { store } = await getContextRuntimeServices(runtime)
-  const events: ContextEvent[] = []
-  for (const id of completion.returned.eventIds) {
-    const event = await store.getEvent(id)
-    if (!event) throw new Error(`reaction_returned_event_not_found:${id}`)
-    events.push(event)
-  }
-  return completion.returned.cardinality === "one" ? events[0]! : Object.freeze(events)
-}
-
-async function assertPersistedEvents(
-  runtime: ContextRuntimeServiceHandle,
-  events: readonly ContextEvent[],
-) {
-  "use step"
-
-  const { store } = await getContextRuntimeServices(runtime)
-  for (const event of events) {
-    if (!(await store.getEvent(event.id))) {
-      throw new Error(`reaction_must_return_persisted_event:${event.id}`)
-    }
-  }
-}
-
-async function loadReactionContext<TContext>(
-  runtime: ContextRuntimeServiceHandle,
-  contextId: string,
-): Promise<StoredContext<TContext>> {
-  "use step"
-
-  const { store } = await getContextRuntimeServices(runtime)
-  const context = await store.getContext({ id: contextId })
-  if (!context) throw new Error(`reaction_context_not_found:${contextId}`)
-  return context as StoredContext<TContext>
-}
-
-async function loadReactionInvocation(input: {
-  runtime: ContextRuntimeServiceHandle
-  contextId: string
-  triggerId: string
-}) {
-  "use step"
-
-  const { store } = await getContextRuntimeServices(input.runtime)
-  const context = await store.getContext({ id: input.contextId })
-  const trigger = await store.getEvent(input.triggerId)
-  if (!context) throw new Error(`reaction_context_not_found:${input.contextId}`)
-  if (!trigger) throw new Error(`reaction_trigger_not_found:${input.triggerId}`)
-  return { context, trigger }
 }
 
 function normalizeEvents(source: EventSource): readonly ContextEvent[] {
@@ -831,29 +725,14 @@ function assertDraftInScope(
   }
 }
 
-function resolveDefinition(key: string, catalog: readonly ReactionDefinition[]) {
-  const matches = catalog.filter(definition => definition.key === key)
-  if (matches.length === 0) throw new Error(`reaction_not_in_workflow:${key}`)
-  if (matches.length > 1) throw new Error(`reaction_workflow_key_duplicated:${key}`)
-  return matches[0]!
-}
-
-async function createReactionReturnHook(sessionId: string): Promise<{
-  token: string
-  completion: Promise<ReactionCompletion>
-} | null> {
+async function currentWorkflowRunId() {
   try {
-    const { createHook, getWorkflowMetadata } = await import("workflow")
-    if (!getWorkflowMetadata?.()?.workflowRunId) return null
-    const token = `reaction:return:${sessionId}`
-    const hook = createHook<ReactionReturnHookPayload>({
-      token,
-      metadata: { kind: "reaction.return", sessionId },
-    })
-    return { token, completion: Promise.resolve(hook).then(unwrapReactionReturnHook) }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (message.includes("can only be called inside a workflow")) return null
-    throw error
+    const { getWorkflowMetadata } = await import("workflow")
+    const value = getWorkflowMetadata?.()?.workflowRunId
+    return value === undefined || value === null || value === ""
+      ? undefined
+      : String(value)
+  } catch {
+    return undefined
   }
 }

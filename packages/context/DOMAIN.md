@@ -13,6 +13,12 @@ Module: `@ekairos/context`
 - Event emission is explicit through `Events(runtime)` or
   `Context(runtime).events`.
 - Reaction execution is explicit through `context.react(trigger, definition)`.
+- A caller may place that same call inside an explicit `"use workflow"`
+  function; Context never creates a Workflow implicitly.
+- `Context(runtime).fromReaction(reactionId)` binds one existing Reaction to its
+  Context without transporting executable capabilities into a domain action.
+- A bound Context may emit deterministic effects and start child Reactions; the
+  parent Session and Reaction are resolved from that single durable id.
 - Files, repositories, Datasets, engines, sandboxes, and tools are not Context
   fields.
 - Meaningful writes remain registered domain actions.

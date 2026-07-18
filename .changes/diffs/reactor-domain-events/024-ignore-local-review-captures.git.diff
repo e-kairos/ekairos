@@ -1,0 +1,15 @@
+diff --git a/.gitignore b/.gitignore
+index a446cb9..1c0a88f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -90,6 +90,9 @@ packages/reactors/openai-reactor/.workflow-vitest/
+ # local codex reactor audit artifacts
+ packages/reactors/openai-reactor/.tmp-audit-*.json
+ 
++# local model review captures and scripts
++/.claude/
++
+ # local sensitive migration artifacts
+ /skills/esolbay-context-migration/artifacts/
+ /skills/esolbay-context-migration/.migration-audit/
+

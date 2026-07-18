@@ -7,6 +7,8 @@ export type {
   ContextEventPartForUI,
   ContextFirstLevel,
   ContextReactionForUI,
+  ContextReactionStreamForUI,
+  ContextReactionStreamReaderForUI,
   ContextSessionForUI,
   ContextStatus,
   ContextValue,

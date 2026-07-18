@@ -1,13 +1,20 @@
 import type { LanguageModel, ModelMessage } from "ai"
-import type { DomainEventConstructor, DomainEventLinkDefinition } from "@ekairos/domain"
+import type {
+  DomainEventConstructor,
+  DomainEventLinkDefinition,
+} from "@ekairos/domain"
 import type {
   ContextEvent,
   ContextPartEnvelope,
   ContextRuntimeServiceHandle,
   ContextSandboxHandle,
   DomainEventItem,
+  ReactionStreamChunk,
+  ReactionStreamChunkInput,
 } from "@ekairos/events"
 import type { z } from "zod"
+
+import type { ReactorPath } from "./workspace-path.js"
 
 export type ReactionModel = string | (() => Promise<LanguageModel>)
 
@@ -15,9 +22,21 @@ export type ReactionToolAction = Readonly<{
   description?: string
   input: z.ZodType
   output: z.ZodType
-  execute(input: unknown): Promise<unknown>
+  execute(input: unknown, reactionId: string): Promise<unknown>
 }>
 export type ReactionEngineActions = Readonly<Record<string, ReactionToolAction>>
+
+export type ReactionEngineStreamEmission = Omit<
+  ReactionStreamChunkInput,
+  "reactionId" | "sequence"
+>
+
+export type ReactionEngineStream = Readonly<{
+  reactionId: string
+  streamId: string
+  clientId: string
+  emit(input: ReactionEngineStreamEmission): Promise<ReactionStreamChunk>
+}>
 
 export type ReactorInitialContext<TContext> = Readonly<{
   ref: Readonly<{ id: string; key: string | null }>
@@ -43,8 +62,10 @@ export type ReactionEngineInput<
   model?: ReactionModel
   maxRounds?: number
   actions: TActions
+  stream?: ReactionEngineStream
   sandbox?: ContextSandboxHandle
   workspaceRoot?: string
+  workspace?: ReactorWorkspace
 }>
 
 export type ReactionEngineResult<TOutput = unknown> = Readonly<{
@@ -125,10 +146,17 @@ export type TriggerEventItem<TTrigger extends DomainEventConstructor<any, any, a
       : never
   }
 
+export type ReactorWorkspace = Readonly<{
+  contextPath: ReactorPath
+  path: ReactorPath
+  artifactsPath: ReactorPath
+  tmpPath: ReactorPath
+}>
+
 export type ReactorShellRunInput = Readonly<{
   command: string
   args?: readonly string[]
-  cwd?: string
+  path?: ReactorPath
   env?: Readonly<Record<string, string>>
   timeoutMs?: number
 }>
@@ -139,34 +167,51 @@ export type ReactorShellRunOutput = Readonly<{
   output: string
   error: string
   command: string
-  cwd?: string
+  path: ReactorPath
 }>
 
-export type ReactorWorkspaceInput = Readonly<{
-  files: string | readonly string[]
-  directory?: string
-  conflict?: "verify" | "replace" | "error"
+export type ReactorFileOrigin = Readonly<{
+  eventId: string
+  eventType: string
+  link: string
 }>
 
-export type ReactorWorkspaceFile = Readonly<{
-  ref: string
+export type ReactorLoadedFile = Readonly<{
   fileId: string
-  filename: string
+  name: string
   mediaType?: string
-  path: string
-  status: "created" | "reused" | "replaced"
+  path: ReactorPath
+  status: "created" | "reused"
+  size: number
+  origins: readonly ReactorFileOrigin[]
+}>
+
+export type ReactorLoadFilesOutput = Readonly<{
+  path: ReactorPath
+  files: readonly ReactorLoadedFile[]
+}>
+
+export type ReactorStoreFilesInput = Readonly<{
+  path: ReactorPath
+  files: string | readonly string[]
+}>
+
+export type ReactorStoredFile = Readonly<{
+  fileId: string
+  name: string
+  mediaType: string
+  path: ReactorPath
   size: number
 }>
 
-export type ReactorWorkspaceOutput = Readonly<{
-  root: string
-  directory: string
-  files: readonly ReactorWorkspaceFile[]
+export type ReactorStoreFilesOutput = Readonly<{
+  path: ReactorPath
+  files: readonly ReactorStoredFile[]
 }>
 
 export type ReactorGitCloneOutput = Readonly<{
-  target: string
-  path: string
+  key: string
+  path: ReactorPath
   url: string
   ref?: string
   commitSha?: string
@@ -174,7 +219,7 @@ export type ReactorGitCloneOutput = Readonly<{
 }>
 
 export type ReactorGitCommitOutput = Readonly<{
-  path: string
+  path: ReactorPath
   status: "committed" | "unchanged"
   message: string
   commitSha?: string
@@ -182,7 +227,7 @@ export type ReactorGitCommitOutput = Readonly<{
 }>
 
 export type ReactorGitPushOutput = Readonly<{
-  path: string
+  path: ReactorPath
   remote: string
   ref: string
   status: "pushed"

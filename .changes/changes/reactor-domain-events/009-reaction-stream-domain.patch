@@ -1,0 +1,970 @@
+*** Begin ECU Patch
+Key: 009-reaction-stream-domain
+Title: Add the provisional Reaction stream contract
+Purpose: Persist a zero-or-one resumable stream on each streaming Reaction while keeping immutable Events and Event Parts as the canonical result.
+
+*** Begin Context
+The prior causal model could persist completed Events but had no live transport owned by the Reaction that was producing one. This patch adds the physical Reaction-to-$streams link, stable stream identity and lifecycle metadata, an NDJSON protocol with strict validation and deterministic reduction, resumable byte-offset consumption, and idempotent store writes. The stream reserves the future effect Event id so a client can replace the provisional projection when the durable Event appears.
+
+Non-streaming Reactions intentionally have no stream. Provider objects and credentials never enter persisted chunks; raw provider data is sanitized by Reactor before encoding.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/DOMAIN.md b/DOMAIN.md
+index 543a2a7..b86ccd0 100644
+--- a/DOMAIN.md
++++ b/DOMAIN.md
+@@ -28,11 +28,14 @@ schema.
+ 4. A Reaction links one or more cause Events to one or more effect Events.
+ 5. Every observable operation is represented by a child Reaction and an effect
+    Event. There are no Steps, Points, or Executions.
+-6. Event Parts are the ordered, streamable content of an Event: messages,
++6. A Reaction owns zero or one provisional InstantDB stream. Streaming model
++   operations reserve their effect Event id, publish their live journal through
++   that stream, and consolidate it into the immutable Event when complete.
++7. Event Parts are the ordered, streamable content of an Event: messages,
+    reasoning, sources, actions, and structured values.
+-7. `reaction.given(event)` selects explicit causal input. An Event array is the
++8. `reaction.given(event)` selects explicit causal input. An Event array is the
+    explicit fan-in form.
+-8. `agent`, `action`, `dataset`, `workspace`, `shell`, `git`, and `emit` all
++9. `agent`, `action`, `dataset`, `workspace`, `shell`, `git`, and `emit` all
+    return Events. Later operations consume those Events.
+ 
+ ## Composition
+diff --git a/packages/events/DOMAIN.md b/packages/events/DOMAIN.md
+index 88d5f4f..991d4be 100644
+--- a/packages/events/DOMAIN.md
++++ b/packages/events/DOMAIN.md
+@@ -24,8 +24,13 @@ Canonical domain: `contextDomain`
+    Reaction.
+ 5. Every Reaction belongs to one Session and stores ordered cause/effect ids in
+    addition to real InstantDB links.
+-6. Event Parts are ordered by `index` and are the canonical UI/model trace.
+-7. Context content contains no implicit files, workspace, engine, sandbox, or
++6. A Reaction has zero or one linked `$stream`. The stream is a resumable,
++   provisional journal; it is never the durable result of the Reaction.
++7. A streaming Reaction reserves its effect Event id before the provider starts.
++   Once that Event and its Parts are durable, clients replace the provisional
++   projection instead of rendering both versions.
++8. Event Parts are ordered by `index` and are the canonical UI/model trace.
++9. Context content contains no implicit files, workspace, engine, sandbox, or
+    tool state.
+ 
+ Reaction execution and model projection belong to `@ekairos/reactor`.
+diff --git a/packages/events/src/context.store.ts b/packages/events/src/context.store.ts
+index 2de7e4b..f465050 100644
+--- a/packages/events/src/context.store.ts
++++ b/packages/events/src/context.store.ts
+@@ -74,6 +74,11 @@ export type ContextReaction = Readonly<{
+   effectIds: readonly string[]
+   parentReactionId?: string
+   instruction?: string
++  streamId?: string
++  streamClientId?: string
++  streamStartedAt?: Date
++  streamFinishedAt?: Date
++  streamError?: string
+   error?: unknown
+   createdAt: Date
+   updatedAt?: Date
+@@ -135,6 +140,21 @@ export interface ContextStore {
+     createdAt?: Date
+   }>): Promise<ContextReaction>
+   getReaction(reactionId: string): Promise<ContextReaction | null>
++  attachReactionStream(
++    reactionId: string,
++    stream: Readonly<{
++      streamId: string
++      clientId: string
++      startedAt?: Date
++    }>,
++  ): Promise<ContextReaction>
++  finishReactionStream(
++    reactionId: string,
++    result?: Readonly<{
++      finishedAt?: Date
++      error?: string
++    }>,
++  ): Promise<ContextReaction>
+   completeReaction(
+     reactionId: string,
+     status: Exclude<ReactionStatus, "running">,
+diff --git a/packages/events/src/index.ts b/packages/events/src/index.ts
+index f7e67c4..10b0d7f 100644
+--- a/packages/events/src/index.ts
++++ b/packages/events/src/index.ts
+@@ -82,3 +82,19 @@ export type {
+ } from "./context.parts.js"
+ 
+ export { uuidV5 } from "./context.part-identity.js"
++
++export {
++  REACTION_STREAM_VERSION,
++  consumeReactionStream,
++  createReactionStreamChunk,
++  encodeReactionStreamChunk,
++  parseReactionStreamChunk,
++  reduceReactionStream,
++  validateReactionStreamChunk,
++} from "./context.reaction-stream.js"
++export type {
++  ReactionStreamChunk,
++  ReactionStreamChunkInput,
++  ReactionStreamChunkKind,
++  ReactionStreamProjection,
++} from "./context.reaction-stream.js"
+diff --git a/packages/events/src/schema.ts b/packages/events/src/schema.ts
+index 9d7bea6..848ea49 100644
+--- a/packages/events/src/schema.ts
++++ b/packages/events/src/schema.ts
+@@ -39,6 +39,11 @@ const contextSchema = {
+       causeIds: i.json(),
+       effectIds: i.json(),
+       instruction: i.string().optional(),
++      streamId: i.string().optional().indexed(),
++      streamClientId: i.string().optional().indexed(),
++      streamStartedAt: i.date().optional().indexed(),
++      streamFinishedAt: i.date().optional().indexed(),
++      streamError: i.string().optional(),
+       error: i.any().optional(),
+       createdAt: i.date().indexed(),
+       updatedAt: i.date().optional().indexed(),
+@@ -94,6 +99,10 @@ const contextSchema = {
+       forward: { on: "context_reactions", has: "many", label: "effects" },
+       reverse: { on: "context_events", has: "many", label: "effectOf" },
+     },
++    contextReactionStream: {
++      forward: { on: "context_reactions", has: "one", label: "stream" },
++      reverse: { on: "$streams", has: "many", label: "reactions" },
++    },
+     contextEventPartsEvent: {
+       forward: { on: "context_eventParts", has: "one", label: "event" },
+       reverse: { on: "context_events", has: "many", label: "eventParts" },
+diff --git a/packages/events/src/stores/instant.store.ts b/packages/events/src/stores/instant.store.ts
+index 4d5d341..31d5689 100644
+--- a/packages/events/src/stores/instant.store.ts
++++ b/packages/events/src/stores/instant.store.ts
+@@ -136,6 +136,11 @@ function toReaction(row: any): ContextReaction {
+     ),
+     ...(linkedId(row.parent) ? { parentReactionId: linkedId(row.parent)! } : {}),
+     ...(typeof row.instruction === "string" ? { instruction: row.instruction } : {}),
++    ...(typeof row.streamId === "string" ? { streamId: row.streamId } : {}),
++    ...(typeof row.streamClientId === "string" ? { streamClientId: row.streamClientId } : {}),
++    ...(row.streamStartedAt == null ? {} : { streamStartedAt: date(row.streamStartedAt) }),
++    ...(row.streamFinishedAt == null ? {} : { streamFinishedAt: date(row.streamFinishedAt) }),
++    ...(typeof row.streamError === "string" ? { streamError: row.streamError } : {}),
+     ...(row.error === undefined ? {} : { error: row.error }),
+     createdAt: date(row.createdAt),
+     ...(row.updatedAt == null ? {} : { updatedAt: date(row.updatedAt) }),
+@@ -464,6 +469,7 @@ export class InstantStore implements ContextStore {
+         parent: {},
+         causes: {},
+         effects: {},
++        stream: {},
+       },
+     } as any)
+     return result?.context_reactions?.[0] ?? null
+@@ -537,6 +543,63 @@ export class InstantStore implements ContextStore {
+     return (await this.getReaction(input.id))!
+   }
+ 
++  async attachReactionStream(
++    reactionId: string,
++    stream: Parameters<ContextStore["attachReactionStream"]>[1],
++  ) {
++    const current = await this.getReaction(reactionId)
++    if (!current) throw new Error(`context_reaction_not_found:${reactionId}`)
++    if (current.streamId || current.streamClientId) {
++      if (
++        current.streamId !== stream.streamId ||
++        current.streamClientId !== stream.clientId
++      ) {
++        throw new Error(`context_reaction_stream_conflict:${reactionId}`)
++      }
++      return current
++    }
++    const startedAt = stream.startedAt ?? new Date()
++    await this.db.transact([
++      this.db.tx.context_reactions[reactionId]
++        .update({
++          streamId: stream.streamId,
++          streamClientId: stream.clientId,
++          streamStartedAt: startedAt,
++          updatedAt: startedAt,
++        })
++        .link({ stream: stream.streamId }),
++    ])
++    return (await this.getReaction(reactionId))!
++  }
++
++  async finishReactionStream(
++    reactionId: string,
++    result: Parameters<ContextStore["finishReactionStream"]>[1] = {},
++  ) {
++    const current = await this.getReaction(reactionId)
++    if (!current) throw new Error(`context_reaction_not_found:${reactionId}`)
++    if (!current.streamId || !current.streamClientId) {
++      throw new Error(`context_reaction_stream_not_attached:${reactionId}`)
++    }
++    const finishedAt = result.finishedAt ?? new Date()
++    if (current.streamFinishedAt) {
++      const sameFinish = current.streamFinishedAt.valueOf() === finishedAt.valueOf()
++      const sameError = current.streamError === result.error
++      if (!sameFinish || !sameError) {
++        throw new Error(`context_reaction_stream_terminal_conflict:${reactionId}`)
++      }
++      return current
++    }
++    await this.db.transact([
++      this.db.tx.context_reactions[reactionId].update({
++        streamFinishedAt: finishedAt,
++        ...(result.error ? { streamError: result.error } : {}),
++        updatedAt: finishedAt,
++      }),
++    ])
++    return (await this.getReaction(reactionId))!
++  }
++
+   async completeReaction(
+     reactionId: string,
+     status: Exclude<ReactionStatus, "running">,
+diff --git a/packages/events/src/tests/context.persistence-schema.test.ts b/packages/events/src/tests/context.persistence-schema.test.ts
+index 0b4929c..d336cc6 100644
+--- a/packages/events/src/tests/context.persistence-schema.test.ts
++++ b/packages/events/src/tests/context.persistence-schema.test.ts
+@@ -30,6 +30,15 @@ describe("context persistence schema", () => {
+       children: { entityName: "context_reactions", cardinality: "many" },
+       causes: { entityName: "context_events", cardinality: "many" },
+       effects: { entityName: "context_events", cardinality: "many" },
++      stream: { entityName: "$streams", cardinality: "one" },
++    })
++
++    expect(schema.entities.context_reactions.attrs).toMatchObject({
++      streamId: expect.anything(),
++      streamClientId: expect.anything(),
++      streamStartedAt: expect.anything(),
++      streamFinishedAt: expect.anything(),
++      streamError: expect.anything(),
+     })
+ 
+     expect(schema.entities.context_eventParts.links).toEqual({
+diff --git a/packages/events/src/tests/context.persistence.instant.test.ts b/packages/events/src/tests/context.persistence.instant.test.ts
+index 2536b12..22f0c31 100644
+--- a/packages/events/src/tests/context.persistence.instant.test.ts
++++ b/packages/events/src/tests/context.persistence.instant.test.ts
+@@ -98,6 +98,20 @@ describeInstant("context causal persistence", () => {
+       causeIds: [triggerId],
+       instruction: "Responde el mensaje.",
+     })
++    const streamClientId = `context-reaction:${operationReactionId}`
++    const stream = (db as any).streams.createWriteStream({ clientId: streamClientId })
++    const streamId = await stream.streamId()
++    await store.attachReactionStream(operationReactionId, {
++      streamId,
++      clientId: streamClientId,
++      startedAt: new Date("2026-07-16T12:00:00.000Z"),
++    })
++    const writer = stream.getWriter()
++    await writer.write("reaction stream\n")
++    await writer.close()
++    await store.finishReactionStream(operationReactionId, {
++      finishedAt: new Date("2026-07-16T12:00:01.000Z"),
++    })
+     const agentResult = await events.create({
+       id: randomUUID(),
+       type: "context.agent",
+@@ -122,7 +136,7 @@ describeInstant("context causal persistence", () => {
+         rootReaction: {
+           causes: {},
+           effects: {},
+-          children: { causes: {}, effects: { eventParts: {} } },
++          children: { causes: {}, effects: { eventParts: {} }, stream: {} },
+         },
+       },
+     } as any)
+@@ -132,6 +146,13 @@ describeInstant("context causal persistence", () => {
+     expect(stored.rootReaction.causes.map((event: any) => event.id)).toEqual([triggerId])
+     expect(stored.rootReaction.effects.map((event: any) => event.id)).toEqual([answer.id])
+     expect(stored.rootReaction.children[0].effects[0].id).toBe(agentResult.id)
++    expect(stored.rootReaction.children[0]).toMatchObject({
++      streamId,
++      streamClientId,
++      streamStartedAt: "2026-07-16T12:00:00.000Z",
++      streamFinishedAt: "2026-07-16T12:00:01.000Z",
++    })
++    expect(stored.rootReaction.children[0].stream.id).toBe(streamId)
+ 
+     const secondContext = await ContextHandle.create(runtime, {
+       id: randomUUID(),
+diff --git a/packages/events/src/context.reaction-stream.ts b/packages/events/src/context.reaction-stream.ts
+new file mode 100644
+index 0000000..3cf2a52
+--- /dev/null
++++ b/packages/events/src/context.reaction-stream.ts
+@@ -0,0 +1,472 @@
++import type { ContextPartEnvelope } from "./context.parts.js"
++
++export const REACTION_STREAM_VERSION = 1 as const
++
++export type ReactionStreamChunkKind =
++  | "reaction.started"
++  | "reaction.completed"
++  | "reaction.failed"
++  | "model.round.started"
++  | "model.round.completed"
++  | "text.delta"
++  | "reasoning.delta"
++  | "reasoning.completed"
++  | "action.input.delta"
++  | "action.started"
++  | "action.completed"
++  | "action.failed"
++  | "source.available"
++  | "provider.event"
++  | "provider.error"
++
++const REACTION_STREAM_KINDS = new Set<ReactionStreamChunkKind>([
++  "reaction.started",
++  "reaction.completed",
++  "reaction.failed",
++  "model.round.started",
++  "model.round.completed",
++  "text.delta",
++  "reasoning.delta",
++  "reasoning.completed",
++  "action.input.delta",
++  "action.started",
++  "action.completed",
++  "action.failed",
++  "source.available",
++  "provider.event",
++  "provider.error",
++])
++
++export type ReactionStreamChunk = Readonly<{
++  version: typeof REACTION_STREAM_VERSION
++  reactionId: string
++  eventId: string
++  sequence: number
++  at: string
++  kind: ReactionStreamChunkKind
++  round?: number
++  partId?: string
++  actionCallId?: string
++  actionName?: string
++  delta?: string
++  input?: unknown
++  output?: unknown
++  error?: unknown
++  data?: unknown
++  provider?: string
++  providerType?: string
++  raw?: unknown
++}>
++
++export type ReactionStreamChunkInput = Omit<
++  ReactionStreamChunk,
++  "version" | "at"
++> & Readonly<{ at?: string }>
++
++export type ReactionStreamProjection = Readonly<{
++  reactionId: string
++  eventId: string
++  eventType: string
++  channel?: string
++  createdAt: string
++  status: "running" | "completed" | "failed"
++  error?: unknown
++  lastSequence: number
++  parts: readonly ContextPartEnvelope[]
++}>
++
++function record(value: unknown): Record<string, unknown> {
++  return value && typeof value === "object" && !Array.isArray(value)
++    ? value as Record<string, unknown>
++    : {}
++}
++
++function assertNonEmptyString(value: unknown, label: string): asserts value is string {
++  if (typeof value !== "string" || value.length === 0) {
++    throw new Error(`invalid_reaction_stream_${label}`)
++  }
++}
++
++function assertOptionalString(value: unknown, label: string) {
++  if (value !== undefined) assertNonEmptyString(value, label)
++}
++
++export function validateReactionStreamChunk(value: unknown): asserts value is ReactionStreamChunk {
++  const chunk = record(value)
++  if (chunk.version !== REACTION_STREAM_VERSION) {
++    throw new Error("invalid_reaction_stream_version")
++  }
++  assertNonEmptyString(chunk.reactionId, "reactionId")
++  assertNonEmptyString(chunk.eventId, "eventId")
++  if (!Number.isSafeInteger(chunk.sequence) || Number(chunk.sequence) < 1) {
++    throw new Error("invalid_reaction_stream_sequence")
++  }
++  assertNonEmptyString(chunk.at, "at")
++  if (Number.isNaN(Date.parse(chunk.at))) {
++    throw new Error("invalid_reaction_stream_at")
++  }
++  assertNonEmptyString(chunk.kind, "kind")
++  if (!REACTION_STREAM_KINDS.has(chunk.kind as ReactionStreamChunkKind)) {
++    throw new Error(`invalid_reaction_stream_kind:${chunk.kind}`)
++  }
++  if (chunk.round !== undefined && (!Number.isSafeInteger(chunk.round) || Number(chunk.round) < 0)) {
++    throw new Error("invalid_reaction_stream_round")
++  }
++  assertOptionalString(chunk.partId, "partId")
++  assertOptionalString(chunk.actionCallId, "actionCallId")
++  assertOptionalString(chunk.actionName, "actionName")
++  assertOptionalString(chunk.provider, "provider")
++  assertOptionalString(chunk.providerType, "providerType")
++  if (chunk.delta !== undefined && typeof chunk.delta !== "string") {
++    throw new Error("invalid_reaction_stream_delta")
++  }
++  if (
++    (chunk.kind === "action.started" ||
++      chunk.kind === "action.completed" ||
++      chunk.kind === "action.failed" ||
++      chunk.kind === "action.input.delta") &&
++    typeof chunk.actionCallId !== "string"
++  ) {
++    throw new Error(`invalid_reaction_stream_actionCallId:${chunk.kind}`)
++  }
++}
++
++export function createReactionStreamChunk(
++  input: ReactionStreamChunkInput,
++): ReactionStreamChunk {
++  const chunk = Object.freeze({
++    ...input,
++    version: REACTION_STREAM_VERSION,
++    at: input.at ?? new Date().toISOString(),
++  })
++  validateReactionStreamChunk(chunk)
++  return chunk
++}
++
++export function parseReactionStreamChunk(value: string | unknown): ReactionStreamChunk {
++  const parsed = typeof value === "string" ? JSON.parse(value) : value
++  validateReactionStreamChunk(parsed)
++  return Object.freeze({ ...parsed })
++}
++
++export function encodeReactionStreamChunk(chunk: ReactionStreamChunk): string {
++  validateReactionStreamChunk(chunk)
++  return `${JSON.stringify(chunk)}\n`
++}
++
++function canonicalValue(value: unknown): unknown {
++  if (Array.isArray(value)) return value.map(canonicalValue)
++  if (!value || typeof value !== "object") return value
++  return Object.fromEntries(
++    Object.entries(value as Record<string, unknown>)
++      .filter(([, entry]) => entry !== undefined)
++      .sort(([left], [right]) => left.localeCompare(right))
++      .map(([key, entry]) => [key, canonicalValue(entry)]),
++  )
++}
++
++function canonical(value: unknown): string {
++  return JSON.stringify(canonicalValue(value))
++}
++
++function parseInputDelta(value: string): unknown {
++  if (!value.trim()) return undefined
++  try {
++    return JSON.parse(value)
++  } catch {
++    return value
++  }
++}
++
++export function reduceReactionStream(
++  input: readonly ReactionStreamChunk[],
++): ReactionStreamProjection {
++  if (input.length === 0) throw new Error("reaction_stream_empty")
++  const chunksBySequence = new Map<number, ReactionStreamChunk>()
++  for (const chunk of input) {
++    validateReactionStreamChunk(chunk)
++    const existing = chunksBySequence.get(chunk.sequence)
++    if (existing && canonical(existing) !== canonical(chunk)) {
++      throw new Error(`reaction_stream_sequence_conflict:${chunk.sequence}`)
++    }
++    chunksBySequence.set(chunk.sequence, chunk)
++  }
++  const chunks = [...chunksBySequence.values()].sort((left, right) => left.sequence - right.sequence)
++  const first = chunks[0]!
++  for (const chunk of chunks) {
++    if (chunk.reactionId !== first.reactionId || chunk.eventId !== first.eventId) {
++      throw new Error("reaction_stream_identity_conflict")
++    }
++  }
++
++  type TextState = { sequence: number; text: string; done?: boolean }
++  type ActionState = {
++    sequence: number
++    terminalSequence?: number
++    actionName: string
++    inputText: string
++    input?: unknown
++    output?: unknown
++    error?: unknown
++    status: "started" | "completed" | "failed"
++  }
++  const text = new Map<string, TextState>()
++  const reasoning = new Map<string, TextState>()
++  const actions = new Map<string, ActionState>()
++  const sources: Array<{ sequence: number; value: any }> = []
++  let status: ReactionStreamProjection["status"] = "running"
++  let terminalError: unknown
++  let eventType = "context.agent"
++  let channel: string | undefined
++
++  for (const chunk of chunks) {
++    const data = record(chunk.data)
++    if (chunk.kind === "reaction.started") {
++      if (typeof data.eventType === "string" && data.eventType) eventType = data.eventType
++      if (typeof data.channel === "string" && data.channel) channel = data.channel
++    }
++    if (chunk.kind === "reaction.completed") status = "completed"
++    if (chunk.kind === "reaction.failed") {
++      status = "failed"
++      terminalError = chunk.error ?? data.error
++    }
++
++    if (chunk.kind === "text.delta" || chunk.kind === "reasoning.delta") {
++      const target = chunk.kind === "text.delta" ? text : reasoning
++      const key = `${chunk.round ?? 0}:${chunk.partId ?? "default"}`
++      const current = target.get(key)
++      target.set(key, {
++        sequence: current?.sequence ?? chunk.sequence,
++        text: `${current?.text ?? ""}${chunk.delta ?? ""}`,
++        done: current?.done,
++      })
++    }
++    if (chunk.kind === "reasoning.completed") {
++      const key = `${chunk.round ?? 0}:${chunk.partId ?? "default"}`
++      const current = reasoning.get(key)
++      if (current) reasoning.set(key, { ...current, done: true })
++    }
++
++    if (chunk.actionCallId) {
++      const current = actions.get(chunk.actionCallId)
++      const actionName = chunk.actionName ?? current?.actionName ?? "unknown.action"
++      if (chunk.kind === "action.input.delta") {
++        const inputText = `${current?.inputText ?? ""}${chunk.delta ?? ""}`
++        actions.set(chunk.actionCallId, {
++          sequence: current?.sequence ?? chunk.sequence,
++          actionName,
++          inputText,
++          input: parseInputDelta(inputText),
++          output: current?.output,
++          error: current?.error,
++          status: current?.status ?? "started",
++          terminalSequence: current?.terminalSequence,
++        })
++      }
++      if (chunk.kind === "action.started") {
++        actions.set(chunk.actionCallId, {
++          sequence: current?.sequence ?? chunk.sequence,
++          actionName,
++          inputText: current?.inputText ?? "",
++          input: chunk.input ?? current?.input ?? {},
++          output: current?.output,
++          error: current?.error,
++          status: current?.status === "completed" || current?.status === "failed"
++            ? current.status
++            : "started",
++          terminalSequence: current?.terminalSequence,
++        })
++      }
++      if (chunk.kind === "action.completed" || chunk.kind === "action.failed") {
++        actions.set(chunk.actionCallId, {
++          sequence: current?.sequence ?? chunk.sequence,
++          terminalSequence: chunk.sequence,
++          actionName,
++          inputText: current?.inputText ?? "",
++          input: current?.input ?? {},
++          output: chunk.output ?? current?.output,
++          error: chunk.error ?? current?.error,
++          status: chunk.kind === "action.completed" ? "completed" : "failed",
++        })
++      }
++    }
++
++    if (chunk.kind === "source.available") {
++      const value = record(chunk.data).source ?? chunk.data
++      if (value && typeof value === "object") sources.push({ sequence: chunk.sequence, value })
++    }
++  }
++
++  const ordered: Array<{ sequence: number; part: ContextPartEnvelope }> = []
++  for (const item of reasoning.values()) {
++    if (!item.text) continue
++    ordered.push({
++      sequence: item.sequence,
++      part: {
++        type: "reasoning",
++        content: {
++          text: item.text,
++          state: status !== "running" || item.done ? "done" : "streaming",
++        },
++      },
++    })
++  }
++  for (const item of text.values()) {
++    if (!item.text) continue
++    ordered.push({
++      sequence: item.sequence,
++      part: { type: "message", content: { text: item.text } },
++    })
++  }
++  for (const [actionCallId, action] of actions) {
++    ordered.push({
++      sequence: action.sequence,
++      part: {
++        type: "action",
++        content: {
++          status: "started",
++          actionName: action.actionName,
++          actionCallId,
++          input: action.input ?? {},
++        },
++      },
++    })
++    if (action.status === "completed") {
++      ordered.push({
++        sequence: action.terminalSequence ?? action.sequence,
++        part: {
++          type: "action",
++          content: {
++            status: "completed",
++            actionName: action.actionName,
++            actionCallId,
++            output: action.output,
++          },
++        },
++      })
++    }
++    if (action.status === "failed") {
++      const error = record(action.error)
++      ordered.push({
++        sequence: action.terminalSequence ?? action.sequence,
++        part: {
++          type: "action",
++          content: {
++            status: "failed",
++            actionName: action.actionName,
++            actionCallId,
++            error: {
++              message: typeof error.message === "string"
++                ? error.message
++                : String(action.error ?? "Action failed."),
++            },
++          },
++        },
++      })
++    }
++  }
++  if (sources.length > 0) {
++    ordered.push({
++      sequence: sources[0]!.sequence,
++      part: {
++        type: "source",
++        content: { sources: sources.map(source => source.value) },
++      } as ContextPartEnvelope,
++    })
++  }
++
++  return Object.freeze({
++    reactionId: first.reactionId,
++    eventId: first.eventId,
++    eventType,
++    ...(channel ? { channel } : {}),
++    createdAt: first.at,
++    status,
++    ...(terminalError === undefined ? {} : { error: terminalError }),
++    lastSequence: chunks[chunks.length - 1]!.sequence,
++    parts: Object.freeze(
++      ordered
++        .sort((left, right) => left.sequence - right.sequence)
++        .map(entry => Object.freeze(entry.part)),
++    ),
++  })
++}
++
++function decodeStreamValue(value: unknown): string {
++  if (typeof value === "string") return value
++  if (value instanceof Uint8Array) return new TextDecoder().decode(value)
++  if (value instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(value))
++  if (ArrayBuffer.isView(value)) {
++    return new TextDecoder().decode(
++      new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
++    )
++  }
++  return value == null ? "" : String(value)
++}
++
++export async function consumeReactionStream(params: {
++  db: any
++  signal: AbortSignal
++  streamId?: string | null
++  clientId?: string | null
++  byteOffset?: number
++  onByteOffset?: (byteOffset: number) => void
++  onChunk?: (chunk: ReactionStreamChunk) => void | Promise<void>
++  onDone?: () => void | Promise<void>
++}): Promise<Readonly<{ byteOffset: number; chunkCount: number }>> {
++  const streams = params.db?.streams
++  if (!streams?.createReadStream) throw new Error("reaction_streams_unavailable")
++  const byteOffset = Math.max(0, params.byteOffset ?? 0)
++  const stream = streams.createReadStream({
++    ...(params.streamId ? { streamId: params.streamId } : {}),
++    ...(params.clientId ? { clientId: params.clientId } : {}),
++    byteOffset,
++  })
++  const reader = stream.getReader()
++  const encoder = new TextEncoder()
++  let safeOffset = byteOffset
++  let receivedOffset = byteOffset
++  let buffer = ""
++  let chunkCount = 0
++  let finished = false
++  const abort = () => { void reader.cancel().catch(() => undefined) }
++  params.signal.addEventListener("abort", abort, { once: true })
++
++  try {
++    while (!params.signal.aborted) {
++      const next = await reader.read()
++      if (next.done) {
++        finished = true
++        break
++      }
++      const value = decodeStreamValue(next.value)
++      if (!value) continue
++      receivedOffset += encoder.encode(value).length
++      buffer += value
++      const lines = buffer.split("\n")
++      buffer = lines.pop() ?? ""
++      for (const line of lines) {
++        const trimmed = line.trim()
++        safeOffset += encoder.encode(`${line}\n`).length
++        params.onByteOffset?.(safeOffset)
++        if (!trimmed) continue
++        await params.onChunk?.(parseReactionStreamChunk(trimmed))
++        chunkCount += 1
++      }
++    }
++    if (finished && buffer.trim()) {
++      safeOffset += encoder.encode(buffer).length
++      params.onByteOffset?.(safeOffset)
++      await params.onChunk?.(parseReactionStreamChunk(buffer.trim()))
++      chunkCount += 1
++    }
++    if (finished) await params.onDone?.()
++    return Object.freeze({ byteOffset: safeOffset, chunkCount })
++  } finally {
++    params.signal.removeEventListener("abort", abort)
++    if (!finished || receivedOffset !== safeOffset) {
++      await reader.cancel().catch(() => undefined)
++    }
++    try { reader.releaseLock() } catch {}
++  }
++}
+diff --git a/packages/events/src/tests/context.reaction-stream.test.ts b/packages/events/src/tests/context.reaction-stream.test.ts
+new file mode 100644
+index 0000000..6183a9a
+--- /dev/null
++++ b/packages/events/src/tests/context.reaction-stream.test.ts
+@@ -0,0 +1,185 @@
++/* @vitest-environment node */
++
++import { describe, expect, it } from "vitest"
++
++import {
++  consumeReactionStream,
++  createReactionStreamChunk,
++  encodeReactionStreamChunk,
++  parseReactionStreamChunk,
++  reduceReactionStream,
++} from "../context.reaction-stream.js"
++
++describe("Reaction stream protocol", () => {
++  it("encodes validated NDJSON and rejects invalid sequence numbers", () => {
++    const chunk = createReactionStreamChunk({
++      reactionId: "reaction-1",
++      eventId: "event-1",
++      sequence: 1,
++      kind: "reaction.started",
++      data: { eventType: "context.agent" },
++      at: "2026-07-16T12:00:00.000Z",
++    })
++
++    const encoded = encodeReactionStreamChunk(chunk)
++    expect(encoded.endsWith("\n")).toBe(true)
++    expect(parseReactionStreamChunk(encoded.trim())).toEqual(chunk)
++    expect(() => createReactionStreamChunk({
++      reactionId: "reaction-1",
++      eventId: "event-1",
++      sequence: 0,
++      kind: "reaction.started",
++    })).toThrow("sequence")
++  })
++
++  it("reduces model deltas and action transitions into ordered provisional Event Parts", () => {
++    const common = { reactionId: "reaction-1", eventId: "event-1" }
++    const chunks = [
++      createReactionStreamChunk({
++        ...common,
++        sequence: 1,
++        kind: "reaction.started",
++        data: { eventType: "context.agent", channel: "web" },
++        at: "2026-07-16T12:00:00.000Z",
++      }),
++      createReactionStreamChunk({
++        ...common,
++        sequence: 2,
++        kind: "reasoning.delta",
++        round: 0,
++        partId: "reasoning-1",
++        delta: "Check facts. ",
++      }),
++      createReactionStreamChunk({
++        ...common,
++        sequence: 3,
++        kind: "text.delta",
++        round: 0,
++        partId: "text-1",
++        delta: "Hello ",
++      }),
++      createReactionStreamChunk({
++        ...common,
++        sequence: 4,
++        kind: "text.delta",
++        round: 0,
++        partId: "text-1",
++        delta: "world",
++      }),
++      createReactionStreamChunk({
++        ...common,
++        sequence: 5,
++        kind: "action.started",
++        round: 0,
++        actionCallId: "call-1",
++        actionName: "catalog.find",
++        input: { sku: "A-1" },
++      }),
++      createReactionStreamChunk({
++        ...common,
++        sequence: 6,
++        kind: "action.completed",
++        round: 0,
++        actionCallId: "call-1",
++        actionName: "catalog.find",
++        output: { found: true },
++      }),
++      createReactionStreamChunk({
++        ...common,
++        sequence: 7,
++        kind: "reaction.completed",
++      }),
++    ]
++
++    const result = reduceReactionStream(chunks)
++    expect(result).toMatchObject({
++      reactionId: "reaction-1",
++      eventId: "event-1",
++      eventType: "context.agent",
++      channel: "web",
++      status: "completed",
++      lastSequence: 7,
++    })
++    expect(result.parts).toEqual([
++      {
++        type: "reasoning",
++        content: { text: "Check facts. ", state: "done" },
++      },
++      {
++        type: "message",
++        content: { text: "Hello world" },
++      },
++      {
++        type: "action",
++        content: {
++          status: "started",
++          actionName: "catalog.find",
++          actionCallId: "call-1",
++          input: { sku: "A-1" },
++        },
++      },
++      {
++        type: "action",
++        content: {
++          status: "completed",
++          actionName: "catalog.find",
++          actionCallId: "call-1",
++          output: { found: true },
++        },
++      },
++    ])
++  })
++
++  it("resumes from a byte offset and parses chunks split across stream reads", async () => {
++    const first = encodeReactionStreamChunk(createReactionStreamChunk({
++      reactionId: "reaction-1",
++      eventId: "event-1",
++      sequence: 1,
++      kind: "reaction.started",
++    }))
++    const second = encodeReactionStreamChunk(createReactionStreamChunk({
++      reactionId: "reaction-1",
++      eventId: "event-1",
++      sequence: 2,
++      kind: "text.delta",
++      delta: "streamed",
++    }))
++    const bytes = new TextEncoder().encode(first + second)
++    const calls: any[] = []
++    const db = {
++      streams: {
++        createReadStream(options: any) {
++          calls.push(options)
++          const remaining = bytes.slice(options.byteOffset ?? 0)
++          return new ReadableStream<Uint8Array>({
++            start(controller) {
++              const pivot = Math.max(1, Math.floor(remaining.length / 2))
++              controller.enqueue(remaining.slice(0, pivot))
++              controller.enqueue(remaining.slice(pivot))
++              controller.close()
++            },
++          })
++        },
++      },
++    }
++    const chunks: any[] = []
++    const offsets: number[] = []
++    await consumeReactionStream({
++      db,
++      streamId: "stream-1",
++      clientId: "context-reaction:reaction-1",
++      byteOffset: new TextEncoder().encode(first).length,
++      signal: new AbortController().signal,
++      onChunk: chunk => { chunks.push(chunk) },
++      onByteOffset: offset => { offsets.push(offset) },
++    })
++
++    expect(calls).toEqual([{
++      streamId: "stream-1",
++      clientId: "context-reaction:reaction-1",
++      byteOffset: new TextEncoder().encode(first).length,
++    }])
++    expect(chunks.map(chunk => chunk.sequence)).toEqual([2])
++    expect(offsets[offsets.length - 1]).toBe(bytes.length)
++  })
++})
+*** End Git Diff
+*** End ECU Patch

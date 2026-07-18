@@ -11,6 +11,7 @@ import {
 import { Context, Events } from "@ekairos/context";
 import { createStorySmokeRuntime } from "../../../../../src/ekairos";
 import { contextEngineDurableWorkflow } from "../../../../../src/lib/context-engine.workflow";
+import { start } from "workflow/api";
 
 // Ensure env is available in dev (turbopack) even if the bootstrap module isn't evaluated.
 dotenvConfig({ path: resolve(process.cwd(), ".env.local"), quiet: true });
@@ -49,9 +50,12 @@ export async function POST(request: Request) {
         createdAt: new Date(),
       },
     );
-    const effect = await context.react(triggerEvent, reaction, {
-      workflow: contextEngineDurableWorkflow,
-    });
+    const run = await start(contextEngineDurableWorkflow, [
+      context,
+      triggerEvent,
+      reaction.key,
+    ]);
+    const effect = await run.returnValue;
     const refreshed = await context.refresh();
 
     return NextResponse.json({

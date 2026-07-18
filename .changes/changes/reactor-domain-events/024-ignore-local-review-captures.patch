@@ -1,0 +1,27 @@
+*** Begin ECU Patch
+Key: 024-ignore-local-review-captures
+Title: Keep local review captures out of revisions
+Purpose: Preserve local model screenshots and one-off browser scripts on disk without letting machine-specific review artifacts enter product revisions or ECU coverage.
+
+*** Begin Context
+The local .claude directory contains screenshots and Playwright helpers with an absolute developer-machine import. They are useful transient review evidence but are neither product code nor portable tests. Ignore the directory explicitly instead of deleting the existing local evidence or recording binary screenshots as a functional change.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/.gitignore b/.gitignore
+index a446cb9..1c0a88f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -90,6 +90,9 @@ packages/reactors/openai-reactor/.workflow-vitest/
+ # local codex reactor audit artifacts
+ packages/reactors/openai-reactor/.tmp-audit-*.json
+ 
++# local model review captures and scripts
++/.claude/
++
+ # local sensitive migration artifacts
+ /skills/esolbay-context-migration/artifacts/
+ /skills/esolbay-context-migration/.migration-audit/
+
+*** End Git Diff
+*** End ECU Patch

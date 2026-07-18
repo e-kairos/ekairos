@@ -4,16 +4,16 @@ import { randomUUID } from "node:crypto"
 import { init } from "@instantdb/admin"
 import { ContextHandle, Events } from "@ekairos/events"
 import { afterAll, beforeAll, expect } from "vitest"
+import { start } from "workflow/api"
 
 import {
   destroyContextTestApp,
   itInstant,
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
-import { executeReaction } from "../../../reactor/src/reaction.ts"
 import {
   reactionDatasetWorkflow,
-  reactionDatasetWorkflowDefinition,
+  ReactionDatasetWorkflowContextHandle,
   reactionDatasetWorkflowDomain,
   ReactionDatasetWorkflowRuntime,
 } from "./workflow/reaction.dataset.workflow-fixtures.ts"
@@ -56,10 +56,11 @@ itInstant("materializes Dataset in a child Session through the Reaction Workflow
       createdAt: Date.now(),
     }),
   ])
-  const context = await ContextHandle.create(runtime, {
+  const stored = await ContextHandle.create(runtime, {
     key: `reaction-dataset-workflow:${randomUUID()}`,
     content: { sandboxId },
   })
+  const context = new ReactionDatasetWorkflowContextHandle(runtime, stored.context)
   const trigger = await Events(runtime).emit(
     reactionDatasetWorkflowDomain.events.received([
       { code: "A1", description: "Bolt", price: 10.5 },
@@ -73,13 +74,8 @@ itInstant("materializes Dataset in a child Session through the Reaction Workflow
     },
   )
 
-  const effect = await executeReaction(
-    runtime,
-    context,
-    trigger,
-    reactionDatasetWorkflowDefinition,
-    { workflow: reactionDatasetWorkflow },
-  )
+  const run = await start(reactionDatasetWorkflow, [context, trigger])
+  const effect = await run.returnValue
 
   expect(effect.payload.itemCount).toBe(2)
   expect(effect.payload.datasetId).toBeTruthy()
@@ -100,7 +96,7 @@ itInstant("materializes Dataset in a child Session through the Reaction Workflow
   } as any)
   const parent = (result as any).context_contexts[0].sessions[0]
   expect(parent.status).toBe("completed")
-  expect(parent.workflowRunId).toBeTruthy()
+  expect(parent.workflowRunId).toBe(run.runId)
   expect(parent.children).toHaveLength(1)
 
   const datasetReaction = parent.reactions.find((row: any) => row.type === "dataset")

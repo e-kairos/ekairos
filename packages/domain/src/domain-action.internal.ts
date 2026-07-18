@@ -6,6 +6,7 @@ type ActionImplementation = (params: {
   input: unknown;
   runtime: unknown;
   domain: unknown;
+  reactionId?: string;
 }) => unknown;
 
 type ActionDescriptor = Readonly<{
@@ -57,6 +58,7 @@ export type DomainActionExecutionPreparationView = Readonly<{
 export type DomainActionExecutionOptions = Readonly<{
   activeDomain?: unknown;
   stack?: readonly string[];
+  reactionId?: string;
 }>;
 
 export type DomainActionInputResolverContext = Readonly<{
@@ -643,6 +645,7 @@ export async function executeDomainActionPrivate(
     input: prepared.effectiveInput,
     runtime,
     domain: prepared.executionDomain,
+    ...(options.reactionId ? { reactionId: options.reactionId } : {}),
   });
   const output = prepared.action.outputSchema.parse(rawOutput);
   return Object.freeze({ output, effectiveInput: prepared.effectiveInput });

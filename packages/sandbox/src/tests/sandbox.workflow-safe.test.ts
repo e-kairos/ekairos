@@ -100,6 +100,30 @@ describe("sandbox workflow-safe boundary", () => {
     expect(queries).toHaveLength(1)
   })
 
+  it("restores Daytona at the provider workspace root when the row has no override", async () => {
+    const runtime = {
+      env,
+      meta: () => ({ domain: sandboxDomain }),
+      use: async () => ({
+        db: {
+          query: async () => ({
+            sandbox_sandboxes: [{
+              id: "sandbox_daytona",
+              provider: "daytona",
+              externalSandboxId: "remote_daytona",
+              runtime: "python3.12",
+            }],
+          }),
+        },
+        actions: {},
+      }),
+    }
+
+    const sandbox = await Sandbox.open(runtime as any, "sandbox_daytona")
+
+    expect(sandbox.workspaceRoot).toBe("/home/daytona")
+  })
+
   it("fails explicitly when a durable sandbox id does not exist", async () => {
     const runtime = {
       env,
@@ -117,9 +141,10 @@ describe("sandbox workflow-safe boundary", () => {
   it("executes commands through the domain with sandboxId bound", async () => {
     const useCalls: unknown[] = []
     const commandCalls: unknown[] = []
+    const rootDomain = { name: "application" }
     const runtime = {
       env,
-      meta: () => ({ domain: sandboxDomain }),
+      meta: () => ({ domain: rootDomain }),
       use: async (domain: unknown) => {
         useCalls.push(domain)
         return {

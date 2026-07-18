@@ -25,5 +25,7 @@ Reactor orchestrates `contextDomain`; it owns no InstantDB schema.
 8. A nested Reaction has its own child Session and explicit parent relation.
 9. Direct and Workflow execution use the same graph and idempotent operation
    ids.
+10. Workflow ownership is explicit: `context.react(...)` runs inside the
+    caller's boundary and never starts or waits for a Workflow.
 
 Cross-package execution hooks are private under `@ekairos/reactor/internal`.

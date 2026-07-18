@@ -30,7 +30,6 @@
     "src/internal.ts",
     "src/reactor.ts",
     "src/reaction.ts",
-    "src/reactor.durable.ts",
     "src/reaction.operation.ts",
     "src/reaction-view.ts",
     "src/agent.ts",

@@ -1,0 +1,44 @@
+{
+  "name": "ekairos-workbench-v3",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --webpack -H 0.0.0.0 -p 4741",
+    "build": "next build --webpack",
+    "start": "next start -H 0.0.0.0 -p 4741",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.68",
+    "@ekairos/context": "workspace:*",
+    "@ekairos/dataset": "workspace:*",
+    "@ekairos/domain": "workspace:*",
+    "@ekairos/events": "workspace:*",
+    "@ekairos/reactor": "workspace:*",
+    "@ekairos/sandbox": "workspace:*",
+    "@ekairos/testing": "workspace:*",
+    "@fontsource-variable/geist-mono": "^5.2.8",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@instantdb/admin": "0.22.158",
+    "@instantdb/core": "0.22.158",
+    "@instantdb/react": "0.22.158",
+    "@vercel/oidc": "3.2.0",
+    "@workflow/serde": "5.0.0-beta.1",
+    "lucide-react": "^0.554.0",
+    "next": "16.0.10",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "server-only": "^0.0.1",
+    "streamdown": "^2.5.0",
+    "workflow": "5.0.0-beta.5",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.0",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "typescript": "^5.9.3"
+  }
+}

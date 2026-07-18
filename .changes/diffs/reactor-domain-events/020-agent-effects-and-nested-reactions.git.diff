@@ -1,0 +1,2053 @@
+diff --git a/DOMAIN.md b/DOMAIN.md
+index b86ccd0..3f573ad 100644
+--- a/DOMAIN.md
++++ b/DOMAIN.md
+@@ -26,11 +26,13 @@ schema.
+    revision.
+ 3. A Session is one invocation of a Reaction definition in one Context.
+ 4. A Reaction links one or more cause Events to one or more effect Events.
+-5. Every observable operation is represented by a child Reaction and an effect
+-   Event. There are no Steps, Points, or Executions.
+-6. A Reaction owns zero or one provisional InstantDB stream. Streaming model
+-   operations reserve their effect Event id, publish their live journal through
+-   that stream, and consolidate it into the immutable Event when complete.
++5. Every observable operation is represented by a child Reaction. Most
++   operations produce one effect Event; `agent` records every model round and
++   executed action as ordered effect Events of that same Reaction. There are no
++   Steps, Points, or Executions.
++6. A Reaction owns zero or one provisional InstantDB stream. Each event-scoped
++   stream entry carries the deterministic effect Event id it projects. Durable
++   Events replace their provisional projections independently as they complete.
+ 7. Event Parts are the ordered, streamable content of an Event: messages,
+    reasoning, sources, actions, and structured values.
+ 8. `reaction.given(event)` selects explicit causal input. An Event array is the
+diff --git a/packages/domain/src/domain-action.internal.ts b/packages/domain/src/domain-action.internal.ts
+index b936da6..5a0e292 100644
+--- a/packages/domain/src/domain-action.internal.ts
++++ b/packages/domain/src/domain-action.internal.ts
+@@ -1,11 +1,14 @@
+ import { z } from "zod";
+ 
++import type { DomainActionExecution } from "./index.js";
++
+ type ActionSchema = z.ZodType;
+ 
+ type ActionImplementation = (params: {
+   input: unknown;
+   runtime: unknown;
+   domain: unknown;
++  execution: DomainActionExecution;
+ }) => unknown;
+ 
+ type ActionDescriptor = Readonly<{
+@@ -57,6 +60,7 @@ export type DomainActionExecutionPreparationView = Readonly<{
+ export type DomainActionExecutionOptions = Readonly<{
+   activeDomain?: unknown;
+   stack?: readonly string[];
++  execution?: DomainActionExecution;
+ }>;
+ 
+ export type DomainActionInputResolverContext = Readonly<{
+@@ -639,10 +643,20 @@ export async function executeDomainActionPrivate(
+     );
+   }
+ 
++  const execution = options.execution ?? Object.freeze({
++    source: "runtime" as const,
++    actionId: prepared.action.id,
++  });
++  if (execution.actionId !== prepared.action.id) {
++    throw new Error(
++      `domain_action_execution_action_mismatch:${prepared.action.id}:${execution.actionId}`,
++    );
++  }
+   const rawOutput = await prepared.action.implementation({
+     input: prepared.effectiveInput,
+     runtime,
+     domain: prepared.executionDomain,
++    execution,
+   });
+   const output = prepared.action.outputSchema.parse(rawOutput);
+   return Object.freeze({ output, effectiveInput: prepared.effectiveInput });
+diff --git a/packages/domain/src/index.ts b/packages/domain/src/index.ts
+index 5cbfafa..c9d991e 100644
+--- a/packages/domain/src/index.ts
++++ b/packages/domain/src/index.ts
+@@ -93,6 +93,26 @@ export type DomainActionRuntimeLike<Env = any> = {
+   ): Promise<ActiveDomain<SubD, Env>>;
+ };
+ 
++export type DomainActionRuntimeExecution = Readonly<{
++  source: "runtime";
++  actionId: string;
++}>;
++
++export type DomainActionReactionExecution = Readonly<{
++  source: "reaction";
++  actionId: string;
++  contextId: string;
++  sessionId: string;
++  reactionId: string;
++  triggerEventId: string;
++  actionCallId: string;
++  reactionDefinitionKey: string;
++}>;
++
++export type DomainActionExecution =
++  | DomainActionRuntimeExecution
++  | DomainActionReactionExecution;
++
+ type RuntimeEnvOfActionRuntime<Runtime> =
+   Runtime extends { readonly env: infer Env } ? Env : unknown;
+ 
+@@ -110,6 +130,7 @@ export type DomainActionExecuteParams<
+     ActionOwnerDomain<Domain>,
+     RuntimeEnvOfActionRuntime<Runtime>
+   >;
++  execution: DomainActionExecution;
+ };
+ 
+ export type DomainActionDefinition<
+diff --git a/packages/domain/src/internal.ts b/packages/domain/src/internal.ts
+index d71657a..1bee38e 100644
+--- a/packages/domain/src/internal.ts
++++ b/packages/domain/src/internal.ts
+@@ -10,6 +10,7 @@ import {
+   getDomainActionBindingView,
+   prepareDomainActionExecutionPrivate,
+   registerDomainActionInputResolverPrivate,
++  type DomainActionExecutionOptions,
+   type DomainActionInputResolver,
+ } from "./domain-action.internal.js";
+ 
+@@ -80,10 +81,12 @@ export async function executeDomainAction<
+   remainingInputOrPreparation:
+     | DomainActionInput<Action>
+     | PreparedDomainActionExecution<Action>,
++  options: DomainActionExecutionOptions = {},
+ ): Promise<ExecuteDomainActionResult<Action>> {
+   return await executeDomainActionPrivate(
+     runtime,
+     registration,
+     remainingInputOrPreparation,
++    options,
+   ) as ExecuteDomainActionResult<Action>;
+ }
+diff --git a/packages/domain/src/tests/runtime-actions.execution-context.unit.test.ts b/packages/domain/src/tests/runtime-actions.execution-context.unit.test.ts
+index 679ddf5..cf153f1 100644
+--- a/packages/domain/src/tests/runtime-actions.execution-context.unit.test.ts
++++ b/packages/domain/src/tests/runtime-actions.execution-context.unit.test.ts
+@@ -30,16 +30,20 @@ describe("runtime action execution outside workflows", () => {
+           inStep: z.boolean(),
+           workflowRunId: z.string().nullable(),
+           stepId: z.string().nullable(),
++          source: z.literal("runtime"),
++          actionId: z.string(),
+         }),
+-        async execute({ input, domain }) {
+-          const execution = await readActionExecutionContext();
++        async execute({ input, domain, execution }) {
++          const workflowExecution = await readActionExecutionContext();
+           return {
+             title: String(input.title).trim(),
+             runtimeCall: domain.db.runtimeCall,
+-            inWorkflow: execution.inWorkflow,
+-            inStep: execution.inStep,
+-            workflowRunId: execution.workflowRunId,
+-            stepId: execution.stepId,
++            inWorkflow: workflowExecution.inWorkflow,
++            inStep: workflowExecution.inStep,
++            workflowRunId: workflowExecution.workflowRunId,
++            stepId: workflowExecution.stepId,
++            source: execution.source,
++            actionId: execution.actionId,
+           };
+         },
+       }),
+@@ -63,6 +67,8 @@ describe("runtime action execution outside workflows", () => {
+       inStep: false,
+       workflowRunId: null,
+       stepId: null,
++      source: "runtime",
++      actionId: "action-execution.inspectExecution",
+     });
+   });
+ });
+diff --git a/packages/events/DOMAIN.md b/packages/events/DOMAIN.md
+index 991d4be..5f93658 100644
+--- a/packages/events/DOMAIN.md
++++ b/packages/events/DOMAIN.md
+@@ -26,9 +26,9 @@ Canonical domain: `contextDomain`
+    addition to real InstantDB links.
+ 6. A Reaction has zero or one linked `$stream`. The stream is a resumable,
+    provisional journal; it is never the durable result of the Reaction.
+-7. A streaming Reaction reserves its effect Event id before the provider starts.
+-   Once that Event and its Parts are durable, clients replace the provisional
+-   projection instead of rendering both versions.
++7. Every event-scoped stream entry identifies the deterministic effect Event it
++   projects. Once an Event and its Parts are durable, clients replace only that
++   provisional projection instead of rendering both versions.
+ 8. Event Parts are ordered by `index` and are the canonical UI/model trace.
+ 9. Context content contains no implicit files, workspace, engine, sandbox, or
+    tool state.
+diff --git a/packages/events/src/context.reaction-stream.ts b/packages/events/src/context.reaction-stream.ts
+index 3cf2a52..b1bcedd 100644
+--- a/packages/events/src/context.reaction-stream.ts
++++ b/packages/events/src/context.reaction-stream.ts
+@@ -40,7 +40,7 @@ const REACTION_STREAM_KINDS = new Set<ReactionStreamChunkKind>([
+ export type ReactionStreamChunk = Readonly<{
+   version: typeof REACTION_STREAM_VERSION
+   reactionId: string
+-  eventId: string
++  eventId?: string
+   sequence: number
+   at: string
+   kind: ReactionStreamChunkKind
+@@ -97,7 +97,7 @@ export function validateReactionStreamChunk(value: unknown): asserts value is Re
+     throw new Error("invalid_reaction_stream_version")
+   }
+   assertNonEmptyString(chunk.reactionId, "reactionId")
+-  assertNonEmptyString(chunk.eventId, "eventId")
++  assertOptionalString(chunk.eventId, "eventId")
+   if (!Number.isSafeInteger(chunk.sequence) || Number(chunk.sequence) < 1) {
+     throw new Error("invalid_reaction_stream_sequence")
+   }
+@@ -109,6 +109,14 @@ export function validateReactionStreamChunk(value: unknown): asserts value is Re
+   if (!REACTION_STREAM_KINDS.has(chunk.kind as ReactionStreamChunkKind)) {
+     throw new Error(`invalid_reaction_stream_kind:${chunk.kind}`)
+   }
++  if (
++    chunk.kind !== "reaction.started" &&
++    chunk.kind !== "reaction.completed" &&
++    chunk.kind !== "reaction.failed" &&
++    typeof chunk.eventId !== "string"
++  ) {
++    throw new Error(`invalid_reaction_stream_eventId:${chunk.kind}`)
++  }
+   if (chunk.round !== undefined && (!Number.isSafeInteger(chunk.round) || Number(chunk.round) < 0)) {
+     throw new Error("invalid_reaction_stream_round")
+   }
+@@ -180,7 +188,7 @@ function parseInputDelta(value: string): unknown {
+ 
+ export function reduceReactionStream(
+   input: readonly ReactionStreamChunk[],
+-): ReactionStreamProjection {
++): readonly ReactionStreamProjection[] {
+   if (input.length === 0) throw new Error("reaction_stream_empty")
+   const chunksBySequence = new Map<number, ReactionStreamChunk>()
+   for (const chunk of input) {
+@@ -194,11 +202,30 @@ export function reduceReactionStream(
+   const chunks = [...chunksBySequence.values()].sort((left, right) => left.sequence - right.sequence)
+   const first = chunks[0]!
+   for (const chunk of chunks) {
+-    if (chunk.reactionId !== first.reactionId || chunk.eventId !== first.eventId) {
++    if (chunk.reactionId !== first.reactionId) {
+       throw new Error("reaction_stream_identity_conflict")
+     }
+   }
+ 
++  const grouped = new Map<string, ReactionStreamChunk[]>()
++  for (const chunk of chunks) {
++    if (!chunk.eventId) continue
++    grouped.set(chunk.eventId, [...(grouped.get(chunk.eventId) ?? []), chunk])
++  }
++  return Object.freeze([...grouped.values()].map(reduceReactionEventStream))
++}
++
++function reduceReactionEventStream(
++  chunks: readonly ReactionStreamChunk[],
++): ReactionStreamProjection {
++  const first = chunks[0]!
++  if (!first.eventId) throw new Error("reaction_stream_event_empty")
++  for (const chunk of chunks) {
++    if (chunk.reactionId !== first.reactionId || chunk.eventId !== first.eventId) {
++      throw new Error("reaction_stream_event_identity_conflict")
++    }
++  }
++
+   type TextState = { sequence: number; text: string; done?: boolean }
+   type ActionState = {
+     sequence: number
+@@ -216,17 +243,19 @@ export function reduceReactionStream(
+   const sources: Array<{ sequence: number; value: any }> = []
+   let status: ReactionStreamProjection["status"] = "running"
+   let terminalError: unknown
+-  let eventType = "context.agent"
++  let eventType = chunks.some(chunk => chunk.kind.startsWith("action."))
++    ? "context.action"
++    : "context.model"
+   let channel: string | undefined
+ 
+   for (const chunk of chunks) {
+     const data = record(chunk.data)
+-    if (chunk.kind === "reaction.started") {
+-      if (typeof data.eventType === "string" && data.eventType) eventType = data.eventType
+-      if (typeof data.channel === "string" && data.channel) channel = data.channel
++    if (typeof data.eventType === "string" && data.eventType) eventType = data.eventType
++    if (typeof data.channel === "string" && data.channel) channel = data.channel
++    if (chunk.kind === "model.round.completed" || chunk.kind === "action.completed") {
++      status = "completed"
+     }
+-    if (chunk.kind === "reaction.completed") status = "completed"
+-    if (chunk.kind === "reaction.failed") {
++    if (chunk.kind === "action.failed" || chunk.kind === "provider.error") {
+       status = "failed"
+       terminalError = chunk.error ?? data.error
+     }
+diff --git a/packages/events/src/context.store.ts b/packages/events/src/context.store.ts
+index f465050..e81fd38 100644
+--- a/packages/events/src/context.store.ts
++++ b/packages/events/src/context.store.ts
+@@ -56,6 +56,7 @@ export type ContextSession = Readonly<{
+   rootReactionId: string
+   status: SessionStatus
+   parentSessionId?: string
++  parentReactionId?: string
+   sandboxId?: string
+   workflowRunId?: string
+   error?: unknown
+@@ -117,6 +118,7 @@ export interface ContextStore {
+     definition: string
+     triggerId: string
+     parentSessionId?: string
++    parentReactionId?: string
+     sandboxId?: string
+     workflowRunId?: string
+     createdAt?: Date
+@@ -140,6 +142,10 @@ export interface ContextStore {
+     createdAt?: Date
+   }>): Promise<ContextReaction>
+   getReaction(reactionId: string): Promise<ContextReaction | null>
++  appendReactionEffect(
++    reactionId: string,
++    effectId: string,
++  ): Promise<ContextReaction>
+   attachReactionStream(
+     reactionId: string,
+     stream: Readonly<{
+diff --git a/packages/events/src/react.types.ts b/packages/events/src/react.types.ts
+index bd5f32b..74a4db2 100644
+--- a/packages/events/src/react.types.ts
++++ b/packages/events/src/react.types.ts
+@@ -66,7 +66,7 @@ export type ContextReactionForUI = {
+   causes: ContextEventForUI[]
+   effects: ContextEventForUI[]
+   stream: ContextReactionStreamForUI | null
+-  liveEffect: ContextEventForUI | null
++  liveEffects: ContextEventForUI[]
+   parent?: Pick<ContextReactionForUI, "id" | "type"> | null
+ }
+ 
+@@ -76,11 +76,13 @@ export type ContextSessionForUI = {
+   status: "running" | "completed" | "failed"
+   sandboxId?: string
+   workflowRunId?: string
++  parentSessionId?: string
+   error?: unknown
+   createdAt: string | Date
+   updatedAt?: string | Date
+   trigger: ContextEventForUI | null
+   rootReaction: ContextReactionForUI | null
++  parentReactionId?: string
+   reactions: ContextReactionForUI[]
+   children: ContextSessionForUI[]
+ }
+diff --git a/packages/events/src/react.use-context.ts b/packages/events/src/react.use-context.ts
+index e5d866b..2f035c3 100644
+--- a/packages/events/src/react.use-context.ts
++++ b/packages/events/src/react.use-context.ts
+@@ -132,7 +132,7 @@ function normalizeReaction(value: unknown): ContextReactionForUI | null {
+     causes,
+     effects,
+     stream: normalizeReactionStream(row),
+-    liveEffect: null,
++    liveEffects: [],
+     parent: parent?.id ? { id: String(parent.id), type: String(parent.type) } : null,
+   }
+ }
+@@ -151,12 +151,16 @@ function normalizeSession(value: unknown): ContextSessionForUI | null {
+     status: row.status,
+     ...(asText(row.sandboxId) ? { sandboxId: asText(row.sandboxId) } : {}),
+     ...(asText(row.workflowRunId) ? { workflowRunId: asText(row.workflowRunId) } : {}),
++    ...(one(row.parent)?.id ? { parentSessionId: String(one(row.parent)!.id) } : {}),
+     ...(row.error === undefined ? {} : { error: row.error }),
+     createdAt: row.createdAt,
+     ...(row.updatedAt ? { updatedAt: row.updatedAt } : {}),
+     trigger: normalizeEvent(one(row.trigger)),
+     rootReaction: reactions.find(reaction => reaction.id === rootId)
+       ?? normalizeReaction(one(row.rootReaction)),
++    ...(normalizeReaction(one(row.rootReaction))?.parent?.id
++      ? { parentReactionId: normalizeReaction(one(row.rootReaction))!.parent!.id }
++      : {}),
+     reactions,
+     children: many(row.children)
+       .map(normalizeSession)
+@@ -384,18 +388,18 @@ function useReactionStreamRuntime(
+   return runtime
+ }
+ 
+-function buildLiveEffect(
++function buildLiveEffects(
+   reaction: ContextReactionForUI,
+   stream: ContextReactionStreamForUI,
+-): ContextEventForUI | null {
+-  if (stream.chunks.length === 0) return null
+-  let projection
++): ContextEventForUI[] {
++  if (stream.chunks.length === 0) return []
++  let projections
+   try {
+-    projection = reduceReactionStream(stream.chunks)
++    projections = reduceReactionStream(stream.chunks)
+   } catch {
+-    return null
++    return []
+   }
+-  return {
++  return projections.map(projection => ({
+     id: projection.eventId,
+     type: projection.eventType,
+     ...(projection.channel ? { channel: projection.channel } : {}),
+@@ -418,7 +422,7 @@ function buildLiveEffect(
+       createdAt: projection.createdAt,
+     })),
+     durability: "streaming",
+-  }
++  }))
+ }
+ 
+ function enrichReaction(
+@@ -433,11 +437,11 @@ function enrichReaction(
+       ? { chunks: [...runtime.chunks], reader: runtime.reader }
+       : {}),
+   }
+-  const candidate = buildLiveEffect(reaction, stream)
++  const candidates = buildLiveEffects(reaction, stream)
+   return {
+     ...reaction,
+     stream,
+-    liveEffect: candidate && !durableEventIds.has(candidate.id) ? candidate : null,
++    liveEffects: candidates.filter(candidate => !durableEventIds.has(candidate.id)),
+   }
+ }
+ 
+@@ -468,6 +472,7 @@ function sessionQuery() {
+   return {
+     $: { order: { createdAt: "desc" } },
+     trigger: { eventParts: {} },
++    parent: {},
+     rootReaction: {
+       causes: { eventParts: {} },
+       effects: { eventParts: {} },
+@@ -650,7 +655,7 @@ export function useContext(db: any, options: UseContextOptions): ContextValue {
+   const events = useMemo(() => {
+     const persisted = new Set(normalized.events.map(event => event.id))
+     const live = flattenSessionReactions(sessions)
+-      .flatMap(reaction => reaction.liveEffect ? [reaction.liveEffect] : [])
++      .flatMap(reaction => reaction.liveEffects)
+     const candidates = [
+       ...normalized.events,
+       ...live.filter(event => !persisted.has(event.id)),
+diff --git a/packages/events/src/stores/instant.store.ts b/packages/events/src/stores/instant.store.ts
+index 31d5689..c918a04 100644
+--- a/packages/events/src/stores/instant.store.ts
++++ b/packages/events/src/stores/instant.store.ts
+@@ -104,6 +104,9 @@ function toEvent<Payload>(row: any): ContextEvent<Payload> {
+ }
+ 
+ function toSession(row: any): ContextSession {
++  const rootReaction = Array.isArray(row.rootReaction)
++    ? row.rootReaction[0]
++    : row.rootReaction
+   return Object.freeze({
+     id: String(row.id),
+     contextId: linkedId(row.context) ?? String(row.contextId ?? ""),
+@@ -112,6 +115,9 @@ function toSession(row: any): ContextSession {
+     rootReactionId: linkedId(row.rootReaction) ?? String(row.rootReactionId ?? ""),
+     status: row.status as SessionStatus,
+     ...(linkedId(row.parent) ? { parentSessionId: linkedId(row.parent)! } : {}),
++    ...(linkedId(rootReaction?.parent)
++      ? { parentReactionId: linkedId(rootReaction.parent)! }
++      : {}),
+     ...(typeof row.sandboxId === "string" ? { sandboxId: row.sandboxId } : {}),
+     ...(typeof row.workflowRunId === "string" ? { workflowRunId: row.workflowRunId } : {}),
+     ...(row.error === undefined ? {} : { error: row.error }),
+@@ -358,7 +364,7 @@ export class InstantStore implements ContextStore {
+         $: { where: { id: sessionId }, limit: 1 },
+         context: {},
+         trigger: {},
+-        rootReaction: {},
++        rootReaction: { parent: {} },
+         parent: {},
+       },
+     } as any)
+@@ -379,6 +385,7 @@ export class InstantStore implements ContextStore {
+         triggerId: input.triggerId,
+         rootReactionId: input.rootReactionId,
+         parentSessionId: input.parentSessionId,
++        parentReactionId: input.parentReactionId,
+         sandboxId: input.sandboxId,
+       }
+       const actual = {
+@@ -387,6 +394,7 @@ export class InstantStore implements ContextStore {
+         triggerId: existing.triggerId,
+         rootReactionId: existing.rootReactionId,
+         parentSessionId: existing.parentSessionId,
++        parentReactionId: existing.parentReactionId,
+         sandboxId: existing.sandboxId,
+       }
+       if (!same(actual, expected)) throw new Error(`context_session_conflict:${input.id}`)
+@@ -397,6 +405,13 @@ export class InstantStore implements ContextStore {
+     if (input.parentSessionId && !(await this.getSession(input.parentSessionId))) {
+       throw new Error("context_session_parent_not_found")
+     }
++    if (input.parentReactionId) {
++      const parentReaction = await this.getReaction(input.parentReactionId)
++      if (!parentReaction) throw new Error("context_session_parent_reaction_not_found")
++      if (!input.parentSessionId || parentReaction.sessionId !== input.parentSessionId) {
++        throw new Error("context_session_parent_reaction_mismatch")
++      }
++    }
+ 
+     const createdAt = input.createdAt ?? new Date()
+     let sessionTx = this.db.tx.context_sessions[input.id]
+@@ -426,11 +441,16 @@ export class InstantStore implements ContextStore {
+       .link({
+         session: input.id,
+         causes: [input.triggerId],
++        ...(input.parentReactionId ? { parent: input.parentReactionId } : {}),
+       })
+-    const currentSessionTx = this.db.tx.context_contexts[input.contextId]
+-      .link({ currentSession: input.id })
++    const transactions = [sessionTx, rootReactionTx]
++    if (!input.parentSessionId) {
++      transactions.push(
++        this.db.tx.context_contexts[input.contextId].link({ currentSession: input.id }),
++      )
++    }
+     try {
+-      await this.db.transact([sessionTx, rootReactionTx, currentSessionTx])
++      await this.db.transact(transactions)
+     } catch (error) {
+       const raced = await this.getSession(input.id)
+       if (!raced) throw error
+@@ -572,6 +592,25 @@ export class InstantStore implements ContextStore {
+     return (await this.getReaction(reactionId))!
+   }
+ 
++  async appendReactionEffect(reactionId: string, effectId: string) {
++    const current = await this.getReaction(reactionId)
++    if (!current) throw new Error(`context_reaction_not_found:${reactionId}`)
++    if (!(await this.getEvent(effectId))) {
++      throw new Error(`context_reaction_effect_not_found:${effectId}`)
++    }
++    if (current.effectIds.includes(effectId)) return current
++    if (current.status !== "running") {
++      throw new Error(`context_reaction_effect_after_terminal:${reactionId}`)
++    }
++    const effectIds = [...current.effectIds, effectId]
++    await this.db.transact([
++      this.db.tx.context_reactions[reactionId]
++        .update({ effectIds, updatedAt: new Date() })
++        .link({ effects: effectId }),
++    ])
++    return (await this.getReaction(reactionId))!
++  }
++
+   async finishReactionStream(
+     reactionId: string,
+     result: Parameters<ContextStore["finishReactionStream"]>[1] = {},
+diff --git a/packages/events/src/tests/context.persistence.instant.test.ts b/packages/events/src/tests/context.persistence.instant.test.ts
+index 22f0c31..51a7a9e 100644
+--- a/packages/events/src/tests/context.persistence.instant.test.ts
++++ b/packages/events/src/tests/context.persistence.instant.test.ts
+@@ -92,7 +92,7 @@ describeInstant("context causal persistence", () => {
+       id: operationReactionId,
+       sessionId,
+       parentReactionId: rootReactionId,
+-      type: "context.agent",
++      type: "agent",
+       position: 1,
+       depth: 1,
+       causeIds: [triggerId],
+@@ -112,14 +112,74 @@ describeInstant("context causal persistence", () => {
+     await store.finishReactionStream(operationReactionId, {
+       finishedAt: new Date("2026-07-16T12:00:01.000Z"),
+     })
++    const modelStarted = await events.create({
++      id: randomUUID(),
++      type: "context.model",
++      contextId: updatedContext.id,
++      payload: { round: 0 },
++      metadata: { reactionId: operationReactionId },
++    })
++    await store.appendReactionEffect(operationReactionId, modelStarted.id)
++
++    const childTrigger = await events.create({
++      id: randomUUID(),
++      type: "contextPersistenceTest.verificationRequested",
++      contextId: updatedContext.id,
++      payload: { review: true },
++      metadata: { reactionId: operationReactionId, actionCallId: "call-1" },
++    })
++    await store.appendReactionEffect(operationReactionId, childTrigger.id)
++    const childSessionId = randomUUID()
++    const childRootReactionId = randomUUID()
++    await updatedContext.openSession({
++      id: childSessionId,
++      rootReactionId: childRootReactionId,
++      definition: "contextPersistenceTest.verify",
++      triggerId: childTrigger.id,
++      parentSessionId: sessionId,
++      parentReactionId: operationReactionId,
++    })
++    const childResult = await events.create({
++      id: randomUUID(),
++      type: "contextPersistenceTest.verificationCompleted",
++      contextId: updatedContext.id,
++      payload: { valid: true },
++      metadata: { reactionId: childRootReactionId },
++    })
++    await store.completeReaction(childRootReactionId, "completed", [childResult.id])
++    await store.completeSession(childSessionId, "completed")
++    await store.appendReactionEffect(operationReactionId, childResult.id)
++
++    const actionResult = await events.create({
++      id: randomUUID(),
++      type: "context.action",
++      contextId: updatedContext.id,
++      payload: { recorded: true },
++      metadata: { reactionId: operationReactionId, actionCallId: "call-1" },
++    })
++    await store.appendReactionEffect(operationReactionId, actionResult.id)
+     const agentResult = await events.create({
+       id: randomUUID(),
+-      type: "context.agent",
++      type: "context.model",
+       contextId: updatedContext.id,
+       payload: { message: "Oferta preparada." },
+       parts: [Part.message("Oferta preparada.")],
++      metadata: { reactionId: operationReactionId },
++    })
++    await store.appendReactionEffect(operationReactionId, agentResult.id)
++    const orderedEffects = [
++      modelStarted.id,
++      childTrigger.id,
++      childResult.id,
++      actionResult.id,
++      agentResult.id,
++    ]
++    await store.completeReaction(operationReactionId, "completed", orderedEffects)
++    expect((await store.getReaction(operationReactionId))?.effectIds).toEqual(orderedEffects)
++    expect(await store.getSession(childSessionId)).toMatchObject({
++      parentSessionId: sessionId,
++      parentReactionId: operationReactionId,
+     })
+-    await store.completeReaction(operationReactionId, "completed", [agentResult.id])
+ 
+     const answer = await events.emit(
+       testDomain.events.messageAnswered({ message: agentResult.payload.message }),
+@@ -145,7 +205,8 @@ describeInstant("context causal persistence", () => {
+     expect(stored.trigger.id).toBe(triggerId)
+     expect(stored.rootReaction.causes.map((event: any) => event.id)).toEqual([triggerId])
+     expect(stored.rootReaction.effects.map((event: any) => event.id)).toEqual([answer.id])
+-    expect(stored.rootReaction.children[0].effects[0].id).toBe(agentResult.id)
++    expect(stored.rootReaction.children[0].effects.map((row: any) => row.id))
++      .toEqual(expect.arrayContaining(orderedEffects))
+     expect(stored.rootReaction.children[0]).toMatchObject({
+       streamId,
+       streamClientId,
+diff --git a/packages/events/src/tests/context.reaction-stream.test.ts b/packages/events/src/tests/context.reaction-stream.test.ts
+index 6183a9a..3311da8 100644
+--- a/packages/events/src/tests/context.reaction-stream.test.ts
++++ b/packages/events/src/tests/context.reaction-stream.test.ts
+@@ -14,10 +14,8 @@ describe("Reaction stream protocol", () => {
+   it("encodes validated NDJSON and rejects invalid sequence numbers", () => {
+     const chunk = createReactionStreamChunk({
+       reactionId: "reaction-1",
+-      eventId: "event-1",
+       sequence: 1,
+       kind: "reaction.started",
+-      data: { eventType: "context.agent" },
+       at: "2026-07-16T12:00:00.000Z",
+     })
+ 
+@@ -26,25 +24,32 @@ describe("Reaction stream protocol", () => {
+     expect(parseReactionStreamChunk(encoded.trim())).toEqual(chunk)
+     expect(() => createReactionStreamChunk({
+       reactionId: "reaction-1",
+-      eventId: "event-1",
+       sequence: 0,
+       kind: "reaction.started",
+     })).toThrow("sequence")
+   })
+ 
+-  it("reduces model deltas and action transitions into ordered provisional Event Parts", () => {
+-    const common = { reactionId: "reaction-1", eventId: "event-1" }
++  it("reduces one Reaction stream into ordered provisional model and action Events", () => {
++    const common = { reactionId: "reaction-1" }
+     const chunks = [
+       createReactionStreamChunk({
+         ...common,
+         sequence: 1,
+         kind: "reaction.started",
+-        data: { eventType: "context.agent", channel: "web" },
+         at: "2026-07-16T12:00:00.000Z",
+       }),
+       createReactionStreamChunk({
+         ...common,
++        eventId: "model-0",
+         sequence: 2,
++        kind: "model.round.started",
++        round: 0,
++        data: { eventType: "context.model", channel: "web" },
++      }),
++      createReactionStreamChunk({
++        ...common,
++        eventId: "model-0",
++        sequence: 3,
+         kind: "reasoning.delta",
+         round: 0,
+         partId: "reasoning-1",
+@@ -52,7 +57,8 @@ describe("Reaction stream protocol", () => {
+       }),
+       createReactionStreamChunk({
+         ...common,
+-        sequence: 3,
++        eventId: "model-0",
++        sequence: 4,
+         kind: "text.delta",
+         round: 0,
+         partId: "text-1",
+@@ -60,7 +66,8 @@ describe("Reaction stream protocol", () => {
+       }),
+       createReactionStreamChunk({
+         ...common,
+-        sequence: 4,
++        eventId: "model-0",
++        sequence: 5,
+         kind: "text.delta",
+         round: 0,
+         partId: "text-1",
+@@ -68,7 +75,15 @@ describe("Reaction stream protocol", () => {
+       }),
+       createReactionStreamChunk({
+         ...common,
+-        sequence: 5,
++        eventId: "model-0",
++        sequence: 6,
++        kind: "model.round.completed",
++        round: 0,
++      }),
++      createReactionStreamChunk({
++        ...common,
++        eventId: "action-0",
++        sequence: 7,
+         kind: "action.started",
+         round: 0,
+         actionCallId: "call-1",
+@@ -77,7 +92,8 @@ describe("Reaction stream protocol", () => {
+       }),
+       createReactionStreamChunk({
+         ...common,
+-        sequence: 6,
++        eventId: "action-0",
++        sequence: 8,
+         kind: "action.completed",
+         round: 0,
+         actionCallId: "call-1",
+@@ -86,21 +102,22 @@ describe("Reaction stream protocol", () => {
+       }),
+       createReactionStreamChunk({
+         ...common,
+-        sequence: 7,
++        sequence: 9,
+         kind: "reaction.completed",
+       }),
+     ]
+ 
+     const result = reduceReactionStream(chunks)
+-    expect(result).toMatchObject({
++    expect(result).toHaveLength(2)
++    expect(result[0]).toMatchObject({
+       reactionId: "reaction-1",
+-      eventId: "event-1",
+-      eventType: "context.agent",
++      eventId: "model-0",
++      eventType: "context.model",
+       channel: "web",
+       status: "completed",
+-      lastSequence: 7,
++      lastSequence: 6,
+     })
+-    expect(result.parts).toEqual([
++    expect(result[0]!.parts).toEqual([
+       {
+         type: "reasoning",
+         content: { text: "Check facts. ", state: "done" },
+@@ -109,6 +126,15 @@ describe("Reaction stream protocol", () => {
+         type: "message",
+         content: { text: "Hello world" },
+       },
++    ])
++    expect(result[1]).toMatchObject({
++      reactionId: "reaction-1",
++      eventId: "action-0",
++      eventType: "context.action",
++      status: "completed",
++      lastSequence: 8,
++    })
++    expect(result[1]!.parts).toEqual([
+       {
+         type: "action",
+         content: {
+@@ -133,13 +159,12 @@ describe("Reaction stream protocol", () => {
+   it("resumes from a byte offset and parses chunks split across stream reads", async () => {
+     const first = encodeReactionStreamChunk(createReactionStreamChunk({
+       reactionId: "reaction-1",
+-      eventId: "event-1",
+       sequence: 1,
+       kind: "reaction.started",
+     }))
+     const second = encodeReactionStreamChunk(createReactionStreamChunk({
+       reactionId: "reaction-1",
+-      eventId: "event-1",
++      eventId: "model-0",
+       sequence: 2,
+       kind: "text.delta",
+       delta: "streamed",
+diff --git a/packages/reactor/README.md b/packages/reactor/README.md
+index 63f0ab4..e841c0f 100644
+--- a/packages/reactor/README.md
++++ b/packages/reactor/README.md
+@@ -137,11 +137,13 @@ const response = await context.react(trigger, answerMessage)
+ a Zod output schema, its payload is typed structured data. It may execute only
+ the scoped domain actions explicitly supplied to it.
+ 
+-Each `agent` operation owns at most one InstantDB `$stream`. Provider chunks,
+-model rounds, action calls, sources, and errors are appended to that stream in
+-causal order. The stream is provisional: completion persists one immutable
+-`context.agent` Event with canonical Event Parts, then marks the stream done.
+-Non-streaming operations do not create an empty stream.
++Each `agent` operation is one Reaction and owns at most one InstantDB `$stream`.
++Every real model round becomes an ordered `context.model` effect Event and every
++executed action becomes an ordered `context.action` effect Event. Provider
++chunks, sources, action progress, and errors are projected through the same
++Reaction stream with the id of the Event they belong to. The terminal model
++Event is the return value. Non-streaming operations do not create an empty
++stream.
+ 
+ ```ts
+ const classification = await reaction.given(reaction.trigger).agent({
+@@ -302,8 +304,8 @@ types. The execution bridge lives under `@ekairos/reactor/internal`.
+ 
+ `useContext` subscribes to the durable Context graph and to every linked
+ Reaction stream. While an `agent` is running, its reduced stream is exposed as
+-an Event-shaped `liveEffect`. When the same reserved Event id becomes durable,
+-`liveEffect` disappears and the immutable Event remains.
++Event-shaped `liveEffects`, one projection per current Event id. When each Event
++becomes durable, only its matching provisional projection disappears.
+ 
+ ```tsx
+ import { useContext } from "@ekairos/events/react"
+@@ -319,6 +321,7 @@ state.reactions       // Reactions in the active Session
+ state.sendStatus      // idle | submitting | streaming | error
+ 
+ const stream = state.reactions[0]?.stream
++state.reactions[0]?.liveEffects // current model/action Event projections
+ stream?.chunks        // complete ordered Reaction journal
+ stream?.reader        // status, byteOffset, chunkCount, reconnect attempt
+ ```
+diff --git a/packages/reactor/src/action-execution.ts b/packages/reactor/src/action-execution.ts
+new file mode 100644
+index 0000000..c42f4a3
+--- /dev/null
++++ b/packages/reactor/src/action-execution.ts
+@@ -0,0 +1,90 @@
++import type {
++  DomainActionExecution,
++  DomainEventDraft,
++} from "@ekairos/domain"
++import {
++  ContextHandle,
++  Events,
++  getContextRuntimeServices,
++  uuidV5,
++  type ContextEvent,
++  type ContextRuntimeServiceHandle,
++  type DomainEventItem,
++} from "@ekairos/events"
++
++import {
++  executeReaction,
++  type ReactionDefinition,
++  type ReactionEffect,
++} from "./reaction.js"
++
++const ACTION_EFFECT_NAMESPACE = "6793b21d-14b5-4a5f-bcc0-d71e41c4a0f9"
++
++type ReactionRuntime = ContextRuntimeServiceHandle & {
++  use(domain: unknown, options?: unknown): Promise<unknown>
++}
++
++function requireReactionExecution(execution: DomainActionExecution) {
++  if (execution.source !== "reaction") {
++    throw new Error(`reaction_action_execution_required:${execution.actionId}`)
++  }
++  return execution
++}
++
++export async function emitActionEffect<Payload>(
++  runtime: ReactionRuntime,
++  execution: DomainActionExecution,
++  input: Readonly<{
++    key: string
++    draft: DomainEventDraft<Payload, any, any, any, any, any>
++    channel?: string
++  }>,
++): Promise<DomainEventItem<Payload>> {
++  const parent = requireReactionExecution(execution)
++  const key = input.key.trim()
++  if (!key) throw new Error("reaction_action_effect_key_required")
++  const event = await Events(runtime).emit(input.draft as any, {
++    id: uuidV5(
++      `${parent.reactionId}:${parent.actionCallId}:${key}`,
++      ACTION_EFFECT_NAMESPACE,
++    ),
++    contextId: parent.contextId,
++    ...(input.channel ? { channel: input.channel } : {}),
++    metadata: {
++      sessionId: parent.sessionId,
++      reactionId: parent.reactionId,
++      definition: parent.reactionDefinitionKey,
++      actionId: parent.actionId,
++      actionCallId: parent.actionCallId,
++    },
++  })
++  const { store } = await getContextRuntimeServices(runtime)
++  await store.appendReactionEffect(parent.reactionId, event.id)
++  return event as DomainEventItem<Payload>
++}
++
++export async function reactFromAction<TEffect extends ReactionEffect>(
++  runtime: ReactionRuntime,
++  execution: DomainActionExecution,
++  trigger: ContextEvent,
++  definition: ReactionDefinition<any, any, any, TEffect>,
++  options: Readonly<{ contextId?: string }> = {},
++): Promise<TEffect> {
++  const parent = requireReactionExecution(execution)
++  const contextId = options.contextId ?? parent.contextId
++  const context = await ContextHandle.get(runtime, { id: contextId })
++  if (!context) throw new Error(`reaction_context_not_found:${contextId}`)
++  const result = await executeReaction(runtime, context, trigger, definition, {
++    parentSessionId: parent.sessionId,
++    parentReactionId: parent.reactionId,
++  })
++  const { store } = await getContextRuntimeServices(runtime)
++  const returned = Array.isArray(result) ? result : [result]
++  for (const event of returned) {
++    if (!event || typeof event !== "object" || typeof (event as ContextEvent).id !== "string") {
++      throw new Error("reaction_child_effect_required")
++    }
++    await store.appendReactionEffect(parent.reactionId, (event as ContextEvent).id)
++  }
++  return result
++}
+diff --git a/packages/reactor/src/agent.ts b/packages/reactor/src/agent.ts
+index fe88097..e7c35c7 100644
+--- a/packages/reactor/src/agent.ts
++++ b/packages/reactor/src/agent.ts
+@@ -1,6 +1,8 @@
+ import type { ModelMessage } from "ai"
+ import {
++  Part,
+   normalizePartsForPersistence,
++  type ContextEvent,
+   type ContextPartEnvelope,
+ } from "@ekairos/events"
+ 
+@@ -17,39 +19,87 @@ import {
+ import {
+   isAiEngine,
+   type AnyReactionEngine,
+-  type ReactionEngineActions,
+   type ReactionEngineInput,
+   type ReactionEngineResult,
++  type ReactionEngineStream,
+   type ReactionToolAction,
+ } from "./reactor.js"
+ 
+ const RESPOND = "respond"
+ 
++export type ReactionAgentEffectDraft = Readonly<{
++  id: string
++  type: "context.model" | "context.action"
++  payload: unknown
++  parts: readonly ContextPartEnvelope[]
++  metadata: Readonly<Record<string, unknown>>
++}>
++
++export type ReactionAgentEffectJournal = Readonly<{
++  id(key: string): string
++  record(draft: ReactionAgentEffectDraft): Promise<ContextEvent>
++}>
++
++export type ReactionAgentRunResult<TOutput> = Readonly<{
++  output: TOutput
++  event: ContextEvent<TOutput>
++  metadata?: Readonly<Record<string, unknown>>
++}>
++
+ export async function runReactionEngineAgent<TContext, TOutput>(input: {
+   engine: AnyReactionEngine<TContext>
+   request: ReactionEngineInput<TContext, TOutput>
+-}): Promise<ReactionEngineResult<TOutput>> {
++  effects: ReactionAgentEffectJournal
++}): Promise<ReactionAgentRunResult<TOutput>> {
+   if (!isAiEngine(input.engine)) {
+-    const result = await input.engine.agent(input.request)
+-    if (!result || typeof result !== "object" || !("output" in result)) {
+-      throw new Error("reaction_engine_result_required")
+-    }
+-    return Object.freeze({
+-      output: input.request.output
+-        ? input.request.output.parse(result.output)
+-        : result.output as TOutput,
+-      parts: Object.freeze(normalizePartsForPersistence([...(result.parts ?? [])])),
+-      ...(result.metadata ? { metadata: Object.freeze({ ...result.metadata }) } : {}),
+-    })
++    return await runCustomEngine(input.engine, input.request, input.effects)
+   }
++  return await runAiSdkAgent(input.engine, input.request, input.effects)
++}
+ 
+-  return await runAiSdkAgent(input.engine, input.request)
++async function runCustomEngine<TContext, TOutput>(
++  engine: Exclude<AnyReactionEngine<TContext>, { kind: "ekairos.ai" }>,
++  request: ReactionEngineInput<TContext, TOutput>,
++  effects: ReactionAgentEffectJournal,
++): Promise<ReactionAgentRunResult<TOutput>> {
++  const eventId = effects.id("model:0")
++  const stream = bindEventStream(request.stream, eventId)
++  await stream?.emit({
++    kind: "model.round.started",
++    round: 0,
++    data: streamEventData(request, "context.model"),
++  })
++  const result = await engine.agent({ ...request, ...(stream ? { stream } : {}) })
++  if (!result || typeof result !== "object" || !("output" in result)) {
++    throw new Error("reaction_engine_result_required")
++  }
++  const output = request.output
++    ? request.output.parse(result.output)
++    : result.output as TOutput
++  const parts = Object.freeze(normalizePartsForPersistence([...(result.parts ?? [])]))
++  await stream?.emit({ kind: "model.round.completed", round: 0 })
++  const event = await effects.record({
++    id: eventId,
++    type: "context.model",
++    payload: output,
++    parts,
++    metadata: Object.freeze({
++      round: 0,
++      ...(result.metadata ?? {}),
++    }),
++  })
++  return Object.freeze({
++    output,
++    event: event as ContextEvent<TOutput>,
++    ...(result.metadata ? { metadata: Object.freeze({ ...result.metadata }) } : {}),
++  })
+ }
+ 
+ async function runAiSdkAgent<TContext, TOutput>(
+   engine: Extract<AnyReactionEngine<TContext>, { kind: "ekairos.ai" }>,
+   request: ReactionEngineInput<TContext, TOutput>,
+-): Promise<ReactionEngineResult<TOutput>> {
++  effects: ReactionAgentEffectJournal,
++): Promise<ReactionAgentRunResult<TOutput>> {
+   const names = createActionNameMap(Object.keys(request.actions))
+   const wireActions: Record<string, ReactionToolAction> = {}
+   for (const [canonical, action] of Object.entries(request.actions)) {
+@@ -82,18 +132,25 @@ async function runAiSdkAgent<TContext, TOutput>(
+     hasOutput: Boolean(request.output),
+   })
+   let messages: ModelMessage[] = [...request.messages]
+-  const persistedParts: ContextPartEnvelope[] = []
+   const roundMetadata: unknown[] = []
+   let finalOutput: unknown
++  let terminalEvent: ContextEvent | undefined
+   let completed = false
+   let lastText = ""
+ 
+   for (let round = 0; round < maxRounds; round += 1) {
++    const modelEventId = effects.id(`model:${round}`)
++    const modelStream = bindEventStream(request.stream, modelEventId)
+     const toolChoice: ReactionToolChoice = request.output
+       ? round === maxRounds - 1
+         ? { type: "tool", toolName: RESPOND }
+         : "required"
+       : "auto"
++    await modelStream?.emit({
++      kind: "model.round.started",
++      round,
++      data: streamEventData(request, "context.model"),
++    })
+     const turn = await executeAiSdkAgentRound({
+       model: request.model ?? engine.model,
+       system,
+@@ -102,107 +159,238 @@ async function runAiSdkAgent<TContext, TOutput>(
+       toolChoice,
+       contextId: request.context.ref.id,
+       round,
+-      ...(request.stream ? { stream: request.stream } : {}),
++      ...(modelStream ? { stream: modelStream } : {}),
+     })
+     roundMetadata.push(turn.metadata)
+     lastText = turn.text || lastText
++
++    const respondCalls = turn.calls.filter(call => call.actionName === RESPOND)
++    const executableCalls = turn.calls.filter(call => call.actionName !== RESPOND)
++    if (respondCalls.length > 1 || (respondCalls.length > 0 && executableCalls.length > 0)) {
++      throw new Error("reaction_agent_respond_must_be_terminal")
++    }
++    if (respondCalls.length === 1 && request.output) {
++      finalOutput = request.output.parse(respondCalls[0]!.input)
++      completed = true
++    }
++
++    const canonicalCalls = turn.calls.map(call => ({
++      actionCallId: call.actionCallId,
++      actionName: call.actionName === RESPOND
++        ? RESPOND
++        : names.wireToCanonical.get(call.actionName) ?? call.actionName,
++      input: call.input,
++    }))
++    const modelPayload = completed
++      ? finalOutput
++      : turn.calls.length === 0
++        ? turn.text
++        : Object.freeze({
++            round,
++            text: turn.text,
++            actionCalls: Object.freeze(canonicalCalls),
++          })
++    const modelParts = turn.parts
++      .filter(part => part.type !== "action")
++      .map(part => canonicalizePart(part, names.wireToCanonical))
++    if (completed && finalOutput !== undefined) modelParts.push(Part.json(finalOutput))
++    await modelStream?.emit({ kind: "model.round.completed", round })
++    terminalEvent = await effects.record({
++      id: modelEventId,
++      type: "context.model",
++      payload: modelPayload,
++      parts: Object.freeze(normalizePartsForPersistence(modelParts)),
++      metadata: Object.freeze({
++        round,
++        calls: Object.freeze(canonicalCalls),
++        ...turn.metadata,
++      }),
++    })
++
+     let roundParts = [...turn.parts]
+-    for (const call of turn.calls) {
++    for (const [callIndex, call] of turn.calls.entries()) {
+       const canonicalName = call.actionName === RESPOND
+         ? RESPOND
+         : names.wireToCanonical.get(call.actionName) ?? call.actionName
+-      await request.stream?.emit({
++      if (call.actionName === RESPOND && request.output) {
++        roundParts = applyActionResult(roundParts, call, {
++          ok: true,
++          output: finalOutput,
++        })
++        continue
++      }
++
++      const actionEventId = effects.id(`action:${round}:${callIndex}`)
++      const actionStream = bindEventStream(request.stream, actionEventId)
++      await actionStream?.emit({
+         kind: "action.started",
+         round,
+         actionCallId: call.actionCallId,
+         actionName: canonicalName,
+         input: call.input,
++        data: streamEventData(request, "context.action"),
+       })
+-      if (call.actionName === RESPOND && request.output) {
+-        finalOutput = call.input
+-        completed = true
+-        roundParts = applyActionResult(roundParts, call, {
+-          ok: true,
+-          output: call.input,
+-        })
+-        await request.stream?.emit({
+-          kind: "action.completed",
+-          round,
++      const started: ContextPartEnvelope = {
++        type: "action",
++        content: {
++          status: "started",
++          actionName: canonicalName,
+           actionCallId: call.actionCallId,
+-          actionName: RESPOND,
+-          output: call.input,
+-        })
+-        continue
++          input: call.input,
++        },
+       }
+-
+       const canonical = names.wireToCanonical.get(call.actionName)
+       const action = canonical ? request.actions[canonical] : undefined
+       if (!canonical || !action) {
+-        roundParts = applyActionResult(roundParts, call, {
+-          ok: false,
+-          error: `Unknown action: ${call.actionName}`,
+-        })
+-        await request.stream?.emit({
++        const message = `Unknown action: ${call.actionName}`
++        roundParts = applyActionResult(roundParts, call, { ok: false, error: message })
++        await actionStream?.emit({
+           kind: "action.failed",
+           round,
+           actionCallId: call.actionCallId,
+           actionName: canonicalName,
+-          error: { message: `Unknown action: ${call.actionName}` },
++          error: { message },
++        })
++        await effects.record({
++          id: actionEventId,
++          type: "context.action",
++          payload: { error: message },
++          parts: Object.freeze(normalizePartsForPersistence([
++            started,
++            failedActionPart(canonicalName, call.actionCallId, message),
++          ])),
++          metadata: Object.freeze({ round, actionCallId: call.actionCallId }),
+         })
+         continue
+       }
++
+       try {
+-        const output = await action.execute(call.input)
++        const output = await action.execute(call.input, Object.freeze({
++          source: "reaction" as const,
++          actionId: canonical,
++          contextId: request.context.ref.id,
++          sessionId: request.sessionId,
++          reactionId: request.reactionId,
++          triggerEventId: request.trigger.id,
++          actionCallId: call.actionCallId,
++          reactionDefinitionKey: request.reactionKey,
++        }))
+         roundParts = applyActionResult(roundParts, call, { ok: true, output })
+-        await request.stream?.emit({
++        await actionStream?.emit({
+           kind: "action.completed",
+           round,
+           actionCallId: call.actionCallId,
+           actionName: canonical,
+           output,
+         })
++        await effects.record({
++          id: actionEventId,
++          type: "context.action",
++          payload: output,
++          parts: Object.freeze(normalizePartsForPersistence([
++            started,
++            completedActionPart(canonical, call.actionCallId, output),
++          ])),
++          metadata: Object.freeze({ round, actionCallId: call.actionCallId }),
++        })
+       } catch (error) {
+         const message = error instanceof Error ? error.message : String(error)
+-        roundParts = applyActionResult(roundParts, call, {
+-          ok: false,
+-          error: message,
+-        })
+-        await request.stream?.emit({
++        roundParts = applyActionResult(roundParts, call, { ok: false, error: message })
++        await actionStream?.emit({
+           kind: "action.failed",
+           round,
+           actionCallId: call.actionCallId,
+           actionName: canonical,
+           error: { message },
+         })
++        await effects.record({
++          id: actionEventId,
++          type: "context.action",
++          payload: { error: message },
++          parts: Object.freeze(normalizePartsForPersistence([
++            started,
++            failedActionPart(canonical, call.actionCallId, message),
++          ])),
++          metadata: Object.freeze({ round, actionCallId: call.actionCallId }),
++        })
+       }
+     }
+ 
+-    const canonicalParts = roundParts.map(part => canonicalizePart(part, names.wireToCanonical))
+-    persistedParts.push(...canonicalParts)
+     messages = [
+       ...messages,
+-      ...actionPartsToModelMessages(roundParts, name => name),
++      ...actionPartsToModelMessages(
++        normalizePartsForPersistence(roundParts),
++        name => name,
++      ),
+       ...(turn.calls.length === 0 && turn.text
+         ? [{ role: "assistant", content: [{ type: "text", text: turn.text }] } as ModelMessage]
+         : []),
+     ]
+-
+     if (completed || turn.calls.length === 0) break
+   }
+ 
+   if (request.output && !completed) {
+     throw new Error(`reaction_agent_output_not_delivered:${maxRounds}`)
+   }
++  if (!terminalEvent) throw new Error("reaction_agent_terminal_event_required")
+   const output = request.output
+     ? request.output.parse(finalOutput)
+     : lastText as TOutput
+   return Object.freeze({
+     output,
+-    parts: Object.freeze(persistedParts),
++    event: terminalEvent as ContextEvent<TOutput>,
+     metadata: Object.freeze({ rounds: Object.freeze(roundMetadata) }),
+   })
+ }
+ 
++function bindEventStream(
++  stream: ReactionEngineStream | undefined,
++  eventId: string,
++): ReactionEngineStream | undefined {
++  if (!stream) return undefined
++  return Object.freeze({
++    ...stream,
++    emit: emission => stream.emit({ ...emission, eventId }),
++  })
++}
++
++function streamEventData<TContext>(
++  request: ReactionEngineInput<TContext, unknown>,
++  eventType: string,
++) {
++  return {
++    eventType,
++    ...(request.trigger.channel ? { channel: request.trigger.channel } : {}),
++  }
++}
++
++function completedActionPart(
++  actionName: string,
++  actionCallId: string,
++  output: unknown,
++): ContextPartEnvelope {
++  return {
++    type: "action",
++    content: { status: "completed", actionName, actionCallId, output },
++  }
++}
++
++function failedActionPart(
++  actionName: string,
++  actionCallId: string,
++  message: string,
++): ContextPartEnvelope {
++  return {
++    type: "action",
++    content: {
++      status: "failed",
++      actionName,
++      actionCallId,
++      error: { message },
++    },
++  }
++}
++
+ function canonicalizePart(
+   part: ContextPartEnvelope,
+   names: ReadonlyMap<string, string>,
+diff --git a/packages/reactor/src/context.action-calls.ts b/packages/reactor/src/context.action-calls.ts
+index 418cd83..0fc249d 100644
+--- a/packages/reactor/src/context.action-calls.ts
++++ b/packages/reactor/src/context.action-calls.ts
+@@ -18,7 +18,7 @@ export function applyActionResult(
+ ) {
+   return normalizePartsForPersistence([
+     ...parts,
+-    result.ok
++    result.ok === true
+       ? {
+           type: "action",
+           content: {
+@@ -34,9 +34,8 @@ export function applyActionResult(
+             status: "failed",
+             actionName: call.actionName,
+             actionCallId: call.actionCallId,
+-            error: { message: result.error },
++            error: { message: (result as Readonly<{ ok: false; error: string }>).error },
+           },
+         },
+   ])
+ }
+-
+diff --git a/packages/reactor/src/index.ts b/packages/reactor/src/index.ts
+index fb55da1..934e711 100644
+--- a/packages/reactor/src/index.ts
++++ b/packages/reactor/src/index.ts
+@@ -1,3 +1,7 @@
++export {
++  emitActionEffect,
++  reactFromAction,
++} from "./action-execution.js"
+ export {
+   defineReaction,
+   runReactionWorkflow,
+diff --git a/packages/reactor/src/reaction-causality.ts b/packages/reactor/src/reaction-causality.ts
+index 5583aee..e3160fe 100644
+--- a/packages/reactor/src/reaction-causality.ts
++++ b/packages/reactor/src/reaction-causality.ts
+@@ -22,6 +22,12 @@ export async function resolveCausalEvents(input: Readonly<{
+       const producer = await input.getReaction(producerId)
+       if (!producer) throw new Error(`reaction_given_producer_not_found:${producerId}`)
+       for (const causeId of producer.causeIds) await visit(causeId)
++      const effectIndex = producer.effectIds.indexOf(eventId)
++      if (effectIndex >= 0) {
++        for (const precedingId of producer.effectIds.slice(0, effectIndex)) {
++          await visit(precedingId)
++        }
++      }
+     }
+     visiting.delete(eventId)
+     visited.add(eventId)
+diff --git a/packages/reactor/src/reaction-view.ts b/packages/reactor/src/reaction-view.ts
+index 10e84ce..0a53d34 100644
+--- a/packages/reactor/src/reaction-view.ts
++++ b/packages/reactor/src/reaction-view.ts
+@@ -48,7 +48,10 @@ export async function eventToModelMessages(
+   runtime: ContextRuntimeServiceHandle,
+   event: ContextEvent,
+ ): Promise<ModelMessage[]> {
+-  const role = event.type === "context.agent" ? "assistant" : "user"
++  if (event.type === "context.action") {
++    return actionPartsToModelMessages(event.eventParts)
++  }
++  const role = event.type === "context.model" ? "assistant" : "user"
+   const content: any[] = [{ type: "text", text: renderEvent(event) }]
+   appendMessageParts(content, event.eventParts)
+   await appendLinkedFiles(runtime, content, event)
+diff --git a/packages/reactor/src/reaction.operation.ts b/packages/reactor/src/reaction.operation.ts
+index a3b4fd9..4e720da 100644
+--- a/packages/reactor/src/reaction.operation.ts
++++ b/packages/reactor/src/reaction.operation.ts
+@@ -16,6 +16,7 @@ import {
+   type ContextPartEnvelope,
+   type ContextRuntimeServiceHandle,
+   type DomainEventDraftLike,
++  uuidV5,
+ } from "@ekairos/events"
+ import { Sandbox } from "@ekairos/sandbox/sandbox"
+ import { z } from "zod"
+@@ -58,6 +59,7 @@ import type {
+ } from "./dataset-adapter.js"
+ 
+ type AnyDomainAction = DomainActionRegistration<any, any, any, any>
++const AGENT_EFFECT_EVENT_NAMESPACE = "d86ced13-b64c-449c-a4c0-c41bd1241068"
+ 
+ export type ReactionOperationActionRef = Readonly<{
+   id: string
+@@ -163,7 +165,7 @@ export async function executeReactionOperation(
+   const { store } = await getContextRuntimeServices(request.runtime)
+   const existingReaction = await store.getReaction(request.reactionId)
+   if (existingReaction?.status === "completed") {
+-    const effectId = existingReaction.effectIds[0]
++    const effectId = existingReaction.effectIds[existingReaction.effectIds.length - 1]
+     const event = effectId ? await store.getEvent(effectId) : null
+     if (!event) throw new Error(`reaction_operation_effect_not_found:${request.reactionId}`)
+     return Object.freeze({ event })
+@@ -191,18 +193,24 @@ export async function executeReactionOperation(
+       stream = await openReactionStream({
+         runtime: request.runtime,
+         reactionId: request.reactionId,
+-        eventId: request.eventId,
+-        eventType: "context.agent",
+-        ...(request.trigger.channel ? { channel: request.trigger.channel } : {}),
+       })
+     }
+     const event = await runOperation(request, stream)
+     await stream?.complete()
+-    await store.completeReaction(request.reactionId, "completed", [event.id])
++    await store.appendReactionEffect(request.reactionId, event.id)
++    const current = await store.getReaction(request.reactionId)
++    const effectIds = current?.effectIds ?? [event.id]
++    await store.completeReaction(request.reactionId, "completed", effectIds)
+     return Object.freeze({ event })
+   } catch (error) {
+     await stream?.fail(error).catch(() => undefined)
+-    await store.completeReaction(request.reactionId, "failed", [], error).catch(() => undefined)
++    const current = await store.getReaction(request.reactionId).catch(() => null)
++    await store.completeReaction(
++      request.reactionId,
++      "failed",
++      current?.effectIds ?? [],
++      error,
++    ).catch(() => undefined)
+     throw error
+   }
+ }
+@@ -228,7 +236,7 @@ async function runOperation(
+     const output = operation.outputSchema
+       ? schemaFromJson(operation.outputSchema, "reaction_agent_output")
+       : undefined
+-    const actions = resolveEngineActions(request.runtime, operation.actions)
++    const actions = resolveEngineActions(request, operation.actions)
+     const sandbox = await openSandbox(request)
+     const workspace = sandbox ? await prepareReactionWorkspace(request, sandbox) : undefined
+     if (operation.path && !workspace) throw new Error("reaction_agent_path_requires_sandbox")
+@@ -272,14 +280,31 @@ async function runOperation(
+             }
+           : {}),
+       },
++      effects: {
++        id: key => uuidV5(`${request.eventId}:${key}`, AGENT_EFFECT_EVENT_NAMESPACE),
++        async record(draft) {
++          const event = await Events(request.runtime).create({
++            id: draft.id,
++            type: draft.type,
++            payload: draft.payload,
++            contextId: request.context.ref.id,
++            metadata: {
++              ...operationMetadata(request),
++              instruction: operation.instruction,
++              ...draft.metadata,
++              ...(stream
++                ? { streamId: stream.streamId, streamClientId: stream.clientId }
++                : {}),
++            },
++            parts: draft.parts,
++          })
++          const { store } = await getContextRuntimeServices(request.runtime)
++          await store.appendReactionEffect(request.reactionId, event.id)
++          return event
++        },
++      },
+     })
+-    return await createOperationEvent(request, result.output, result.parts ?? [], {
+-      ...(result.metadata ?? {}),
+-      instruction: operation.instruction,
+-      ...(stream
+-        ? { streamId: stream.streamId, streamClientId: stream.clientId }
+-        : {}),
+-    })
++    return result.event
+   }
+ 
+   if (operation.kind === "action") {
+@@ -304,6 +329,18 @@ async function runOperation(
+         request.runtime as any,
+         action,
+         prepared,
++        {
++          execution: {
++            source: "reaction",
++            actionId: operation.action.id,
++            contextId: request.context.ref.id,
++            sessionId: request.sessionId,
++            reactionId: request.reactionId,
++            triggerEventId: request.trigger.id,
++            actionCallId: callId,
++            reactionDefinitionKey: request.definition,
++          },
++        },
+       )
+       const parsed = action.output.parse(executed.output)
+       return await createOperationEvent(request, parsed, [
+@@ -464,19 +501,28 @@ function resolveAction(
+ }
+ 
+ function resolveEngineActions(
+-  runtime: ReactionOperationRequest["runtime"],
++  request: ReactionOperationRequest,
+   refs: readonly ReactionOperationActionRef[],
+ ) {
+   return Object.freeze(Object.fromEntries(refs.map(ref => {
+-    const action = resolveAction(runtime, ref)
++    const action = resolveAction(request.runtime, ref)
+     const binding = getDomainActionBinding(action)!
+     const tool: ReactionToolAction = Object.freeze({
+       description: action.description,
+       input: action.input,
+       output: action.output,
+-      async execute(input: unknown) {
+-        const prepared = await prepareDomainActionExecution(runtime as any, action, input as any)
+-        return (await executeDomainAction(runtime as any, action, prepared)).output
++      async execute(input: unknown, execution) {
++        const prepared = await prepareDomainActionExecution(
++          request.runtime as any,
++          action,
++          input as any,
++        )
++        return (await executeDomainAction(
++          request.runtime as any,
++          action,
++          prepared,
++          { execution },
++        )).output
+       },
+     })
+     return [binding.id, tool]
+diff --git a/packages/reactor/src/reaction.stream.ts b/packages/reactor/src/reaction.stream.ts
+index 3054362..8781fc6 100644
+--- a/packages/reactor/src/reaction.stream.ts
++++ b/packages/reactor/src/reaction.stream.ts
+@@ -43,9 +43,6 @@ export type ReactionStreamController = ReactionEngineStream & Readonly<{
+ export async function openReactionStream(input: {
+   runtime: ContextRuntimeServiceHandle
+   reactionId: string
+-  eventId: string
+-  eventType: string
+-  channel?: string
+ }): Promise<ReactionStreamController> {
+   const { db, store } = await getContextRuntimeServices(input.runtime)
+   const streams = db?.streams
+@@ -75,7 +72,6 @@ export async function openReactionStream(input: {
+     const full: ReactionStreamChunkInput = {
+       ...emission,
+       reactionId: input.reactionId,
+-      eventId: input.eventId,
+       sequence,
+       ...(emission.input === undefined ? {} : { input: sanitize(emission.input) }),
+       ...(emission.output === undefined ? {} : { output: sanitize(emission.output) }),
+@@ -110,7 +106,6 @@ export async function openReactionStream(input: {
+ 
+   const controller: ReactionStreamController = Object.freeze({
+     reactionId: input.reactionId,
+-    eventId: input.eventId,
+     streamId,
+     clientId,
+     emit,
+@@ -119,10 +114,6 @@ export async function openReactionStream(input: {
+   })
+   await controller.emit({
+     kind: "reaction.started",
+-    data: {
+-      eventType: input.eventType,
+-      ...(input.channel ? { channel: input.channel } : {}),
+-    },
+   })
+   return controller
+ }
+diff --git a/packages/reactor/src/reaction.ts b/packages/reactor/src/reaction.ts
+index af5a486..acf90ef 100644
+--- a/packages/reactor/src/reaction.ts
++++ b/packages/reactor/src/reaction.ts
+@@ -214,6 +214,7 @@ export type ReactionDefinition<
+ export type ReactOptions = Readonly<{
+   workflow?: ReactionWorkflow
+   parentSessionId?: string
++  parentReactionId?: string
+ }>
+ 
+ export function defineReaction<
+@@ -385,7 +386,7 @@ class ActiveReaction<
+         childContext,
+         trigger,
+         definition,
+-        { parentSessionId: this.id },
++        { parentSessionId: this.id, parentReactionId: boundaryId },
+       )
+       await completeChildBoundary(
+         this.input.runtime,
+@@ -482,6 +483,7 @@ export async function executeReaction<
+     definition: definition.key,
+     sandboxId,
+     parentSessionId: options.parentSessionId,
++    parentReactionId: options.parentReactionId,
+   })
+ 
+   if (!options.workflow) {
+@@ -503,6 +505,7 @@ export async function executeReaction<
+     rootReactionId: prepared.rootReactionId,
+     ...(prepared.sandboxId === false ? {} : { sandboxId: prepared.sandboxId }),
+     ...(options.parentSessionId ? { parentSessionId: options.parentSessionId } : {}),
++    ...(options.parentReactionId ? { parentReactionId: options.parentReactionId } : {}),
+     ...(pendingHook ? { returnHookToken: pendingHook.token } : {}),
+   })
+   let runId = ""
+@@ -600,6 +603,7 @@ async function prepareSession(input: {
+   definition: string
+   sandboxId: string | false
+   parentSessionId?: string
++  parentReactionId?: string
+ }): Promise<PreparedSession> {
+   "use step"
+   const { store } = await getContextRuntimeServices(input.runtime)
+@@ -616,6 +620,7 @@ async function prepareSession(input: {
+     definition: input.definition,
+     triggerId: trigger.id,
+     ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
++    ...(input.parentReactionId ? { parentReactionId: input.parentReactionId } : {}),
+     ...(input.sandboxId === false ? {} : { sandboxId: input.sandboxId }),
+   })
+   return Object.freeze({
+diff --git a/packages/reactor/src/reactor.durable.ts b/packages/reactor/src/reactor.durable.ts
+index 6ab3009..3df8737 100644
+--- a/packages/reactor/src/reactor.durable.ts
++++ b/packages/reactor/src/reactor.durable.ts
+@@ -22,6 +22,7 @@ export type ReactionWorkflowPayload = Readonly<{
+   rootReactionId: string
+   sandboxId?: string
+   parentSessionId?: string
++  parentReactionId?: string
+   returnHookToken?: string
+ }>
+ 
+@@ -83,9 +84,10 @@ export function serializeReactionError(error: unknown) {
+ }
+ 
+ export function unwrapReactionReturnHook(payload: ReactionReturnHookPayload) {
+-  if (payload.ok) return payload.completion
+-  const error = new Error(payload.error.message)
+-  error.name = payload.error.name ?? "Error"
+-  if (payload.error.stack) error.stack = payload.error.stack
++  if (payload.ok === true) return payload.completion
++  const failure = payload as Extract<ReactionReturnHookPayload, { ok: false }>
++  const error = new Error(failure.error.message)
++  error.name = failure.error.name ?? "Error"
++  if (failure.error.stack) error.stack = failure.error.stack
+   throw error
+ }
+diff --git a/packages/reactor/src/reactor.ts b/packages/reactor/src/reactor.ts
+index 804ccf9..975dbc4 100644
+--- a/packages/reactor/src/reactor.ts
++++ b/packages/reactor/src/reactor.ts
+@@ -1,5 +1,9 @@
+ import type { LanguageModel, ModelMessage } from "ai"
+-import type { DomainEventConstructor, DomainEventLinkDefinition } from "@ekairos/domain"
++import type {
++  DomainActionReactionExecution,
++  DomainEventConstructor,
++  DomainEventLinkDefinition,
++} from "@ekairos/domain"
+ import type {
+   ContextEvent,
+   ContextPartEnvelope,
+@@ -19,18 +23,17 @@ export type ReactionToolAction = Readonly<{
+   description?: string
+   input: z.ZodType
+   output: z.ZodType
+-  execute(input: unknown): Promise<unknown>
++  execute(input: unknown, execution: DomainActionReactionExecution): Promise<unknown>
+ }>
+ export type ReactionEngineActions = Readonly<Record<string, ReactionToolAction>>
+ 
+ export type ReactionEngineStreamEmission = Omit<
+   ReactionStreamChunkInput,
+-  "reactionId" | "eventId" | "sequence"
++  "reactionId" | "sequence"
+ >
+ 
+ export type ReactionEngineStream = Readonly<{
+   reactionId: string
+-  eventId: string
+   streamId: string
+   clientId: string
+   emit(input: ReactionEngineStreamEmission): Promise<ReactionStreamChunk>
+diff --git a/packages/reactor/src/tests/action-execution.test.ts b/packages/reactor/src/tests/action-execution.test.ts
+new file mode 100644
+index 0000000..2a5ca9e
+--- /dev/null
++++ b/packages/reactor/src/tests/action-execution.test.ts
+@@ -0,0 +1,26 @@
++import { describe, expect, it } from "vitest"
++
++import {
++  emitActionEffect,
++  reactFromAction,
++} from "../action-execution.js"
++
++describe("Reaction-aware domain action execution", () => {
++  const runtimeExecution = {
++    source: "runtime" as const,
++    actionId: "catalog.record",
++  }
++
++  it("rejects nested effects when the action was not called by a Reaction", async () => {
++    await expect(emitActionEffect({} as any, runtimeExecution, {
++      key: "requested",
++      draft: {} as any,
++    })).rejects.toThrow("reaction_action_execution_required:catalog.record")
++    await expect(reactFromAction(
++      {} as any,
++      runtimeExecution,
++      {} as any,
++      {} as any,
++    )).rejects.toThrow("reaction_action_execution_required:catalog.record")
++  })
++})
+diff --git a/packages/reactor/src/tests/agent.effects.test.ts b/packages/reactor/src/tests/agent.effects.test.ts
+new file mode 100644
+index 0000000..5400410
+--- /dev/null
++++ b/packages/reactor/src/tests/agent.effects.test.ts
+@@ -0,0 +1,127 @@
++/* @vitest-environment node */
++
++import { Part, type ContextEvent } from "@ekairos/events"
++import { beforeEach, describe, expect, it, vi } from "vitest"
++import { z } from "zod"
++
++const rounds = vi.hoisted(() => ({ value: 0 }))
++
++vi.mock("../reactors/ai-sdk.agent.js", () => ({
++  executeAiSdkAgentRound: vi.fn(async (input: any) => {
++    const round = rounds.value++
++    if (round === 0) {
++      const actionName = Object.keys(input.actions).find(name => name !== "respond")!
++      return {
++        text: "",
++        calls: [{ actionCallId: "call-1", actionName, input: { sku: "A-1" } }],
++        parts: [{
++          type: "action",
++          content: {
++            status: "started",
++            actionName,
++            actionCallId: "call-1",
++            input: { sku: "A-1" },
++          },
++        }],
++        metadata: { round },
++      }
++    }
++    return {
++      text: "Found A-1.",
++      calls: [],
++      parts: [Part.message("Found A-1.")],
++      metadata: { round },
++    }
++  }),
++}))
++
++import {
++  runReactionEngineAgent,
++  type ReactionAgentEffectDraft,
++} from "../agent.js"
++
++describe("agent Reaction effects", () => {
++  beforeEach(() => { rounds.value = 0 })
++
++  it("records every model call and action execution as ordered Events", async () => {
++    const drafts: ReactionAgentEffectDraft[] = []
++    const executions: unknown[] = []
++    const result = await runReactionEngineAgent({
++      engine: { kind: "ekairos.ai", model: "test/model" },
++      request: {
++        reactionKey: "catalog.answer",
++        runtime: {} as any,
++        context: { ref: { id: "context-1", key: null }, content: {} },
++        trigger: {
++          id: "trigger-1",
++          type: "catalog.requested",
++          createdAt: new Date(),
++          payload: {},
++          links: {},
++          physicalLinks: {},
++          metadata: {},
++          eventParts: [],
++        },
++        sessionId: "session-1",
++        reactionId: "reaction-1",
++        given: [],
++        messages: [],
++        instruction: "Find the SKU and answer.",
++        actions: {
++          "catalog.find": {
++            input: z.object({ sku: z.string() }),
++            output: z.object({ found: z.boolean() }),
++            async execute(_input, execution) {
++              executions.push(execution)
++              return { found: true }
++            },
++          },
++        },
++      },
++      effects: {
++        id: key => `event:${key}`,
++        async record(draft) {
++          drafts.push(draft)
++          return {
++            id: draft.id,
++            type: draft.type,
++            createdAt: new Date(),
++            payload: draft.payload,
++            links: {},
++            physicalLinks: {},
++            metadata: draft.metadata,
++            eventParts: draft.parts.map((part, index) => ({
++              id: `${draft.id}:${index}`,
++              key: `${draft.id}:${index}`,
++              index,
++              type: part.type,
++              content: part.content,
++              createdAt: new Date(),
++            })),
++          } satisfies ContextEvent
++        },
++      },
++    })
++
++    expect(drafts.map(draft => draft.type)).toEqual([
++      "context.model",
++      "context.action",
++      "context.model",
++    ])
++    expect(drafts.map(draft => draft.id)).toEqual([
++      "event:model:0",
++      "event:action:0:0",
++      "event:model:1",
++    ])
++    expect(executions).toEqual([expect.objectContaining({
++      contextId: "context-1",
++      sessionId: "session-1",
++      reactionId: "reaction-1",
++      triggerEventId: "trigger-1",
++      actionCallId: "call-1",
++      reactionDefinitionKey: "catalog.answer",
++    })])
++    expect(result.event.id).toBe("event:model:1")
++    expect(result.output).toBe("Found A-1.")
++  })
++})
+diff --git a/packages/reactor/src/tests/public-surface.test.ts b/packages/reactor/src/tests/public-surface.test.ts
+index 3d06e9e..71ac846 100644
+--- a/packages/reactor/src/tests/public-surface.test.ts
++++ b/packages/reactor/src/tests/public-surface.test.ts
+@@ -9,10 +9,11 @@ describe("@ekairos/reactor public surface", () => {
+     expect(Object.keys(root).sort()).toEqual([
+       "ai",
+       "defineReaction",
++      "emitActionEffect",
+       "isAiEngine",
++      "reactFromAction",
+       "runReactionWorkflow",
+     ])
+-
+   })
+ 
+   it("keeps internal as a narrow cross-package bridge", () => {
+diff --git a/packages/reactor/src/tests/reaction-causality.test.ts b/packages/reactor/src/tests/reaction-causality.test.ts
+index 91e6699..1f85646 100644
+--- a/packages/reactor/src/tests/reaction-causality.test.ts
++++ b/packages/reactor/src/tests/reaction-causality.test.ts
+@@ -16,7 +16,11 @@ function event(id: string, producer?: string): ContextEvent {
+   }
+ }
+ 
+-function reaction(id: string, causeIds: string[]): ContextReaction {
++function reaction(
++  id: string,
++  causeIds: string[],
++  effectIds: string[] = [],
++): ContextReaction {
+   return {
+     id,
+     sessionId: "session",
+@@ -25,7 +29,7 @@ function reaction(id: string, causeIds: string[]): ContextReaction {
+     position: 1,
+     depth: 1,
+     causeIds,
+-    effectIds: [],
++    effectIds,
+     createdAt: new Date("2026-07-17T12:00:00.000Z"),
+   }
+ }
+@@ -59,6 +63,28 @@ describe("Reaction causal input", () => {
+       .toEqual(["trigger", "repository", "attachments", "findings"])
+   })
+ 
++  it("includes only preceding effects from the same multi-effect Reaction", async () => {
++    const orderedEvents = new Map([
++      ["trigger", event("trigger")],
++      ["model-0", event("model-0", "agent")],
++      ["action-0", event("action-0", "agent")],
++      ["model-1", event("model-1", "agent")],
++    ])
++    const orderedReactions = new Map([
++      ["agent", reaction("agent", ["trigger"], ["model-0", "action-0", "model-1"])],
++    ])
++    const resolveOrdered = (sourceIds: readonly string[]) => resolveCausalEvents({
++      sourceIds,
++      getEvent: async id => orderedEvents.get(id) ?? null,
++      getReaction: async id => orderedReactions.get(id) ?? null,
++    })
++
++    expect((await resolveOrdered(["action-0"])).map(row => row.id))
++      .toEqual(["trigger", "model-0", "action-0"])
++    expect((await resolveOrdered(["model-1"])).map(row => row.id))
++      .toEqual(["trigger", "model-0", "action-0", "model-1"])
++  })
++
+   it("fails when graph metadata references a missing producer", async () => {
+     const broken = new Map(events).set("broken", event("broken", "missing"))
+     await expect(resolveCausalEvents({
+diff --git a/packages/reactor/src/tests/reaction.events.instant.test.ts b/packages/reactor/src/tests/reaction.events.instant.test.ts
+index 98c1d6f..2f36673 100644
+--- a/packages/reactor/src/tests/reaction.events.instant.test.ts
++++ b/packages/reactor/src/tests/reaction.events.instant.test.ts
+@@ -108,8 +108,12 @@ class GraphEngine implements ReactionEngine<Record<string, unknown>> {
+     } else if (input.instruction === "risks") {
+       output = { risk: "low" }
+     } else {
++      const itemFacts = selected.find(value =>
++        typeof value === "object" && value !== null && "itemCount" in value)
++      const riskFacts = selected.find(value =>
++        typeof value === "object" && value !== null && "risk" in value)
+       output = {
+-        decision: `${(selected[0] as any).itemCount}:${(selected[1] as any).risk}`,
++        decision: `${(itemFacts as any).itemCount}:${(riskFacts as any).risk}`,
+       }
+     }
+     await input.stream?.emit({
+@@ -211,6 +215,22 @@ describe("Reaction Event graph", () => {
+       accepted: true,
+       datasetCount: 2,
+     })
++    const decisionCall = engine.calls.find(call => call.instruction === "decide")
++    expect(decisionCall?.given.map(event => event.payload)).toEqual([
++      { message: "quote this" },
++      { normalized: "QUOTE THIS" },
++      { itemCount: 2 },
++      { risk: "low" },
++      {
++        datasetId: expect.any(String),
++        mode: "built",
++        preview: [
++          { sku: "A-1", quantity: 2 },
++          { sku: "B-2", quantity: 1 },
++        ],
++        count: 2,
++      },
++    ])
+     expect(runtime.datasetCalls).toHaveLength(1)
+     expect(runtime.datasetCalls[0].sessionId).toBeTruthy()
+     expect(runtime.datasetCalls[0].reactionId).toBeTruthy()
+@@ -257,9 +277,13 @@ describe("Reaction Event graph", () => {
+     })
+     expect(trace.map(chunk => chunk.kind)).toEqual([
+       "reaction.started",
++      "model.round.started",
+       "text.delta",
++      "model.round.completed",
+       "reaction.completed",
+     ])
++    expect(streamedReactions.every((row: any) =>
++      row.effects.every((event: any) => event.type === "context.model"))).toBe(true)
+ 
+     const byType = new Map(session.reactions.map((row: any) => [row.type, row]))
+     expect([...byType.keys()]).toEqual(expect.arrayContaining([
+

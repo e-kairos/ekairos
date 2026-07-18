@@ -1,0 +1,1464 @@
+diff --git a/packages/events/src/react.stream-selection.ts b/packages/events/src/react.stream-selection.ts
+new file mode 100644
+index 0000000..b5aa667
+--- /dev/null
++++ b/packages/events/src/react.stream-selection.ts
+@@ -0,0 +1,11 @@
++import type { ContextReactionForUI } from "./react.types.js"
++
++export function selectReactionsForStreaming(
++  reactions: readonly ContextReactionForUI[],
++  reactionIds: readonly string[] | undefined,
++): readonly ContextReactionForUI[] {
++  if (reactionIds === undefined) return reactions
++  const selected = new Set(reactionIds)
++  return reactions.filter(reaction =>
++    reaction.status === "running" || selected.has(reaction.id))
++}
+diff --git a/packages/events/src/react.types.ts b/packages/events/src/react.types.ts
+index 9902b9c..bd5f32b 100644
+--- a/packages/events/src/react.types.ts
++++ b/packages/events/src/react.types.ts
+@@ -55,6 +55,8 @@ export type ContextReactionForUI = {
+   id: string
+   type: string
+   status: "running" | "completed" | "failed"
++  createdAt: string | Date
++  updatedAt?: string | Date
+   position: number
+   depth: number
+   causeIds: string[]
+@@ -139,5 +141,6 @@ export type UseContextOptions = {
+     reasoningLevel?: ReasoningLevel
+     contextId?: string
+   }) => Promise<Record<string, unknown>> | Record<string, unknown>
++  streamReactionIds?: readonly string[]
+   state?: UseContextStateHook
+ }
+diff --git a/packages/events/src/react.use-context.ts b/packages/events/src/react.use-context.ts
+index 206f26d..e5d866b 100644
+--- a/packages/events/src/react.use-context.ts
++++ b/packages/events/src/react.use-context.ts
+@@ -21,6 +21,7 @@ import type {
+   UseContextOptions,
+   UseContextStateHook,
+ } from "./react.types.js"
++import { selectReactionsForStreaming } from "./react.stream-selection.js"
+ import { INPUT_TEXT_ITEM_TYPE } from "./react.types.js"
+ 
+ type EphemeralEvent = ContextEventForUI & { __contextId: string | null }
+@@ -120,6 +121,8 @@ function normalizeReaction(value: unknown): ContextReactionForUI | null {
+     id: String(row.id),
+     type: String(row.type),
+     status: row.status,
++    createdAt: row.createdAt,
++    ...(row.updatedAt ? { updatedAt: row.updatedAt } : {}),
+     position: Number(row.position),
+     depth: Number(row.depth),
+     causeIds: Array.isArray(row.causeIds) ? row.causeIds.map(String) : causes.map(event => event.id),
+@@ -531,6 +534,7 @@ export function useContext(db: any, options: UseContextOptions): ContextValue {
+     onContextUpdate,
+     prepareAppendArgs,
+     prepareRequestBody,
++    streamReactionIds,
+     state: useStateImpl = useDefaultState,
+   } = options
+   const [contextId, setContextId] = useState<string | null>(initialContextId ?? null)
+@@ -549,7 +553,11 @@ export function useContext(db: any, options: UseContextOptions): ContextValue {
+     () => flattenSessionReactions(normalized.sessions),
+     [normalized.sessions],
+   )
+-  const streamRuntime = useReactionStreamRuntime(db, allReactions)
++  const streamedReactions = useMemo(
++    () => selectReactionsForStreaming(allReactions, streamReactionIds),
++    [allReactions, streamReactionIds],
++  )
++  const streamRuntime = useReactionStreamRuntime(db, streamedReactions)
+   const durableEventIds = useMemo(
+     () => new Set(normalized.events.map(event => event.id)),
+     [normalized.events],
+diff --git a/packages/events/src/tests/react.stream-selection.test.ts b/packages/events/src/tests/react.stream-selection.test.ts
+new file mode 100644
+index 0000000..b9dc3e8
+--- /dev/null
++++ b/packages/events/src/tests/react.stream-selection.test.ts
+@@ -0,0 +1,29 @@
++import { describe, expect, it } from "vitest"
++
++import { selectReactionsForStreaming } from "../react.stream-selection.js"
++
++function reaction(id: string, status: "running" | "completed" | "failed") {
++  return { id, status } as any
++}
++
++describe("React Context stream selection", () => {
++  const reactions = [
++    reaction("running", "running"),
++    reaction("selected", "completed"),
++    reaction("historical", "completed"),
++  ]
++
++  it("preserves eager replay when no selection policy is supplied", () => {
++    expect(selectReactionsForStreaming(reactions, undefined)).toBe(reactions)
++  })
++
++  it("always streams running Reactions and only selected history", () => {
++    expect(selectReactionsForStreaming(reactions, ["selected"]).map(row => row.id))
++      .toEqual(["running", "selected"])
++  })
++
++  it("can disable historical replay while retaining live streams", () => {
++    expect(selectReactionsForStreaming(reactions, []).map(row => row.id))
++      .toEqual(["running"])
++  })
++})
+diff --git a/packages/workbench-v3/DOMAIN.md b/packages/workbench-v3/DOMAIN.md
+index 7fb8577..e86f132 100644
+--- a/packages/workbench-v3/DOMAIN.md
++++ b/packages/workbench-v3/DOMAIN.md
+@@ -1,13 +1,26 @@
+ # Workbench Domain
+ 
+-`workbench` is a local review surface for the Context causal graph.
++`workbench` is a local review surface for the Context causal graph and a
++production-shaped integration fixture for Reactor.
+ 
+-It owns no durable entities. It composes `contextDomain` and defines two facts:
++It composes `contextDomain`, `datasetDomain`, and `sandboxDomain`. It owns the
++durable `workbench_reviews` entity and defines three facts:
+ 
+-- `workbench.messageReceived`: a user message entered the Context.
++- `workbench.messageReceived`: a chat or causal-review request entered the Context.
+ - `workbench.messageAnswered`: a Reaction completed with an answer.
++- `workbench.reviewCompleted`: a formal Dataset was reviewed and its durable
++  review was recorded.
++
++`workbench.recordReview` accepts `dataset(workbenchItemSchema)`. Domain action
++preparation therefore validates that the referenced Dataset exists and matches
++the declared row type before the action implementation writes the review.
+ 
+ The application writes those facts through `Events(runtime).emit(...)`. Reactor
+ creates Sessions, Reactions, operation Events, Event Parts, and the optional
+ InstantDB stream owned by each streaming Reaction. A Reaction has zero or one
+ stream; non-streaming Reactions do not create placeholder streams.
++
++The causal-review Reaction fans out Dataset materialization, requirement
++extraction, and risk analysis with `Promise.all`; joins those three Events for a
++decision; executes `recordReview`; and emits `reviewCompleted`. Dataset owns a
++child Session linked to the parent materialization Reaction.
+diff --git a/packages/workbench-v3/README.md b/packages/workbench-v3/README.md
+index 82ef274..7574834 100644
+--- a/packages/workbench-v3/README.md
++++ b/packages/workbench-v3/README.md
+@@ -2,22 +2,33 @@
+ 
+ Live React workbench for the Context / Session / Reaction / Event graph.
+ 
+-It provisions a temporary InstantDB app, invokes Azure OpenAI through the real
+-Reactor, and renders both durable Event Parts and the provisional Reaction
+-stream consumed by `@ekairos/events/react`.
++It provisions a temporary InstantDB app and a durable Daytona Sandbox, invokes
++Azure OpenAI through the real Reactor, and renders both durable Event Parts and
++the provisional Reaction stream consumed by `@ekairos/events/react`.
+ 
+ The left column shows the Context, Sessions, and durable Events. The center
+ column uses the Event-shaped projection returned by `useContext`. The right
+-column follows the active streaming Reaction and exposes its complete ordered
+-chunk journal; after consolidation the same trace remains inspectable through
+-the Reaction-to-stream link.
++column renders the causal DAG. It exposes the selected Reaction's complete
++ordered chunk journal on demand; active Reactions always stream immediately,
++while historical streams are not replayed until selected.
++
++The default `Causal review` scenario proves the full path:
++
++1. Dataset materialization, requirements, and risks execute in parallel.
++2. A decision Reaction joins their effect Events.
++3. `workbench.recordReview` validates `dataset(workbenchItemSchema)` and writes
++   the linked durable review.
++4. `workbench.reviewCompleted` is emitted as the final domain Event.
++5. Dataset's own materialization appears as a nested child Session.
+ 
+ Required environment variables:
+ 
+ - `INSTANT_PERSONAL_ACCESS_TOKEN`
+ - `AZURE_API_KEY`
+ - `AZURE_RESOURCE_NAME` (or `AZURE_OPENAI_ENDPOINT`)
+-- optional `AZURE_API_VERSION` and `WORKBENCH_AZURE_MODEL`
++- `DAYTONA_API_KEY`
++- optional `DAYTONA_API_URL`, `AZURE_API_VERSION`, and
++  `WORKBENCH_AZURE_MODEL` (defaults to `gpt-5.6-sol`)
+ 
+ ```bash
+ pnpm --filter ekairos-workbench-v3 dev
+diff --git a/packages/workbench-v3/app/api/bootstrap/route.ts b/packages/workbench-v3/app/api/bootstrap/route.ts
+index 255f4d8..7eeb3e6 100644
+--- a/packages/workbench-v3/app/api/bootstrap/route.ts
++++ b/packages/workbench-v3/app/api/bootstrap/route.ts
+@@ -13,6 +13,7 @@ export async function GET() {
+       contextId: state.context.id,
+       contextKey: state.context.key,
+       model: azureModelName(),
++      sandbox: state.sandboxProvider,
+     })
+   } catch (error) {
+     return NextResponse.json(
+diff --git a/packages/workbench-v3/app/api/context/route.ts b/packages/workbench-v3/app/api/context/route.ts
+index 122873f..803e1f5 100644
+--- a/packages/workbench-v3/app/api/context/route.ts
++++ b/packages/workbench-v3/app/api/context/route.ts
+@@ -1,6 +1,7 @@
+ import { NextResponse } from "next/server"
+ 
+ import { answerMessage } from "@/src/chat-reaction"
++import { workbenchScenarioSchema } from "@/src/domain"
+ import { ensureWorkbenchContext } from "@/src/runtime"
+ 
+ export const maxDuration = 120
+@@ -22,6 +23,7 @@ function message(body: Record<string, unknown>) {
+     id: text(latest?.id) || globalThis.crypto.randomUUID(),
+     text: value || text(body.message),
+     parts,
++    scenario: workbenchScenarioSchema.catch("chat").parse(body.scenario),
+   }
+ }
+ 
+@@ -34,9 +36,11 @@ export async function POST(request: Request) {
+     const event = await answerMessage({
+       runtime: state.runtime,
+       context: state.context,
++      sandboxId: state.sandboxId,
+       eventId: input.id,
+       text: input.text,
+       parts: input.parts,
++      scenario: input.scenario,
+     })
+     return NextResponse.json({
+       appId: state.appId,
+diff --git a/packages/workbench-v3/app/globals.css b/packages/workbench-v3/app/globals.css
+index 0306d19..d5eb1ca 100644
+--- a/packages/workbench-v3/app/globals.css
++++ b/packages/workbench-v3/app/globals.css
+@@ -89,23 +89,44 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+ .chat-empty strong { color: #dfe3e2; font-size: 13px; }
+ .chat-empty span { max-width: 340px; font-size: 11px; line-height: 1.5; }
+ .error-banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid #6e302d; background: #2a1515; color: #ffc3be; font-size: 10px; }
+-.composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; margin: 0 clamp(12px, 3vw, 32px) 14px; padding: 8px; border: 1px solid #3b4042; background: #17191a; box-shadow: 0 8px 28px #0008; }
++.composer-shell { margin: 0 clamp(12px, 3vw, 32px) 14px; border: 1px solid #3b4042; background: #17191a; box-shadow: 0 8px 28px #0008; }
++.scenario-bar { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px; border-bottom: 1px solid var(--line-soft); }
++.scenario-control { display: inline-flex; align-items: center; border: 1px solid #34393a; background: #101213; }
++.scenario-control button, .load-sample { min-height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 9px; }
++.scenario-control button + button { border-left: 1px solid #34393a; }
++.scenario-control button.active { background: #213229; color: #c9f4d5; }
++.load-sample { color: var(--cyan); }
++.load-sample:hover { background: #182226; }
++.composer { display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: end; gap: 8px; padding: 8px; }
+ .composer textarea { width: 100%; min-height: 40px; max-height: 130px; resize: vertical; border: 0; outline: 0; padding: 9px; background: transparent; color: var(--text); font-size: 12px; line-height: 1.45; }
+ .composer textarea::placeholder { color: #737a79; }
+ .composer button { width: 36px; height: 36px; border: 1px solid #4b7b5a; background: #21432c; color: #c8fbd6; display: grid; place-items: center; cursor: pointer; }
+ .composer button:disabled { cursor: not-allowed; opacity: .4; }
+ 
+-.traces { display: grid; grid-template-rows: 39px minmax(96px, 30%) minmax(0, 1fr); overflow: hidden; background: #101213; }
+-.reaction-list { overflow: auto; border-bottom: 1px solid var(--line); }
+-.reaction-row { width: 100%; min-height: 48px; display: grid; grid-template-columns: 25px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 10px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; text-align: left; cursor: pointer; }
+-.reaction-row:hover { background: #181b1c; }
+-.reaction-row.selected { background: #1b2220; box-shadow: inset 2px 0 var(--green); }
+-.reaction-position { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid #39403e; color: var(--muted); font: 700 9px/1 monospace; }
+-.reaction-copy { display: grid; gap: 3px; min-width: 0; }
+-.reaction-copy strong { font-size: 10px; }
+-.reaction-copy small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
+-.reaction-state { display: grid; justify-items: end; gap: 3px; color: var(--muted); font-size: 8px; }
+-.reaction-state > span:first-child { justify-self: end; }
++.traces { display: grid; grid-template-rows: 39px minmax(210px, 46%) minmax(0, 1fr); overflow: hidden; background: #101213; }
++.reaction-flow { overflow: auto; border-bottom: 1px solid var(--line); background: #0e1011; }
++.session-flow { padding: 9px; }
++.session-flow.nested { margin-top: 10px; padding: 8px; border-left: 2px solid #3b545a; background: #111619; }
++.session-flow-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 0 2px 8px; }
++.session-flow-header span, .session-flow-header small { color: var(--muted); font-size: 8px; text-transform: uppercase; }
++.session-flow-header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dfe4e2; font-size: 10px; }
++.causal-stage + .causal-stage { margin-top: 11px; padding-top: 10px; border-top: 1px solid #222729; }
++.stage-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; color: #737b79; font-size: 8px; text-transform: uppercase; }
++.stage-label strong { display: inline-flex; align-items: center; gap: 4px; color: var(--cyan); font-weight: 600; }
++.stage-reactions { display: grid; gap: 6px; }
++.stage-reactions.parallel { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); align-items: stretch; }
++.causal-reaction { min-width: 0; display: grid; grid-template-rows: auto auto auto auto; gap: 5px; padding: 7px; border: 1px solid #303638; background: #141719; text-align: left; cursor: pointer; }
++.causal-reaction:hover { border-color: #50605c; background: #181d1b; }
++.causal-reaction.selected { border-color: #4a9462; box-shadow: inset 2px 0 var(--green); background: #19231d; }
++.causal-events { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
++.causal-events.effects { padding-top: 5px; border-top: 1px solid #252a2c; }
++.event-type { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 4px; border: 1px solid #303b40; background: #101416; color: #9fb7bc; font: 7px/1.25 monospace; }
++.empty-event { color: #6c7372; border-style: dashed; }
++.causal-edge { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 6px; }
++.causal-edge strong { overflow-wrap: anywhere; color: #e1e5e4; font-size: 9px; line-height: 1.35; }
++.operation-badge { padding: 2px 4px; border: 1px solid #635b36; color: var(--amber); background: #1d1a11; font: 700 7px/1.2 monospace; text-transform: uppercase; }
++.causal-state { display: flex; align-items: center; gap: 6px; color: #7d8583; font-size: 7px; }
++.causal-state > span:last-child { margin-left: auto; }
+ .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #737a79; box-shadow: 0 0 0 2px #737a7920; }
+ .status-running { background: var(--cyan); box-shadow: 0 0 0 2px #46c9d428; }
+ .status-completed, .status-idle { background: var(--green); box-shadow: 0 0 0 2px #65d68828; }
+@@ -162,6 +183,6 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+   .workspace-grid { grid-template-columns: 1fr; }
+   .navigator { display: none; }
+   .conversation { min-height: 70vh; border-bottom: 1px solid var(--line); }
+-  .traces { min-height: 72vh; grid-template-rows: 39px 220px minmax(420px, 1fr); }
++  .traces { min-height: 86vh; grid-template-rows: 39px minmax(320px, 48vh) minmax(420px, 1fr); }
+   .topbar-chip { display: none; }
+ }
+diff --git a/packages/workbench-v3/package.json b/packages/workbench-v3/package.json
+index 26dcfa2..37f2ef0 100644
+--- a/packages/workbench-v3/package.json
++++ b/packages/workbench-v3/package.json
+@@ -7,15 +7,19 @@
+     "dev": "next dev --webpack -H 0.0.0.0 -p 4741",
+     "build": "next build --webpack",
+     "start": "next start -H 0.0.0.0 -p 4741",
++    "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+   },
+   "dependencies": {
+     "@ai-sdk/openai": "^2.0.68",
++    "@ekairos/dataset": "workspace:*",
+     "@ekairos/domain": "workspace:*",
+     "@ekairos/events": "workspace:*",
+     "@ekairos/reactor": "workspace:*",
++    "@ekairos/sandbox": "workspace:*",
+     "@ekairos/testing": "workspace:*",
+     "@instantdb/admin": "0.22.158",
++    "@instantdb/core": "0.22.158",
+     "@instantdb/react": "0.22.158",
+     "lucide-react": "^0.554.0",
+     "next": "16.0.10",
+diff --git a/packages/workbench-v3/src/azure.ts b/packages/workbench-v3/src/azure.ts
+index c6e0d3d..e9f467f 100644
+--- a/packages/workbench-v3/src/azure.ts
++++ b/packages/workbench-v3/src/azure.ts
+@@ -52,7 +52,7 @@ function azureFetch(apiVersion: string) {
+ }
+ 
+ export function azureModelName() {
+-  return env("WORKBENCH_AZURE_MODEL") || "gpt-5.2"
++  return env("WORKBENCH_AZURE_MODEL") || "gpt-5.6-sol"
+ }
+ 
+ export function getAzureModel() {
+diff --git a/packages/workbench-v3/src/chat-reaction.ts b/packages/workbench-v3/src/chat-reaction.ts
+index 2dc55ae..78a38a6 100644
+--- a/packages/workbench-v3/src/chat-reaction.ts
++++ b/packages/workbench-v3/src/chat-reaction.ts
+@@ -5,6 +5,7 @@ import {
+   Part,
+   type ContextEvent,
+   type ContextHandle,
++  uuidV5,
+ } from "@ekairos/events"
+ import {
+   ai,
+@@ -13,16 +14,27 @@ import {
+ import { executeReaction } from "@ekairos/reactor/internal"
+ 
+ import { getAzureModel } from "./azure"
+-import { workbenchDomain } from "./domain"
++import {
++  workbenchDecisionSchema,
++  workbenchDomain,
++  workbenchItemSchema,
++  workbenchRequirementsSchema,
++  workbenchRisksSchema,
++  type WorkbenchScenario,
++} from "./domain"
+ import type { WorkbenchContext, WorkbenchRuntime } from "./runtime"
+ 
++function engine(maxRounds = 8) {
++  return ai({ model: async () => getAzureModel(), maxRounds })
++}
++
+ function createChatReaction(history: readonly ContextEvent[]) {
+   return defineReaction(
+     workbenchDomain.events.messageReceived,
+     {
+       key: "workbench.answer-message",
+       scope: workbenchDomain,
+-      engine: ai({ model: async () => getAzureModel(), maxRounds: 6 }),
++      engine: engine(6),
+       sandbox: false,
+     },
+     async reaction => {
+@@ -40,22 +52,100 @@ function createChatReaction(history: readonly ContextEvent[]) {
+   )
+ }
+ 
++function createReviewReaction(sandboxId: string) {
++  return defineReaction(
++    workbenchDomain.events.messageReceived,
++    {
++      key: "workbench.review-request",
++      scope: workbenchDomain,
++      engine: engine(12),
++      sandbox: sandboxId,
++    },
++    async reaction => {
++      const [items, requirements, risks] = await Promise.all([
++        reaction.given(reaction.trigger).dataset({
++          instruction: [
++            "Extract one row per requested item from the messageReceived Event.",
++            "Preserve quantity and unit exactly when stated.",
++            "Do not invent products that are not present in the request.",
++          ].join(" "),
++          schema: workbenchItemSchema,
++        }),
++        reaction.given(reaction.trigger).agent({
++          instruction: "Identify the request objective and every explicit commercial or delivery constraint.",
++          output: workbenchRequirementsSchema,
++        }),
++        reaction.given(reaction.trigger).agent({
++          instruction: "Assess concrete procurement risks in the request and classify each as low, medium, or high.",
++          output: workbenchRisksSchema,
++        }),
++      ])
++
++      const decision = await reaction.given([items, requirements, risks]).agent({
++        instruction: [
++          "Produce a grounded decision from the formal item Dataset, requirements, and risks.",
++          "The answer must mention the extracted item count and clearly state what should happen next.",
++        ].join(" "),
++        output: workbenchDecisionSchema,
++      })
++
++      const datasetId = String((items.payload as any).datasetId)
++      const preview = Array.isArray((items.payload as any).preview)
++        ? (items.payload as any).preview
++        : []
++      const riskRows = Array.isArray((risks.payload as any).risks)
++        ? (risks.payload as any).risks
++        : []
++      const reviewId = uuidV5(`workbench:review:${datasetId}`)
++      const recorded = await reaction.given([items, risks, decision]).action(
++        workbenchDomain.actions.recordReview,
++        {
++          reviewId,
++          request: reaction.trigger.payload.text,
++          items: { datasetId },
++          itemCount: preview.length,
++          riskCount: riskRows.length,
++          decision: decision.payload,
++        },
++      )
++
++      return await reaction.given(recorded).emit(
++        workbenchDomain.events.reviewCompleted({
++          text: decision.payload.answer,
++          reviewId,
++          datasetId,
++          itemCount: preview.length,
++          recommendation: decision.payload.recommendation,
++        }).link({ review: reviewId }),
++      )
++    },
++  )
++}
++
+ export async function answerMessage(input: {
+   runtime: WorkbenchRuntime
+   context: ContextHandle<WorkbenchContext> | null
++  sandboxId: string
+   eventId: string
+   text: string
+   parts: readonly unknown[]
++  scenario: WorkbenchScenario
+ }) {
+   if (!input.context) throw new Error("workbench_context_not_found")
++  const messageBlocks = input.parts.length > 0
++    ? input.parts
++    : [{ type: "text", text: input.text }]
+   const trigger = await Events(input.runtime).emit(
+-    workbenchDomain.events.messageReceived({ text: input.text }),
++    workbenchDomain.events.messageReceived({
++      text: input.text,
++      scenario: input.scenario,
++    }),
+     {
+       id: input.eventId,
+       channel: "web",
+       contextId: input.context.id,
+       parts: [Part.message({
+-        blocks: input.parts as any,
++        blocks: messageBlocks as any,
+       })],
+     },
+   )
+@@ -67,11 +157,15 @@ export async function answerMessage(input: {
+     },
+   })).filter(event =>
+     event.type === workbenchDomain.events.messageReceived.kind ||
+-    event.type === workbenchDomain.events.messageAnswered.kind)
++    event.type === workbenchDomain.events.messageAnswered.kind ||
++    event.type === workbenchDomain.events.reviewCompleted.kind)
++  const definition = input.scenario === "review"
++    ? createReviewReaction(input.sandboxId)
++    : createChatReaction(history)
+   return await executeReaction(
+     input.runtime,
+     input.context,
+     trigger,
+-    createChatReaction(history),
++    definition,
+   )
+ }
+diff --git a/packages/workbench-v3/src/client-schema.ts b/packages/workbench-v3/src/client-schema.ts
+new file mode 100644
+index 0000000..4ee05ee
+--- /dev/null
++++ b/packages/workbench-v3/src/client-schema.ts
+@@ -0,0 +1,5 @@
++import { contextDomain } from "@ekairos/events"
++
++// The browser only reads Context graph entities. Server-only domain actions and
++// Dataset/Sandbox implementation code stay out of the client bundle.
++export const workbenchClientSchema = contextDomain.instantSchema()
+diff --git a/packages/workbench-v3/src/components/workbench.tsx b/packages/workbench-v3/src/components/workbench.tsx
+index 4654296..2fe39db 100644
+--- a/packages/workbench-v3/src/components/workbench.tsx
++++ b/packages/workbench-v3/src/components/workbench.tsx
+@@ -5,18 +5,22 @@ import {
+   type ContextEventForUI,
+   type ContextEventPartForUI,
+   type ContextReactionForUI,
++  type ContextSessionForUI,
+ } from "@ekairos/events/react"
+ import { init } from "@instantdb/react"
+ import {
+   Activity,
+   ArrowUp,
+   Bot,
++  Boxes,
+   Braces,
+   CircleAlert,
+   Clock3,
+   Database,
+   GitFork,
+   LoaderCircle,
++  MessageSquare,
++  Network,
+   Radio,
+   TerminalSquare,
+   User,
+@@ -24,15 +28,34 @@ import {
+ import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
+ import { Streamdown } from "streamdown"
+ 
+-import { workbenchSchema } from "@/src/domain"
++import { workbenchClientSchema } from "@/src/client-schema"
++import {
++  buildReactionStages,
++  reactionDurationMs,
++  reactionEventTypes,
++  reactionTitle,
++} from "@/src/reaction-graph"
+ 
+ type Bootstrap = Readonly<{
+   appId: string
+   contextId: string
+   contextKey: string
+   model: string
++  sandbox: string
+ }>
+ 
++type Scenario = "chat" | "review"
++
++const REVIEW_SAMPLE = [
++  "Revisar esta solicitud de compra:",
++  "- 12 notebooks empresariales de 14 pulgadas",
++  "- 24 monitores de 27 pulgadas",
++  "- 12 docking stations USB-C",
++  "Presupuesto máximo: USD 45.000.",
++  "Entrega requerida: 30 días.",
++  "Determina los ítems formales, restricciones, riesgos y la recomendación concreta.",
++].join("\n")
++
+ function short(value: string | null | undefined, size = 8) {
+   return value ? value.slice(0, size) : "-"
+ }
+@@ -125,7 +148,12 @@ function Message({ event }: { event: ContextEventForUI }) {
+   )
+ }
+ 
+-function ReactionRow({
++function EventTypes({ values }: { values: readonly string[] }) {
++  if (values.length === 0) return <span className="event-type empty-event">pending</span>
++  return <>{values.map(value => <span className="event-type" key={value}>{value}</span>)}</>
++}
++
++function ReactionCard({
+   reaction,
+   selected,
+   onSelect,
+@@ -134,22 +162,74 @@ function ReactionRow({
+   selected: boolean
+   onSelect(): void
+ }) {
+-  const reader = reaction.stream?.reader
++  const duration = reactionDurationMs(reaction)
+   return (
+-    <button className={`reaction-row ${selected ? "selected" : ""}`} onClick={onSelect}>
+-      <span className="reaction-position">{reaction.position}</span>
+-      <span className="reaction-copy">
+-        <strong>{reaction.type}</strong>
+-        <small>{reaction.instruction || `${reaction.causeIds.length} cause - ${reaction.effectIds.length} effect`}</small>
++    <button className={`causal-reaction ${selected ? "selected" : ""}`} onClick={onSelect}>
++      <span className="causal-events"><EventTypes values={reactionEventTypes(reaction, "causes")} /></span>
++      <span className="causal-edge">
++        <span className="operation-badge">{reaction.type}</span>
++        <strong>{reactionTitle(reaction)}</strong>
+       </span>
+-      <span className="reaction-state">
++      <span className="causal-events effects"><EventTypes values={reactionEventTypes(reaction, "effects")} /></span>
++      <span className="causal-state">
+         <StatusDot status={reaction.status} />
+-        {reader ? <small>{reader.chunkCount} chunks</small> : <small>durable</small>}
++        <span>{reaction.stream?.reader.chunkCount ?? 0} chunks</span>
++        <span>{duration === null ? "-" : `${(duration / 1000).toFixed(1)}s`}</span>
+       </span>
+     </button>
+   )
+ }
+ 
++function SessionFlow({
++  session,
++  selectedId,
++  onSelect,
++  nested = false,
++}: {
++  session: ContextSessionForUI
++  selectedId: string | null
++  onSelect(id: string): void
++  nested?: boolean
++}) {
++  const stages = buildReactionStages(session)
++  return (
++    <section className={`session-flow ${nested ? "nested" : ""}`}>
++      <header className="session-flow-header">
++        <span>{nested ? "Child Session" : "Reaction"}</span>
++        <strong>{session.definition}</strong>
++        <small>{session.status}</small>
++      </header>
++      {stages.map((stage, index) => (
++        <div className="causal-stage" key={`${session.id}:${stage.rank}`}>
++          <div className="stage-label">
++            <span>stage {index + 1}</span>
++            {stage.parallel ? <strong><GitFork size={11} />parallel fan-out</strong> : null}
++          </div>
++          <div className={`stage-reactions ${stage.parallel ? "parallel" : ""}`}>
++            {stage.reactions.map(reaction => (
++              <ReactionCard
++                key={reaction.id}
++                reaction={reaction}
++                selected={reaction.id === selectedId}
++                onSelect={() => onSelect(reaction.id)}
++              />
++            ))}
++          </div>
++        </div>
++      ))}
++      {session.children.map(child => (
++        <SessionFlow
++          key={child.id}
++          session={child}
++          selectedId={selectedId}
++          onSelect={onSelect}
++          nested
++        />
++      ))}
++    </section>
++  )
++}
++
+ function ChunkTrace({ reaction }: { reaction: ContextReactionForUI | null }) {
+   if (!reaction) return <div className="empty"><GitFork size={20} />Select a Reaction.</div>
+   const stream = reaction.stream
+@@ -175,30 +255,7 @@ function ChunkTrace({ reaction }: { reaction: ContextReactionForUI | null }) {
+         <div className="empty compact">This Reaction has no provisional stream.</div>
+       ) : (
+         <div className="chunks">
+-          {stream.chunks.map(chunk => (
+-            <details className={`chunk chunk-${chunk.kind.replaceAll(".", "-")}`} key={chunk.sequence}>
+-              <summary>
+-                <span className="chunk-sequence">{chunk.sequence}</span>
+-                <strong>{chunk.kind}</strong>
+-                <span>{chunk.providerType ?? chunk.provider ?? "reactor"}</span>
+-                <time>{time(chunk.at)}</time>
+-              </summary>
+-              {chunk.delta ? <pre className="chunk-delta">{chunk.delta}</pre> : null}
+-              {chunk.actionName ? (
+-                <div className="chunk-action">{chunk.actionName} - {short(chunk.actionCallId, 12)}</div>
+-              ) : null}
+-              {chunk.input !== undefined ? <pre>{json(chunk.input)}</pre> : null}
+-              {chunk.output !== undefined ? <pre>{json(chunk.output)}</pre> : null}
+-              {chunk.error !== undefined ? <pre>{json(chunk.error)}</pre> : null}
+-              {chunk.data !== undefined ? <pre>{json(chunk.data)}</pre> : null}
+-              {chunk.raw !== undefined ? (
+-                <details className="provider-raw">
+-                  <summary>provider raw</summary>
+-                  <pre>{json(chunk.raw)}</pre>
+-                </details>
+-              ) : null}
+-            </details>
+-          ))}
++          {stream.chunks.map(chunk => <ChunkRow chunk={chunk} key={chunk.sequence} />)}
+           {stream.chunks.length === 0 ? (
+             <div className="empty compact"><Radio size={16} />Waiting for the first chunk.</div>
+           ) : null}
+@@ -208,39 +265,89 @@ function ChunkTrace({ reaction }: { reaction: ContextReactionForUI | null }) {
+   )
+ }
+ 
++type TraceChunk = NonNullable<ContextReactionForUI["stream"]>["chunks"][number]
++
++function ChunkRow({ chunk }: { chunk: TraceChunk }) {
++  const [open, setOpen] = useState(false)
++  return (
++    <details
++      className={`chunk chunk-${chunk.kind.replaceAll(".", "-")}`}
++      onToggle={event => setOpen(event.currentTarget.open)}
++    >
++      <summary>
++        <span className="chunk-sequence">{chunk.sequence}</span>
++        <strong>{chunk.kind}</strong>
++        <span>{chunk.providerType ?? chunk.provider ?? "reactor"}</span>
++        <time>{time(chunk.at)}</time>
++      </summary>
++      {open ? (
++        <>
++          {chunk.delta ? <pre className="chunk-delta">{chunk.delta}</pre> : null}
++          {chunk.actionName ? (
++            <div className="chunk-action">{chunk.actionName} - {short(chunk.actionCallId, 12)}</div>
++          ) : null}
++          {chunk.input !== undefined ? <pre>{json(chunk.input)}</pre> : null}
++          {chunk.output !== undefined ? <pre>{json(chunk.output)}</pre> : null}
++          {chunk.error !== undefined ? <pre>{json(chunk.error)}</pre> : null}
++          {chunk.data !== undefined ? <pre>{json(chunk.data)}</pre> : null}
++          {chunk.raw !== undefined ? (
++            <details className="provider-raw">
++              <summary>provider raw</summary>
++              <pre>{json(chunk.raw)}</pre>
++            </details>
++          ) : null}
++        </>
++      ) : null}
++    </details>
++  )
++}
++
+ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+   const db = useMemo(() => init({
+     appId: bootstrap.appId,
+-    schema: workbenchSchema,
++    schema: workbenchClientSchema,
+     useDateObjects: true,
+   } as any), [bootstrap.appId])
++  const [scenario, setScenario] = useState<Scenario>("review")
++  const [selectedId, setSelectedId] = useState<string | null>(null)
++  const streamReactionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
+   const context = useEkairosContext(db, {
+     apiUrl: "/api/context",
+     contextKey: bootstrap.contextKey,
+     initialContextId: bootstrap.contextId,
++    prepareRequestBody: body => ({ ...body, scenario }),
++    streamReactionIds,
+   })
+-  const [draft, setDraft] = useState("")
+-  const [selectedId, setSelectedId] = useState<string | null>(null)
++  const [draft, setDraft] = useState(REVIEW_SAMPLE)
+   const bottom = useRef<HTMLDivElement>(null)
+   const chatEvents = useMemo(() => context.events.filter(event =>
+     event.type === "workbench.messageReceived" ||
+     event.type === "user.message" ||
+-    event.type === "context.agent"), [context.events])
+-  const selected = context.reactions.find(reaction => reaction.id === selectedId)
+-    ?? context.reactions.find(reaction => reaction.status === "running")
+-    ?? [...context.reactions].reverse().find(reaction => reaction.stream)
+-    ?? context.reactions[0]
++    event.type === "context.agent" ||
++    event.type === "workbench.reviewCompleted"), [context.events])
++  const rootIds = useMemo(() => new Set(context.sessions.flatMap(function collect(session): string[] {
++    return [session.rootReaction?.id ?? "", ...session.children.flatMap(collect)]
++  })), [context.sessions])
++  const operationReactions = useMemo(
++    () => context.reactions.filter(reaction => !rootIds.has(reaction.id)),
++    [context.reactions, rootIds],
++  )
++  const selected = operationReactions.find(reaction => reaction.id === selectedId)
++    ?? operationReactions.find(reaction => reaction.status === "running")
++    ?? [...operationReactions].reverse().find(reaction => reaction.stream)
++    ?? operationReactions[0]
+     ?? null
++  const activeSession = context.context?.currentSession ?? context.sessions[0] ?? null
+ 
+   useEffect(() => {
+-    const runningStream = context.reactions.find(reaction =>
++    const runningStream = operationReactions.find(reaction =>
+       reaction.status === "running" && reaction.stream)
+     if (runningStream && runningStream.id !== selectedId) {
+       setSelectedId(runningStream.id)
+       return
+     }
+     if (!selectedId && selected) setSelectedId(selected.id)
+-  }, [context.reactions, selected, selectedId])
++  }, [operationReactions, selected, selectedId])
+   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }) }, [chatEvents])
+ 
+   async function submit(event: FormEvent) {
+@@ -259,6 +366,7 @@ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+         <div className="topbar-spacer" />
+         <span className="topbar-chip"><Database size={13} />{short(bootstrap.appId, 12)}</span>
+         <span className="topbar-chip"><Bot size={13} />{bootstrap.model}</span>
++        <span className="topbar-chip"><Boxes size={13} />{bootstrap.sandbox}</span>
+         <span className="topbar-chip"><StatusDot status={context.contextStatus} />{context.contextStatus}</span>
+       </header>
+ 
+@@ -273,7 +381,7 @@ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+             <div><strong>{context.sessions.length}</strong><span>sessions</span></div>
+             <div><strong>{context.events.length}</strong><span>events</span></div>
+             <div><strong>{context.reactions.length}</strong><span>reactions</span></div>
+-            <div><strong>{context.reactions.reduce((sum, row) => sum + (row.stream?.reader.chunkCount ?? 0), 0)}</strong><span>chunks</span></div>
++            <div><strong>{context.reactions.reduce((sum, row) => sum + (row.stream?.reader.chunkCount ?? 0), 0)}</strong><span>loaded chunks</span></div>
+           </div>
+           <div className="panel-title section-title"><span>Sessions</span><Clock3 size={14} /></div>
+           <div className="session-list">
+@@ -310,36 +418,62 @@ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+             <div ref={bottom} />
+           </div>
+           {context.sendError ? <div className="error-banner"><CircleAlert size={15} />{context.sendError}</div> : null}
+-          <form className="composer" onSubmit={submit}>
+-            <textarea
+-              aria-label="Message"
+-              placeholder="Ask something that produces a trace..."
+-              value={draft}
+-              onChange={event => setDraft(event.target.value)}
+-              onKeyDown={event => {
+-                if (event.key === "Enter" && !event.shiftKey) {
+-                  event.preventDefault()
+-                  event.currentTarget.form?.requestSubmit()
+-                }
+-              }}
+-            />
+-            <button aria-label="Send message" disabled={!draft.trim() || context.sendStatus !== "idle"}>
+-              {context.sendStatus === "idle" ? <ArrowUp size={18} /> : <LoaderCircle className="spin" size={18} />}
+-            </button>
+-          </form>
++          <div className="composer-shell">
++            <div className="scenario-bar">
++              <div className="scenario-control" aria-label="Scenario">
++                <button
++                  className={scenario === "review" ? "active" : ""}
++                  onClick={() => {
++                    setScenario("review")
++                    if (!draft.trim()) setDraft(REVIEW_SAMPLE)
++                  }}
++                  type="button"
++                ><Network size={13} />Causal review</button>
++                <button
++                  className={scenario === "chat" ? "active" : ""}
++                  onClick={() => {
++                    setScenario("chat")
++                    if (draft === REVIEW_SAMPLE) setDraft("")
++                  }}
++                  type="button"
++                ><MessageSquare size={13} />Chat</button>
++              </div>
++              {scenario === "review" ? (
++                <button className="load-sample" onClick={() => setDraft(REVIEW_SAMPLE)} type="button">
++                  Load sample
++                </button>
++              ) : null}
++            </div>
++            <form className="composer" onSubmit={submit}>
++              <textarea
++                aria-label="Message"
++                placeholder={scenario === "review" ? "Describe a request with concrete items..." : "Ask something that produces a trace..."}
++                value={draft}
++                onChange={event => setDraft(event.target.value)}
++                onKeyDown={event => {
++                  if (event.key === "Enter" && !event.shiftKey) {
++                    event.preventDefault()
++                    event.currentTarget.form?.requestSubmit()
++                  }
++                }}
++              />
++              <button aria-label="Send message" disabled={!draft.trim() || context.sendStatus !== "idle"}>
++                {context.sendStatus === "idle" ? <ArrowUp size={18} /> : <LoaderCircle className="spin" size={18} />}
++              </button>
++            </form>
++          </div>
+         </section>
+ 
+         <aside className="traces panel">
+-          <div className="panel-title"><span>Reactions</span><GitFork size={15} /></div>
+-          <div className="reaction-list">
+-            {context.reactions.map(reaction => (
+-              <ReactionRow
+-                key={reaction.id}
+-                reaction={reaction}
+-                selected={reaction.id === selected?.id}
+-                onSelect={() => setSelectedId(reaction.id)}
++          <div className="panel-title"><span>Causal graph</span><GitFork size={15} /></div>
++          <div className="reaction-flow">
++            {activeSession ? (
++              <SessionFlow
++                session={activeSession}
++                selectedId={selected?.id ?? null}
++                onSelect={setSelectedId}
+               />
+-            ))}
++            ) : <div className="empty"><Network size={20} />No Reaction yet.</div>}
+           </div>
+           <ChunkTrace reaction={selected} />
+         </aside>
+diff --git a/packages/workbench-v3/src/domain.ts b/packages/workbench-v3/src/domain.ts
+index 7a154bf..469be8a 100644
+--- a/packages/workbench-v3/src/domain.ts
++++ b/packages/workbench-v3/src/domain.ts
+@@ -1,17 +1,151 @@
+-import { defineEvent, domain } from "@ekairos/domain"
++import { dataset, datasetDomain } from "@ekairos/dataset"
++import {
++  defineDomainAction,
++  defineEvent,
++  domain,
++} from "@ekairos/domain"
+ import { contextDomain } from "@ekairos/events"
++import { sandboxDomain } from "@ekairos/sandbox"
++import { i } from "@instantdb/core"
+ import { z } from "zod"
+ 
+-export const workbenchDomain = domain("workbench")
++export const workbenchScenarioSchema = z.enum(["chat", "review"])
++export type WorkbenchScenario = z.infer<typeof workbenchScenarioSchema>
++
++export const workbenchItemSchema = z.object({
++  description: z.string().min(1),
++  quantity: z.number().positive(),
++  unit: z.string().min(1),
++})
++
++export const workbenchRequirementsSchema = z.object({
++  objective: z.string().min(1),
++  constraints: z.array(z.string()),
++})
++
++export const workbenchRisksSchema = z.object({
++  risks: z.array(z.object({
++    risk: z.string().min(1),
++    severity: z.enum(["low", "medium", "high"]),
++  })),
++})
++
++export const workbenchDecisionSchema = z.object({
++  recommendation: z.enum(["proceed", "clarify", "reject"]),
++  summary: z.string().min(1),
++  answer: z.string().min(1),
++})
++
++const workbenchCore = domain("workbench")
+   .includes(contextDomain)
+-  .withSchema({ entities: {}, links: {}, rooms: {} })
++  .includes(datasetDomain)
++  .includes(sandboxDomain)
++  .withSchema({
++    entities: {
++      workbench_reviews: i.entity({
++        request: i.string(),
++        datasetId: i.string().indexed(),
++        itemCount: i.number(),
++        riskCount: i.number(),
++        recommendation: i.string().indexed(),
++        summary: i.string(),
++        status: i.string().indexed(),
++        createdAt: i.date().indexed(),
++        updatedAt: i.date().indexed(),
++      }),
++    },
++    links: {
++      workbenchReviewDataset: {
++        forward: { on: "workbench_reviews", has: "one", label: "dataset" },
++        reverse: { on: "dataset_datasets", has: "many", label: "reviews" },
++      },
++    },
++    rooms: {},
++  })
+   .withEvents({
+     messageReceived: defineEvent({
+-      payload: z.object({ text: z.string().min(1) }),
++      payload: z.object({
++        text: z.string().min(1),
++        scenario: workbenchScenarioSchema,
++      }),
+     }),
+     messageAnswered: defineEvent({
+-      payload: z.object({ text: z.string() }),
++      payload: z.object({ text: z.string().min(1) }),
++    }),
++    reviewCompleted: defineEvent({
++      payload: z.object({
++        text: z.string().min(1),
++        reviewId: z.string().min(1),
++        datasetId: z.string().min(1),
++        itemCount: z.number().int().nonnegative(),
++        recommendation: z.enum(["proceed", "clarify", "reject"]),
++      }),
++      links: {
++        review: { on: "workbench_reviews", has: "one" },
++      },
+     }),
+   })
+ 
++const recordReview = defineDomainAction({
++  description: "Persist the reviewed request and link it to its validated formal Dataset.",
++  input: z.object({
++    reviewId: z.string().min(1),
++    request: z.string().min(1),
++    items: dataset(workbenchItemSchema),
++    itemCount: z.number().int().nonnegative(),
++    riskCount: z.number().int().nonnegative(),
++    decision: workbenchDecisionSchema,
++  }),
++  output: z.object({
++    reviewId: z.string(),
++    datasetId: z.string(),
++    status: z.literal("recorded"),
++  }),
++  execute: async ({ input, domain: activeDomain }) => {
++    "use step"
++
++    const db = (activeDomain as any).db
++    const datasetResult = await db.query({
++      dataset_datasets: {
++        $: { where: { datasetId: input.items.datasetId }, limit: 1 },
++      },
++    } as any)
++    const datasetEntity = datasetResult.dataset_datasets?.[0]
++    if (!datasetEntity) throw new Error(`workbench_review_dataset_not_found:${input.items.datasetId}`)
++
++    const reviewResult = await db.query({
++      workbench_reviews: {
++        $: { where: { id: input.reviewId }, limit: 1 },
++      },
++    } as any)
++    const existingReview = reviewResult.workbench_reviews?.[0]
++    const now = new Date()
++    await db.transact([
++      db.tx.workbench_reviews[input.reviewId]
++        .update({
++          request: input.request,
++          datasetId: input.items.datasetId,
++          itemCount: input.itemCount,
++          riskCount: input.riskCount,
++          recommendation: input.decision.recommendation,
++          summary: input.decision.summary,
++          status: "recorded",
++          createdAt: existingReview?.createdAt ?? now,
++          updatedAt: now,
++        })
++        .link({ dataset: datasetEntity.id }),
++    ])
++    return {
++      reviewId: input.reviewId,
++      datasetId: input.items.datasetId,
++      status: "recorded" as const,
++    }
++  },
++})
++
++export const workbenchDomain = workbenchCore
++  .withActions({ recordReview })
++  .withActions(datasetDomain.actions)
++  .withActions(sandboxDomain.actions)
++
+ export const workbenchSchema = workbenchDomain.instantSchema()
+diff --git a/packages/workbench-v3/src/reaction-graph.test.ts b/packages/workbench-v3/src/reaction-graph.test.ts
+new file mode 100644
+index 0000000..f9e14d9
+--- /dev/null
++++ b/packages/workbench-v3/src/reaction-graph.test.ts
+@@ -0,0 +1,93 @@
++import type {
++  ContextEventForUI,
++  ContextReactionForUI,
++  ContextSessionForUI,
++} from "@ekairos/events/react"
++import { describe, expect, it } from "vitest"
++
++import {
++  buildReactionStages,
++  reactionTitle,
++} from "./reaction-graph"
++
++function event(id: string, type: string): ContextEventForUI {
++  return {
++    id,
++    type,
++    createdAt: "2026-07-16T12:00:00.000Z",
++    payload: {},
++    links: {},
++    metadata: {},
++    eventParts: [],
++    durability: "durable",
++  }
++}
++
++function reaction(input: {
++  id: string
++  type: string
++  position: number
++  causes: ContextEventForUI[]
++  effects: ContextEventForUI[]
++  instruction?: string
++}): ContextReactionForUI {
++  return {
++    id: input.id,
++    type: input.type,
++    status: "completed",
++    createdAt: "2026-07-16T12:00:00.000Z",
++    updatedAt: "2026-07-16T12:00:01.000Z",
++    position: input.position,
++    depth: input.position === 0 ? 0 : 1,
++    causeIds: input.causes.map(row => row.id),
++    effectIds: input.effects.map(row => row.id),
++    ...(input.instruction ? { instruction: input.instruction } : {}),
++    causes: input.causes,
++    effects: input.effects,
++    stream: null,
++    liveEffect: null,
++    parent: null,
++  }
++}
++
++describe("Workbench causal graph", () => {
++  it("groups independent siblings as fan-out and preserves explicit fan-in", () => {
++    const trigger = event("trigger", "workbench.messageReceived")
++    const dataset = event("dataset", "context.dataset")
++    const risks = event("risks", "context.agent")
++    const requirements = event("requirements", "context.agent")
++    const decision = event("decision", "context.agent")
++    const recorded = event("recorded", "context.action")
++    const completed = event("completed", "workbench.reviewCompleted")
++    const rows = [
++      reaction({ id: "root", type: "workbench.review-request", position: 0, causes: [trigger], effects: [completed] }),
++      reaction({ id: "items", type: "dataset", position: 1, causes: [trigger], effects: [dataset] }),
++      reaction({ id: "requirements", type: "agent", position: 2, causes: [trigger], effects: [requirements] }),
++      reaction({ id: "risks", type: "agent", position: 3, causes: [trigger], effects: [risks] }),
++      reaction({ id: "decision", type: "agent", position: 4, causes: [dataset, requirements, risks], effects: [decision] }),
++      reaction({ id: "record", type: "action", position: 5, causes: [dataset, risks, decision], effects: [recorded] }),
++      reaction({ id: "emit", type: "emit", position: 6, causes: [recorded], effects: [completed] }),
++    ]
++    const session: ContextSessionForUI = {
++      id: "session",
++      definition: "workbench.review-request",
++      status: "completed",
++      createdAt: "2026-07-16T12:00:00.000Z",
++      trigger,
++      rootReaction: rows[0]!,
++      reactions: rows,
++      children: [],
++    }
++
++    const stages = buildReactionStages(session)
++    expect(stages.map(stage => stage.reactions.map(row => row.id))).toEqual([
++      ["items", "requirements", "risks"],
++      ["decision"],
++      ["record"],
++      ["emit"],
++    ])
++    expect(stages[0]?.parallel).toBe(true)
++    expect(stages.slice(1).every(stage => !stage.parallel)).toBe(true)
++    expect(reactionTitle(rows[6]!)).toBe("Publish reviewCompleted")
++  })
++})
+diff --git a/packages/workbench-v3/src/reaction-graph.ts b/packages/workbench-v3/src/reaction-graph.ts
+new file mode 100644
+index 0000000..9b2addd
+--- /dev/null
++++ b/packages/workbench-v3/src/reaction-graph.ts
+@@ -0,0 +1,103 @@
++import type {
++  ContextEventForUI,
++  ContextReactionForUI,
++  ContextSessionForUI,
++} from "@ekairos/events/react"
++
++export type ReactionStage = Readonly<{
++  rank: number
++  reactions: readonly ContextReactionForUI[]
++  parallel: boolean
++}>
++
++export function buildReactionStages(session: ContextSessionForUI): readonly ReactionStage[] {
++  const rootId = session.rootReaction?.id
++  const reactions = session.reactions
++    .filter(reaction => reaction.id !== rootId)
++    .sort((left, right) => left.position - right.position)
++  const producer = new Map<string, ContextReactionForUI>()
++  reactions.forEach(reaction => reaction.effectIds.forEach(id => producer.set(id, reaction)))
++  const memo = new Map<string, number>()
++
++  function rank(reaction: ContextReactionForUI, visiting = new Set<string>()): number {
++    const cached = memo.get(reaction.id)
++    if (cached !== undefined) return cached
++    if (visiting.has(reaction.id)) return 0
++    const nextVisiting = new Set(visiting).add(reaction.id)
++    const parents = reaction.causeIds
++      .map(id => producer.get(id))
++      .filter((value): value is ContextReactionForUI => Boolean(value))
++    const value = parents.length === 0
++      ? 0
++      : Math.max(...parents.map(parent => rank(parent, nextVisiting))) + 1
++    memo.set(reaction.id, value)
++    return value
++  }
++
++  const grouped = new Map<number, ContextReactionForUI[]>()
++  reactions.forEach(reaction => {
++    const value = rank(reaction)
++    grouped.set(value, [...(grouped.get(value) ?? []), reaction])
++  })
++  return Object.freeze([...grouped.entries()]
++    .sort(([left], [right]) => left - right)
++    .map(([value, rows]) => Object.freeze({
++      rank: value,
++      reactions: Object.freeze(rows.sort((left, right) => left.position - right.position)),
++      parallel: rows.length > 1,
++    })))
++}
++
++export function reactionTitle(reaction: ContextReactionForUI) {
++  if (reaction.type === "emit") {
++    return `Publish ${shortType(reaction.effects[0]?.type ?? reaction.liveEffect?.type ?? "Event")}`
++  }
++  if (reaction.type === "action") {
++    const name = actionName(reaction.effects[0] ?? reaction.liveEffect)
++    return name ? `Execute ${name}` : "Execute domain action"
++  }
++  if (reaction.type === "dataset") return "Materialize formal Dataset"
++  if (reaction.type === "agent") return firstSentence(reaction.instruction) || "Run model inference"
++  if (reaction.type === "child") return reaction.instruction || "Run child Reaction"
++  return reaction.instruction || reaction.type
++}
++
++export function reactionEventTypes(reaction: ContextReactionForUI, side: "causes" | "effects") {
++  const events = side === "causes"
++    ? reaction.causes
++    : reaction.effects.length > 0
++      ? reaction.effects
++      : reaction.liveEffect ? [reaction.liveEffect] : []
++  return unique(events.map(event => event.type))
++}
++
++export function reactionDurationMs(reaction: ContextReactionForUI) {
++  const start = new Date(reaction.createdAt).valueOf()
++  const finish = reaction.updatedAt ? new Date(reaction.updatedAt).valueOf() : Date.now()
++  return Number.isFinite(start) && Number.isFinite(finish) ? Math.max(0, finish - start) : null
++}
++
++function actionName(event: ContextEventForUI | null | undefined) {
++  for (const part of event?.eventParts ?? []) {
++    if (part.type !== "action") continue
++    const content = part.content as Record<string, unknown>
++    if (typeof content.actionName === "string") return content.actionName
++  }
++  return ""
++}
++
++function shortType(type: string) {
++  const pieces = type.split(".")
++  return pieces[pieces.length - 1] || type
++}
++
++function firstSentence(value: string | undefined) {
++  const text = String(value ?? "").trim()
++  if (!text) return ""
++  const end = text.search(/[.!?](?:\s|$)/)
++  return (end >= 0 ? text.slice(0, end) : text).trim()
++}
++
++function unique(values: readonly string[]) {
++  return [...new Set(values)]
++}
+diff --git a/packages/workbench-v3/src/runtime.ts b/packages/workbench-v3/src/runtime.ts
+index 90d3377..e902931 100644
+--- a/packages/workbench-v3/src/runtime.ts
++++ b/packages/workbench-v3/src/runtime.ts
+@@ -1,7 +1,9 @@
+ import "server-only"
+ 
++import { buildReactionDataset } from "@ekairos/dataset"
+ import { EkairosRuntime } from "@ekairos/domain"
+ import { ContextHandle } from "@ekairos/events"
++import { Sandbox } from "@ekairos/sandbox"
+ import { createTestApp } from "@ekairos/testing/provision"
+ import { init } from "@instantdb/admin"
+ 
+@@ -12,7 +14,7 @@ export type WorkbenchContext = Readonly<{
+   createdBy: "workbench-v3"
+ }>
+ 
+-type RuntimeEnv = Readonly<{ appId: string; adminToken: string }>
++type RuntimeEnv = Readonly<{ appId: string; adminToken: string; orgId: string }>
+ 
+ export class WorkbenchRuntime extends EkairosRuntime<
+   RuntimeEnv,
+@@ -29,22 +31,28 @@ export class WorkbenchRuntime extends EkairosRuntime<
+       useDateObjects: true,
+     } as any)
+   }
++
++  async materializeDataset(input: Parameters<typeof buildReactionDataset>[0]) {
++    return await buildReactionDataset(input)
++  }
+ }
+ 
+-type RuntimeState = Readonly<{
++type RuntimeProvision = Readonly<{
+   appId: string
+   adminToken: string
+-  runtime: WorkbenchRuntime
++  orgId: string
++  sandboxId: string
++  sandboxProvider: "daytona"
+ }>
+ 
+ const STATE = Symbol.for("ekairos.workbench-v3.runtime")
+-type RuntimeGlobal = typeof globalThis & { [STATE]?: Promise<RuntimeState> }
++type RuntimeGlobal = typeof globalThis & { [STATE]?: Promise<RuntimeProvision> }
+ 
+ function personalAccessToken() {
+   return String(process.env.INSTANT_PERSONAL_ACCESS_TOKEN ?? "").trim()
+ }
+ 
+-async function provision(): Promise<RuntimeState> {
++async function provision(): Promise<RuntimeProvision> {
+   const token = personalAccessToken()
+   if (!token) throw new Error("INSTANT_PERSONAL_ACCESS_TOKEN is required")
+   const app = await createTestApp({
+@@ -56,19 +64,43 @@ async function provision(): Promise<RuntimeState> {
+       $streams: { allow: { view: "true" } },
+     } as any,
+   })
++  const orgId = `workbench:${app.appId}`
++  const runtime = new WorkbenchRuntime({
++    appId: app.appId,
++    adminToken: app.adminToken,
++    orgId,
++  })
++  const sandbox = await Sandbox.create(runtime, {
++    provider: "daytona",
++    runtime: "python3.12",
++    purpose: "workbench.reaction",
++    dataset: { enabled: true },
++    daytona: {
++      language: "python",
++      ephemeral: true,
++      autoStopIntervalMin: 30,
++    },
++  })
+   return Object.freeze({
+     ...app,
+-    runtime: new WorkbenchRuntime({
+-      appId: app.appId,
+-      adminToken: app.adminToken,
+-    }),
++    orgId,
++    sandboxId: sandbox.id,
++    sandboxProvider: "daytona" as const,
+   })
+ }
+ 
+ export async function getWorkbenchRuntime() {
+   const root = globalThis as RuntimeGlobal
+   root[STATE] ??= provision()
+-  return await root[STATE]
++  const provisioned = await root[STATE]
++  return {
++    ...provisioned,
++    runtime: new WorkbenchRuntime({
++      appId: provisioned.appId,
++      adminToken: provisioned.adminToken,
++      orgId: provisioned.orgId,
++    }),
++  }
+ }
+ 
+ export async function ensureWorkbenchContext(contextId?: string) {
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 5272f7a..a840a00 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -516,7 +516,7 @@ importers:
+         version: 5.0.0-beta.1
+       '@workflow/vitest':
+         specifier: 5.0.0-beta.5
+-        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
++        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
+       dotenv:
+         specifier: ^17.2.3
+         version: 17.2.3
+@@ -1363,7 +1363,7 @@ importers:
+         version: 24.5.0
+       '@workflow/vitest':
+         specifier: 5.0.0-beta.5
+-        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
++        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
+       typescript:
+         specifier: ^5.9.2
+         version: 5.9.3
+@@ -1459,6 +1459,9 @@ importers:
+       '@ai-sdk/openai':
+         specifier: ^2.0.68
+         version: 2.0.68(zod@4.3.6)
++      '@ekairos/dataset':
++        specifier: workspace:*
++        version: link:../dataset
+       '@ekairos/domain':
+         specifier: workspace:*
+         version: link:../domain
+@@ -1468,12 +1471,18 @@ importers:
+       '@ekairos/reactor':
+         specifier: workspace:*
+         version: link:../reactor
++      '@ekairos/sandbox':
++        specifier: workspace:*
++        version: link:../sandbox
+       '@ekairos/testing':
+         specifier: workspace:*
+         version: link:../ekairos-test
+       '@instantdb/admin':
+         specifier: 0.22.158
+         version: 0.22.158
++      '@instantdb/core':
++        specifier: 0.22.158
++        version: 0.22.158
+       '@instantdb/react':
+         specifier: 0.22.158
+         version: 0.22.158(react@19.2.1)
+@@ -17614,6 +17623,23 @@ snapshots:
+       - supports-color
+       - zod
+ 
++  '@workflow/vitest@5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)':
++    dependencies:
++      '@workflow/builders': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
++      '@workflow/core': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
++      '@workflow/rollup': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
++      '@workflow/world': 5.0.0-beta.2(zod@4.3.6)
++      '@workflow/world-local': 5.0.0-beta.4(@opentelemetry/api@1.9.0)
++      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
++    optionalDependencies:
++      vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
++    transitivePeerDependencies:
++      - '@opentelemetry/api'
++      - '@swc/helpers'
++      - aws-crt
++      - supports-color
++      - zod
++
+   '@workflow/vitest@5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)':
+     dependencies:
+       '@workflow/builders': 5.0.0-beta.5(@opentelemetry/api@1.9.0)

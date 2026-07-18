@@ -106,6 +106,37 @@ describe("remote sandbox session filesystem existence", () => {
     )
   })
 
+  it("forwards Daytona command path, environment, and timeout", async () => {
+    const executeCommand = vi.fn(async () => ({ exitCode: 0, result: "ok" }))
+    mocks.createDaytona.mockResolvedValue({
+      id: "daytona-test",
+      fs: {
+        getFileDetails: vi.fn(async () => ({})),
+        uploadFiles: vi.fn(async () => undefined),
+        downloadFile: vi.fn(async () => Buffer.alloc(0)),
+      },
+      process: { executeCommand },
+    })
+
+    const session = await createSandboxSession(daytonaSandbox())
+
+    await expect(
+      session.exec({
+        command: "node",
+        args: ["script.js", "hello world"],
+        cwd: "/home/daytona/contexts/context-1/repositories/platform/checkout",
+        env: { EKAIROS_CONTEXT: "/home/daytona/contexts/context-1" },
+        timeoutMs: 1_001,
+      }),
+    ).resolves.toMatchObject({ exitCode: 0, output: "ok" })
+    expect(executeCommand).toHaveBeenCalledWith(
+      "EKAIROS_CONTEXT='/home/daytona/contexts/context-1'; export EKAIROS_CONTEXT; node script.js 'hello world'",
+      "/home/daytona/contexts/context-1/repositories/platform/checkout",
+      undefined,
+      2,
+    )
+  })
+
   it("uses Sprites' exec API to distinguish present, missing, and failed probes", async () => {
     mocks.provisionSprites.mockResolvedValue({
       __provider: "sprites",

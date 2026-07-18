@@ -1,24 +1,29 @@
 import { defineEvent, domain, EkairosRuntime } from "@ekairos/domain"
-import { contextDomain, Part } from "@ekairos/events"
+import {
+  ContextHandle,
+  contextDomain,
+  Part,
+  type ContextEvent,
+  type StoredContext,
+} from "@ekairos/events"
 import { init } from "@instantdb/admin"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { z } from "zod"
 
 import {
   defineReaction,
-  runReactionWorkflow,
   type ReactionEngine,
   type ReactionEngineActions,
   type ReactionEngineInput,
-  type ReactionWorkflowPayload,
 } from "../../index.ts"
+import { executeReaction } from "../../reaction.ts"
 
 export type ReactorWorkflowEnv = {
   appId: string
   adminToken: string
 }
 
-export type ReactorWorkflowContext = {
+export type ReactorWorkflowContent = {
   prefix: string
 }
 
@@ -59,7 +64,36 @@ export class ReactorWorkflowRuntime extends EkairosRuntime<
   }
 }
 
-class ReactorWorkflowEngine implements ReactionEngine<ReactorWorkflowContext> {
+export class ReactorWorkflowContext extends ContextHandle<ReactorWorkflowContent> {
+  declare readonly runtime: ReactorWorkflowRuntime
+
+  constructor(
+    runtime: ReactorWorkflowRuntime,
+    context: StoredContext<ReactorWorkflowContent>,
+  ) {
+    super(runtime, context)
+  }
+
+  static [WORKFLOW_SERIALIZE](instance: ReactorWorkflowContext) {
+    return { runtime: instance.runtime, context: instance.context }
+  }
+
+  static [WORKFLOW_DESERIALIZE](data: {
+    runtime: ReactorWorkflowRuntime
+    context: StoredContext<ReactorWorkflowContent>
+  }) {
+    return new ReactorWorkflowContext(data.runtime, data.context)
+  }
+
+  async react(
+    trigger: ContextEvent,
+    definition: typeof reactorWorkflowReaction,
+  ) {
+    return await executeReaction(this.runtime, this, trigger, definition)
+  }
+}
+
+class ReactorWorkflowEngine implements ReactionEngine<ReactorWorkflowContent> {
   static [WORKFLOW_SERIALIZE]() {
     return {}
   }
@@ -69,7 +103,7 @@ class ReactorWorkflowEngine implements ReactionEngine<ReactorWorkflowContext> {
   }
 
   async agent<TOutput, TActions extends ReactionEngineActions>(
-    input: ReactionEngineInput<ReactorWorkflowContext, TOutput, TActions>,
+    input: ReactionEngineInput<ReactorWorkflowContent, TOutput, TActions>,
   ) {
     const request = reactorWorkflowDomain.events.requested.payload.parse(
       input.trigger.payload,
@@ -105,8 +139,12 @@ export const reactorWorkflowReaction = defineReaction(
   },
 )
 
-export async function reactorWorkflow(payload: ReactionWorkflowPayload) {
+export async function reactorWorkflow(
+  context: ReactorWorkflowContext,
+  trigger: ContextEvent,
+) {
   "use workflow"
 
-  return await runReactionWorkflow(payload, [reactorWorkflowReaction])
+  const answered = await context.react(trigger, reactorWorkflowReaction)
+  return answered
 }

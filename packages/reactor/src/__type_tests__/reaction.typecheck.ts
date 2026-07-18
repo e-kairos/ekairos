@@ -7,6 +7,7 @@ import {
 } from "@ekairos/domain"
 import type { ContextEvent } from "@ekairos/events"
 import * as reactorSurface from "../index.js"
+import type { ReactorPath } from "../workspace-path.js"
 import { defineReaction } from "../reaction.js"
 
 const messageReceived = defineEvent({
@@ -44,12 +45,31 @@ defineReaction(
     answer.payload.answer satisfies string
     const checked: ContextEvent<{ answer: string }> = answer
 
-    const workspace = await reaction.given(checked).workspace({
-      files: ["file-1"],
-      directory: "requisition",
-      conflict: "verify",
+    const files = await reaction.given(checked).loadFiles()
+    files.payload.path satisfies ReactorPath
+    files.payload.files[0]?.path satisfies ReactorPath | undefined
+
+    const repository = await reaction.given(checked).git({
+      operation: "clone",
+      key: "platform",
+      url: "https://example.test/platform.git",
     })
-    workspace.payload.files[0]?.path satisfies string | undefined
+    repository.payload.path satisfies ReactorPath
+    const inspected = await reaction.given(repository).shell({
+      command: "git",
+      args: ["status", "--short"],
+      path: repository.payload.path,
+    })
+    const stored = await reaction.given(inspected).storeFiles({
+      path: repository.payload.path,
+      files: "review.md",
+    })
+    stored.payload.files[0]?.fileId satisfies string | undefined
+    await reaction.given(stored).git({
+      operation: "commit",
+      path: repository.payload.path,
+      message: "Record review",
+    })
 
     const saved = await reaction.given(checked).action(
       conversation.actions.saveAnswer.scope({ conversationId: "conversation-1" }),
@@ -78,6 +98,10 @@ defineReaction(
     reaction.given(answer).compute({ instruction: "No." })
     // @ts-expect-error effect was renamed to emit
     reaction.given(answer).effect(conversation.events.messageAnswered({ answer: "No." }))
+    // @ts-expect-error shell uses a typed logical path, never cwd
+    reaction.given(answer).shell({ command: "pwd", cwd: "." })
+    // @ts-expect-error workspace was replaced by loadFiles/storeFiles
+    reaction.given(answer).workspace({ files: ["file-1"] })
 
     return await reaction.given(saved).emit(
       conversation.events.messageAnswered({ answer: checked.payload.answer }),

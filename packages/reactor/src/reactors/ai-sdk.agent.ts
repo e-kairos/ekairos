@@ -4,11 +4,16 @@ import {
   type ContextPartEnvelope,
 } from "@ekairos/events"
 
-import type { ReactionModel, ReactionToolAction } from "../reactor.js"
+import type {
+  ReactionEngineStream,
+  ReactionModel,
+  ReactionToolAction,
+} from "../reactor.js"
 import {
   actionSpecToAiSdkTool,
   actionsToActionSpecs,
 } from "../tools-to-model-tools.js"
+import { mapAiSdkStreamChunk } from "./ai-sdk.stream.js"
 
 export type ReactionToolChoice =
   | "auto"
@@ -22,6 +27,8 @@ export async function executeAiSdkAgentRound(input: {
   actions: Readonly<Record<string, ReactionToolAction>>
   toolChoice: ReactionToolChoice
   contextId: string
+  round: number
+  stream?: ReactionEngineStream
 }): Promise<{
   parts: readonly ContextPartEnvelope[]
   calls: readonly Readonly<{
@@ -54,12 +61,20 @@ export async function executeAiSdkAgentRound(input: {
     providerOptions: { openai: { promptCacheKey: input.contextId } },
   })
 
+  const streamed = (async () => {
+    if (!input.stream || !result.fullStream) return
+    for await (const chunk of result.fullStream) {
+      await input.stream.emit(mapAiSdkStreamChunk(chunk, input.round))
+    }
+  })()
+
   const [text, toolCalls, usage, providerMetadata] = await Promise.all([
     Promise.resolve(result.text).catch(() => ""),
     Promise.resolve(result.toolCalls).catch(() => []),
     Promise.resolve(result.usage).catch(() => undefined),
     Promise.resolve(result.providerMetadata ?? result.experimental_providerMetadata)
       .catch(() => undefined),
+    streamed,
   ])
   const calls = (Array.isArray(toolCalls) ? toolCalls : []).map((call: any) => ({
     actionCallId: String(call.toolCallId ?? call.id ?? globalThis.crypto.randomUUID()),

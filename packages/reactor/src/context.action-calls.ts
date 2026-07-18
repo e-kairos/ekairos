@@ -18,7 +18,7 @@ export function applyActionResult(
 ) {
   return normalizePartsForPersistence([
     ...parts,
-    result.ok
+    result.ok === true
       ? {
           type: "action",
           content: {
@@ -34,9 +34,8 @@ export function applyActionResult(
             status: "failed",
             actionName: call.actionName,
             actionCallId: call.actionCallId,
-            error: { message: result.error },
+            error: { message: (result as Readonly<{ ok: false; error: string }>).error },
           },
         },
   ])
 }
-

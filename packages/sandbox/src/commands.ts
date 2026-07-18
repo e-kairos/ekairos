@@ -18,10 +18,18 @@ export async function runCommandInSandbox(
   sandbox: Sandbox,
   command: string,
   args: string[] = [],
+  options: {
+    cwd?: string
+    env?: Record<string, string>
+  } = {},
 ): Promise<CommandResult> {
   try {
-    // @vercel/sandbox soporta { cmd, args } en runCommand
-    const result = await sandbox.runCommand({ cmd: command, args })
+    const result = await sandbox.runCommand({
+      cmd: command,
+      args,
+      cwd: options.cwd,
+      env: options.env,
+    })
 
     const stdout = (await result.stdout()) ?? ""
     const stderr = (await result.stderr()) ?? ""

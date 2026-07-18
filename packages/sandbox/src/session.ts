@@ -30,6 +30,7 @@ import {
 } from "./providers/sprites.js"
 import type { SpritesSandbox } from "./providers/types.js"
 import { provisionVercelSandbox } from "./providers/vercel.js"
+import { withPosixEnvironment } from "./shell-environment.js"
 
 export type SandboxExecInput = {
   command: string
@@ -468,7 +469,15 @@ export function daytonaSandbox(config: SandboxConfig = {}): SandboxSessionProvid
         async exec(input) {
           const args = normalizeArgs(input.args).map(shellEscapeArg)
           const command = args.length > 0 ? [input.command, ...args].join(" ") : input.command
-          const result = await (sandbox as DaytonaSandbox).process.executeCommand(command)
+          const scopedCommand = withPosixEnvironment(command, input.env)
+          const result = await (sandbox as DaytonaSandbox).process.executeCommand(
+            scopedCommand,
+            input.cwd,
+            undefined,
+            input.timeoutMs === undefined
+              ? undefined
+              : Math.max(1, Math.ceil(input.timeoutMs / 1_000)),
+          )
           const exitCode = Number(result.exitCode ?? 0)
           return makeCommandResult({
             exitCode,

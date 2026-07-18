@@ -56,6 +56,7 @@ export type ContextSession = Readonly<{
   rootReactionId: string
   status: SessionStatus
   parentSessionId?: string
+  parentReactionId?: string
   sandboxId?: string
   workflowRunId?: string
   error?: unknown
@@ -74,6 +75,11 @@ export type ContextReaction = Readonly<{
   effectIds: readonly string[]
   parentReactionId?: string
   instruction?: string
+  streamId?: string
+  streamClientId?: string
+  streamStartedAt?: Date
+  streamFinishedAt?: Date
+  streamError?: string
   error?: unknown
   createdAt: Date
   updatedAt?: Date
@@ -112,6 +118,7 @@ export interface ContextStore {
     definition: string
     triggerId: string
     parentSessionId?: string
+    parentReactionId?: string
     sandboxId?: string
     workflowRunId?: string
     createdAt?: Date
@@ -135,6 +142,25 @@ export interface ContextStore {
     createdAt?: Date
   }>): Promise<ContextReaction>
   getReaction(reactionId: string): Promise<ContextReaction | null>
+  appendReactionEffect(
+    reactionId: string,
+    effectId: string,
+  ): Promise<ContextReaction>
+  attachReactionStream(
+    reactionId: string,
+    stream: Readonly<{
+      streamId: string
+      clientId: string
+      startedAt?: Date
+    }>,
+  ): Promise<ContextReaction>
+  finishReactionStream(
+    reactionId: string,
+    result?: Readonly<{
+      finishedAt?: Date
+      error?: string
+    }>,
+  ): Promise<ContextReaction>
   completeReaction(
     reactionId: string,
     status: Exclude<ReactionStatus, "running">,

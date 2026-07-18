@@ -1,8 +1,4 @@
-import {
-  runReactionWorkflow,
-  type ReactionDefinition,
-  type ReactionWorkflowPayload,
-} from "@ekairos/reactor";
+import type { ContextEvent, ReactionContextHandle } from "@ekairos/context";
 import {
   storySmoke,
   storySmokeScripted,
@@ -49,33 +45,32 @@ function createStageTimer() {
 }
 
 export async function contextEngineDurableWorkflow(
-  payload: ReactionWorkflowPayload,
+  context: ReactionContextHandle,
+  trigger: ContextEvent,
+  reactionKey: string,
 ) {
   "use workflow";
 
   const reactor =
-    payload.reactionKey === "story.smoke.scripted"
+    reactionKey === "story.smoke.scripted"
       ? storySmokeScripted
-      : payload.reactionKey === "story.smoke.tool-error"
+      : reactionKey === "story.smoke.tool-error"
         ? storySmokeToolError
-        : payload.reactionKey === "story.smoke"
+        : reactionKey === "story.smoke"
           ? storySmoke
           : null;
 
   if (!reactor) {
-    throw new Error(`Unknown reaction key "${payload.reactionKey}" for durable workflow`);
+    throw new Error(`Unknown reaction key "${reactionKey}" for durable workflow`);
   }
 
   const benchmark = createStageTimer();
-  const catalog = [storySmoke, storySmokeScripted, storySmokeToolError] as unknown as
-    readonly ReactionDefinition[];
-  const result = await runReactionWorkflow(payload, catalog);
+  const result = await context.react(trigger, reactor);
   // eslint-disable-next-line no-console
   console.log(
     `[context-workflow-benchmark] ${JSON.stringify({
       workflowRunId: String(getWorkflowMetadata()?.workflowRunId ?? ""),
-      reactionKey: payload.reactionKey,
-      sessionId: payload.sessionId,
+      reactionKey,
       ...benchmark.snapshot(),
     })}`,
   );

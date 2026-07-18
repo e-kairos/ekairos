@@ -1,0 +1,330 @@
+*** Begin ECU Patch
+Key: 016-renew-missing-workbench-sandbox
+Title: Renew missing Workbench sandbox leases
+Purpose: Keep repeated Workbench review reactions usable when an ephemeral Daytona sandbox has disappeared.
+
+*** Begin Context
+The Workbench stores a durable Context and Instant app, but its backing Daytona sandbox is ephemeral. A cached sandbox id can later fail with provider errors such as "Sandbox with ID or name ... not found" or with the durable sandbox row already marked shutdown after a failed reconnect.
+
+This patch moves sandbox selection from a fixed id passed into the review reaction to a reaction sandbox resolver. The resolver probes the cached lease with a minimal command, replaces only missing or terminal leases under a shared lock, preserves the current app/context/history, and propagates credential/network/non-terminal failures instead of hiding them.
+
+Verification:
+- pnpm test in packages/workbench-v3: 2 files, 7 tests passed.
+- pnpm typecheck in packages/workbench-v3: passed.
+- pnpm build in packages/workbench-v3: passed with existing optional dependency warnings.
+- Real POST /api/context review scenario with gpt-5.6-sol completed HTTP 200 in 198.32s after creating/using real sandbox + dataset path.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/packages/workbench-v3/DOMAIN.md b/packages/workbench-v3/DOMAIN.md
+index e86f132..412a55c 100644
+--- a/packages/workbench-v3/DOMAIN.md
++++ b/packages/workbench-v3/DOMAIN.md
+@@ -24,3 +24,7 @@ The causal-review Reaction fans out Dataset materialization, requirement
+ extraction, and risk analysis with `Promise.all`; joins those three Events for a
+ decision; executes `recordReview`; and emits `reviewCompleted`. Dataset owns a
+ child Session linked to the parent materialization Reaction.
++
++The Reaction resolves its sandbox lease at execution start. A Daytona sandbox
++that no longer exists is replaced while preserving the same application and
++Context; failures unrelated to absence are propagated unchanged.
+diff --git a/packages/workbench-v3/README.md b/packages/workbench-v3/README.md
+index 7574834..c28dfcf 100644
+--- a/packages/workbench-v3/README.md
++++ b/packages/workbench-v3/README.md
+@@ -21,6 +21,12 @@ The default `Causal review` scenario proves the full path:
+ 4. `workbench.reviewCompleted` is emitted as the final domain Event.
+ 5. Dataset's own materialization appears as a nested child Session.
+ 
++At the beginning of a causal review, the Reaction sandbox resolver probes the
++cached Daytona lease. A missing remote sandbox is replaced once under a shared
++lock without replacing the InstantDB app, Context, or conversation history.
++Provider, network, and credential failures remain visible instead of triggering
++an unrelated replacement.
++
+ Required environment variables:
+ 
+ - `INSTANT_PERSONAL_ACCESS_TOKEN`
+diff --git a/packages/workbench-v3/app/api/context/route.ts b/packages/workbench-v3/app/api/context/route.ts
+index 803e1f5..980c5a9 100644
+--- a/packages/workbench-v3/app/api/context/route.ts
++++ b/packages/workbench-v3/app/api/context/route.ts
+@@ -36,7 +36,6 @@ export async function POST(request: Request) {
+     const event = await answerMessage({
+       runtime: state.runtime,
+       context: state.context,
+-      sandboxId: state.sandboxId,
+       eventId: input.id,
+       text: input.text,
+       parts: input.parts,
+diff --git a/packages/workbench-v3/src/chat-reaction.ts b/packages/workbench-v3/src/chat-reaction.ts
+index 78a38a6..15a07a8 100644
+--- a/packages/workbench-v3/src/chat-reaction.ts
++++ b/packages/workbench-v3/src/chat-reaction.ts
+@@ -22,7 +22,11 @@ import {
+   workbenchRisksSchema,
+   type WorkbenchScenario,
+ } from "./domain"
+-import type { WorkbenchContext, WorkbenchRuntime } from "./runtime"
++import {
++  ensureWorkbenchSandbox,
++  type WorkbenchContext,
++  type WorkbenchRuntime,
++} from "./runtime"
+ 
+ function engine(maxRounds = 8) {
+   return ai({ model: async () => getAzureModel(), maxRounds })
+@@ -52,14 +56,14 @@ function createChatReaction(history: readonly ContextEvent[]) {
+   )
+ }
+ 
+-function createReviewReaction(sandboxId: string) {
++function createReviewReaction(resolveSandbox: () => Promise<string>) {
+   return defineReaction(
+     workbenchDomain.events.messageReceived,
+     {
+       key: "workbench.review-request",
+       scope: workbenchDomain,
+       engine: engine(12),
+-      sandbox: sandboxId,
++      sandbox: async () => await resolveSandbox(),
+     },
+     async reaction => {
+       const [items, requirements, risks] = await Promise.all([
+@@ -125,7 +129,6 @@ function createReviewReaction(sandboxId: string) {
+ export async function answerMessage(input: {
+   runtime: WorkbenchRuntime
+   context: ContextHandle<WorkbenchContext> | null
+-  sandboxId: string
+   eventId: string
+   text: string
+   parts: readonly unknown[]
+@@ -160,7 +163,7 @@ export async function answerMessage(input: {
+     event.type === workbenchDomain.events.messageAnswered.kind ||
+     event.type === workbenchDomain.events.reviewCompleted.kind)
+   const definition = input.scenario === "review"
+-    ? createReviewReaction(input.sandboxId)
++    ? createReviewReaction(() => ensureWorkbenchSandbox(input.runtime))
+     : createChatReaction(history)
+   return await executeReaction(
+     input.runtime,
+diff --git a/packages/workbench-v3/src/runtime.ts b/packages/workbench-v3/src/runtime.ts
+index e902931..de6c42e 100644
+--- a/packages/workbench-v3/src/runtime.ts
++++ b/packages/workbench-v3/src/runtime.ts
+@@ -8,6 +8,7 @@ import { createTestApp } from "@ekairos/testing/provision"
+ import { init } from "@instantdb/admin"
+ 
+ import { workbenchDomain, workbenchSchema } from "./domain"
++import { resolveSandboxLease } from "./sandbox-lifecycle"
+ 
+ export type WorkbenchContext = Readonly<{
+   purpose: string
+@@ -46,12 +47,30 @@ type RuntimeProvision = Readonly<{
+ }>
+ 
+ const STATE = Symbol.for("ekairos.workbench-v3.runtime")
+-type RuntimeGlobal = typeof globalThis & { [STATE]?: Promise<RuntimeProvision> }
++const SANDBOX_REFRESH = Symbol.for("ekairos.workbench-v3.sandbox-refresh")
++type RuntimeGlobal = typeof globalThis & {
++  [STATE]?: Promise<RuntimeProvision>
++  [SANDBOX_REFRESH]?: Promise<RuntimeProvision>
++}
+ 
+ function personalAccessToken() {
+   return String(process.env.INSTANT_PERSONAL_ACCESS_TOKEN ?? "").trim()
+ }
+ 
++async function createWorkbenchSandbox(runtime: WorkbenchRuntime) {
++  return await Sandbox.create(runtime, {
++    provider: "daytona",
++    runtime: "python3.12",
++    purpose: "workbench.reaction",
++    dataset: { enabled: true },
++    daytona: {
++      language: "python",
++      ephemeral: true,
++      autoStopIntervalMin: 30,
++    },
++  })
++}
++
+ async function provision(): Promise<RuntimeProvision> {
+   const token = personalAccessToken()
+   if (!token) throw new Error("INSTANT_PERSONAL_ACCESS_TOKEN is required")
+@@ -70,17 +89,7 @@ async function provision(): Promise<RuntimeProvision> {
+     adminToken: app.adminToken,
+     orgId,
+   })
+-  const sandbox = await Sandbox.create(runtime, {
+-    provider: "daytona",
+-    runtime: "python3.12",
+-    purpose: "workbench.reaction",
+-    dataset: { enabled: true },
+-    daytona: {
+-      language: "python",
+-      ephemeral: true,
+-      autoStopIntervalMin: 30,
+-    },
+-  })
++  const sandbox = await createWorkbenchSandbox(runtime)
+   return Object.freeze({
+     ...app,
+     orgId,
+@@ -103,6 +112,39 @@ export async function getWorkbenchRuntime() {
+   }
+ }
+ 
++export async function ensureWorkbenchSandbox(runtime: WorkbenchRuntime): Promise<string> {
++  const root = globalThis as RuntimeGlobal
++  root[STATE] ??= provision()
++  root[SANDBOX_REFRESH] ??= (async () => {
++    const current = await root[STATE]!
++    const resolved = await resolveSandboxLease(current.sandboxId, {
++      probe: async sandboxId => {
++        const sandbox = await Sandbox.open(runtime, sandboxId)
++        const result = await sandbox.exec({ command: "true" })
++        return {
++          success: result.success,
++          ...(result.error ? { error: result.error } : {}),
++        }
++      },
++      create: async () => (await createWorkbenchSandbox(runtime)).id,
++    })
++    if (!resolved.replaced) return current
++
++    const replacement = Object.freeze({
++      ...current,
++      sandboxId: resolved.sandboxId,
++    })
++    root[STATE] = Promise.resolve(replacement)
++    return replacement
++  })()
++
++  try {
++    return (await root[SANDBOX_REFRESH]).sandboxId
++  } finally {
++    delete root[SANDBOX_REFRESH]
++  }
++}
++
+ export async function ensureWorkbenchContext(contextId?: string) {
+   const state = await getWorkbenchRuntime()
+   if (contextId) {
+diff --git a/packages/workbench-v3/src/sandbox-lifecycle.test.ts b/packages/workbench-v3/src/sandbox-lifecycle.test.ts
+new file mode 100644
+index 0000000..94a7796
+--- /dev/null
++++ b/packages/workbench-v3/src/sandbox-lifecycle.test.ts
+@@ -0,0 +1,70 @@
++import { describe, expect, it, vi } from "vitest"
++
++import { resolveSandboxLease } from "./sandbox-lifecycle"
++
++describe("Workbench sandbox lifecycle", () => {
++  it("reuses a reachable remote sandbox", async () => {
++    const create = vi.fn(async () => "sandbox-new")
++
++    const result = await resolveSandboxLease("sandbox-current", {
++      probe: async () => ({ success: true }),
++      create,
++    })
++
++    expect(result).toEqual({ sandboxId: "sandbox-current", replaced: false })
++    expect(create).not.toHaveBeenCalled()
++  })
++
++  it("creates a replacement when the provider no longer has the sandbox", async () => {
++    const create = vi.fn(async () => "sandbox-new")
++
++    const result = await resolveSandboxLease("sandbox-missing", {
++      probe: async () => ({
++        success: false,
++        error: "Sandbox with ID or name remote-123 not found",
++      }),
++      create,
++    })
++
++    expect(result).toEqual({ sandboxId: "sandbox-new", replaced: true })
++    expect(create).toHaveBeenCalledOnce()
++  })
++
++  it("also replaces a sandbox when opening it reports a missing durable handle", async () => {
++    const result = await resolveSandboxLease("sandbox-missing", {
++      probe: async () => { throw new Error("sandbox_not_found:sandbox-missing") },
++      create: async () => "sandbox-new",
++    })
++
++    expect(result).toEqual({ sandboxId: "sandbox-new", replaced: true })
++  })
++
++  it("replaces a lease already marked as terminal after a failed reconnect", async () => {
++    const result = await resolveSandboxLease("sandbox-shutdown", {
++      probe: async () => ({ success: false, error: "sandbox_not_active:shutdown" }),
++      create: async () => "sandbox-new",
++    })
++
++    expect(result).toEqual({ sandboxId: "sandbox-new", replaced: true })
++  })
++
++  it("does not hide provider, network, or credential failures", async () => {
++    const create = vi.fn(async () => "sandbox-new")
++
++    await expect(resolveSandboxLease("sandbox-current", {
++      probe: async () => ({ success: false, error: "DAYTONA_API_KEY is invalid" }),
++      create,
++    })).rejects.toThrow("DAYTONA_API_KEY is invalid")
++    expect(create).not.toHaveBeenCalled()
++  })
++
++  it("does not replace a lease in a non-terminal transition", async () => {
++    const create = vi.fn(async () => "sandbox-new")
++
++    await expect(resolveSandboxLease("sandbox-creating", {
++      probe: async () => ({ success: false, error: "sandbox_not_active:creating" }),
++      create,
++    })).rejects.toThrow("sandbox_not_active:creating")
++    expect(create).not.toHaveBeenCalled()
++  })
++})
+diff --git a/packages/workbench-v3/src/sandbox-lifecycle.ts b/packages/workbench-v3/src/sandbox-lifecycle.ts
+new file mode 100644
+index 0000000..9a361c0
+--- /dev/null
++++ b/packages/workbench-v3/src/sandbox-lifecycle.ts
+@@ -0,0 +1,33 @@
++export type SandboxProbeResult = Readonly<{
++  success: boolean
++  error?: string
++}>
++
++export type SandboxLeaseDependencies = Readonly<{
++  probe(sandboxId: string): Promise<SandboxProbeResult>
++  create(): Promise<string>
++}>
++
++export function isMissingSandboxError(value: unknown): boolean {
++  const message = value instanceof Error ? value.message : String(value ?? "")
++  return /sandbox_not_found|sandbox_not_active:(?:shutdown|error)|sandbox[\s\S]*not found|not found[\s\S]*sandbox/i.test(message)
++}
++
++export async function resolveSandboxLease(
++  sandboxId: string,
++  dependencies: SandboxLeaseDependencies,
++): Promise<Readonly<{ sandboxId: string; replaced: boolean }>> {
++  try {
++    const probe = await dependencies.probe(sandboxId)
++    if (probe.success) return Object.freeze({ sandboxId, replaced: false })
++
++    const error = String(probe.error ?? "sandbox_probe_failed").trim()
++    if (!isMissingSandboxError(error)) throw new Error(error)
++  } catch (error) {
++    if (!isMissingSandboxError(error)) throw error
++  }
++
++  const replacementId = String(await dependencies.create()).trim()
++  if (!replacementId) throw new Error("sandbox_replacement_id_required")
++  return Object.freeze({ sandboxId: replacementId, replaced: true })
++}
+*** End Git Diff
+*** End ECU Patch

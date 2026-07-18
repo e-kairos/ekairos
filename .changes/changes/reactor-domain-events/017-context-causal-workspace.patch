@@ -1,0 +1,1580 @@
+*** Begin ECU Patch
+Key: 017-context-causal-workspace
+Title: Make Context filesystem operations causal and path-based
+Purpose: Replace public cwd/workspace plumbing with typed Context-owned paths, automatic event-file discovery, explicit materialization and publication, and causal input closure shared by agents, datasets, shell, and Git.
+
+*** Begin Context
+A Reaction now treats Events as the durable causal graph and the Context workspace as its provider-independent filesystem. given(...) resolves transitive ancestors without admitting sibling branches before fan-in. loadFiles() discovers linked $files, preserves immutable identities and origins, and materializes canonical paths. Git returns a branded logical path reused by agent, shell, commit, push, and storeFiles; provider cwd never appears in the public DX. Text and JSON files are projected to models as text while retaining their durable file header.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/packages/events/src/index.ts b/packages/events/src/index.ts
+index 10b0d7f..41cdb38 100644
+--- a/packages/events/src/index.ts
++++ b/packages/events/src/index.ts
+@@ -1,4 +1,5 @@
+ export { contextDomain } from "./schema.js"
++export { contextEventFilesPhysicalLink } from "./schema.js"
+ 
+ export {
+   Events,
+diff --git a/packages/events/src/schema.ts b/packages/events/src/schema.ts
+index 848ea49..311f539 100644
+--- a/packages/events/src/schema.ts
++++ b/packages/events/src/schema.ts
+@@ -1,6 +1,15 @@
+ import { domain } from "@ekairos/domain"
+ import { i } from "@instantdb/core"
+ 
++export const contextEventFilesPhysicalLink = Object.freeze({
++  alias: "files",
++  key: "contextEventFiles",
++  target: "$files",
++  has: "many" as const,
++  forwardLabel: "files",
++  reverseLabel: "contextEvents",
++})
++
+ const contextSchema = {
+   entities: {
+     context_contexts: i.entity({
+@@ -107,6 +116,10 @@ const contextSchema = {
+       forward: { on: "context_eventParts", has: "one", label: "event" },
+       reverse: { on: "context_events", has: "many", label: "eventParts" },
+     },
++    contextEventFiles: {
++      forward: { on: "context_events", has: "many", label: "files" },
++      reverse: { on: "$files", has: "many", label: "contextEvents" },
++    },
+   },
+   rooms: {},
+ } as const
+diff --git a/packages/events/src/tests/context.persistence-schema.test.ts b/packages/events/src/tests/context.persistence-schema.test.ts
+index d336cc6..d81961d 100644
+--- a/packages/events/src/tests/context.persistence-schema.test.ts
++++ b/packages/events/src/tests/context.persistence-schema.test.ts
+@@ -44,5 +44,9 @@ describe("context persistence schema", () => {
+     expect(schema.entities.context_eventParts.links).toEqual({
+       event: { entityName: "context_events", cardinality: "one" },
+     })
++    expect(schema.entities.context_events.links.files).toEqual({
++      entityName: "$files",
++      cardinality: "many",
++    })
+   })
+ })
+diff --git a/packages/reactor/README.md b/packages/reactor/README.md
+index 8cd8b0b..63f0ab4 100644
+--- a/packages/reactor/README.md
++++ b/packages/reactor/README.md
+@@ -178,26 +178,38 @@ items.payload.count
+ ### Workspace, shell, and git
+ 
+ ```ts
+-const files = await reaction.given(reaction.trigger).workspace({
+-  files: reaction.trigger.links.files ?? [],
+-  directory: "inbound",
+-  conflict: "verify",
+-})
++const files = await reaction.given(reaction.trigger).loadFiles()
+ 
+ const repository = await reaction.given(files).git({
+   operation: "clone",
+-  target: "project",
++  key: "project",
+   url: "https://github.com/e-kairos/example",
+   ref: "main",
+ })
+ 
++const review = await reaction.given([repository, files]).agent({
++  path: repository.payload.path,
++  instruction: "Review the repository against the attached request.",
++})
++
+ const tests = await reaction.given(repository).shell({
+   command: "pnpm",
+   args: ["test"],
+-  cwd: repository.payload.path,
++  path: repository.payload.path,
++})
++
++const artifacts = await reaction.given([review, tests]).storeFiles({
++  path: repository.payload.path,
++  files: "review.md",
+ })
+ ```
+ 
++`loadFiles()` discovers every `$files` reference in the selected causal closure,
++deduplicates by immutable file id, and materializes each file at its canonical
++Context path. Git returns a branded logical `path`; callers pass that value to
++agent, shell, commit, push, and `storeFiles` instead of constructing provider
++directories. Provider `cwd` values remain an internal adapter concern.
++
+ These operations require a configured sandbox. The durable sandbox id is
+ reopened for each operation; no live provider object crosses Workflow steps.
+ 
+diff --git a/packages/reactor/src/__type_tests__/reaction.typecheck.ts b/packages/reactor/src/__type_tests__/reaction.typecheck.ts
+index e5bc2b8..c61b711 100644
+--- a/packages/reactor/src/__type_tests__/reaction.typecheck.ts
++++ b/packages/reactor/src/__type_tests__/reaction.typecheck.ts
+@@ -7,6 +7,7 @@ import {
+ } from "@ekairos/domain"
+ import type { ContextEvent } from "@ekairos/events"
+ import * as reactorSurface from "../index.js"
++import type { ReactorPath } from "../workspace-path.js"
+ import { defineReaction } from "../reaction.js"
+ 
+ const messageReceived = defineEvent({
+@@ -44,12 +45,31 @@ defineReaction(
+     answer.payload.answer satisfies string
+     const checked: ContextEvent<{ answer: string }> = answer
+ 
+-    const workspace = await reaction.given(checked).workspace({
+-      files: ["file-1"],
+-      directory: "requisition",
+-      conflict: "verify",
++    const files = await reaction.given(checked).loadFiles()
++    files.payload.path satisfies ReactorPath
++    files.payload.files[0]?.path satisfies ReactorPath | undefined
++
++    const repository = await reaction.given(checked).git({
++      operation: "clone",
++      key: "platform",
++      url: "https://example.test/platform.git",
++    })
++    repository.payload.path satisfies ReactorPath
++    const inspected = await reaction.given(repository).shell({
++      command: "git",
++      args: ["status", "--short"],
++      path: repository.payload.path,
++    })
++    const stored = await reaction.given(inspected).storeFiles({
++      path: repository.payload.path,
++      files: "review.md",
++    })
++    stored.payload.files[0]?.fileId satisfies string | undefined
++    await reaction.given(stored).git({
++      operation: "commit",
++      path: repository.payload.path,
++      message: "Record review",
+     })
+-    workspace.payload.files[0]?.path satisfies string | undefined
+ 
+     const saved = await reaction.given(checked).action(
+       conversation.actions.saveAnswer.scope({ conversationId: "conversation-1" }),
+@@ -78,6 +98,10 @@ defineReaction(
+     reaction.given(answer).compute({ instruction: "No." })
+     // @ts-expect-error effect was renamed to emit
+     reaction.given(answer).effect(conversation.events.messageAnswered({ answer: "No." }))
++    // @ts-expect-error shell uses a typed logical path, never cwd
++    reaction.given(answer).shell({ command: "pwd", cwd: "." })
++    // @ts-expect-error workspace was replaced by loadFiles/storeFiles
++    reaction.given(answer).workspace({ files: ["file-1"] })
+ 
+     return await reaction.given(saved).emit(
+       conversation.events.messageAnswered({ answer: checked.payload.answer }),
+diff --git a/packages/reactor/src/index.ts b/packages/reactor/src/index.ts
+index d60381c..fb55da1 100644
+--- a/packages/reactor/src/index.ts
++++ b/packages/reactor/src/index.ts
+@@ -40,12 +40,19 @@ export type {
+   ReactionSandbox,
+   ReactionSandboxResolverInput,
+   ReactionToolAction,
++  ReactorFileOrigin,
+   ReactorGitCloneOutput,
+   ReactorGitCommitOutput,
+   ReactorGitPushOutput,
+   ReactorInitialContext,
++  ReactorLoadedFile,
++  ReactorLoadFilesOutput,
+   ReactorShellRunInput,
+   ReactorShellRunOutput,
+-  ReactorWorkspaceInput,
+-  ReactorWorkspaceOutput,
++  ReactorStoredFile,
++  ReactorStoreFilesInput,
++  ReactorStoreFilesOutput,
++  ReactorWorkspace,
+ } from "./reactor.js"
++
++export type { ReactorPath } from "./workspace-path.js"
+diff --git a/packages/reactor/src/reaction-causality.ts b/packages/reactor/src/reaction-causality.ts
+new file mode 100644
+index 0000000..5583aee
+--- /dev/null
++++ b/packages/reactor/src/reaction-causality.ts
+@@ -0,0 +1,33 @@
++import type { ContextEvent, ContextReaction } from "@ekairos/events"
++
++export async function resolveCausalEvents(input: Readonly<{
++  sourceIds: readonly string[]
++  getEvent(id: string): Promise<ContextEvent | null>
++  getReaction(id: string): Promise<ContextReaction | null>
++}>): Promise<readonly ContextEvent[]> {
++  const ordered: ContextEvent[] = []
++  const visited = new Set<string>()
++  const visiting = new Set<string>()
++
++  const visit = async (eventId: string): Promise<void> => {
++    if (visited.has(eventId)) return
++    if (visiting.has(eventId)) throw new Error(`reaction_given_cycle:${eventId}`)
++    visiting.add(eventId)
++    const event = await input.getEvent(eventId)
++    if (!event) throw new Error(`reaction_given_event_not_found:${eventId}`)
++    const producerId = typeof event.metadata?.reactionId === "string"
++      ? event.metadata.reactionId
++      : ""
++    if (producerId) {
++      const producer = await input.getReaction(producerId)
++      if (!producer) throw new Error(`reaction_given_producer_not_found:${producerId}`)
++      for (const causeId of producer.causeIds) await visit(causeId)
++    }
++    visiting.delete(eventId)
++    visited.add(eventId)
++    ordered.push(event)
++  }
++
++  for (const sourceId of input.sourceIds) await visit(sourceId)
++  return Object.freeze(ordered)
++}
+diff --git a/packages/reactor/src/reaction-files.ts b/packages/reactor/src/reaction-files.ts
+new file mode 100644
+index 0000000..ad6a6dc
+--- /dev/null
++++ b/packages/reactor/src/reaction-files.ts
+@@ -0,0 +1,38 @@
++import type { ContextEvent } from "@ekairos/events"
++
++export type EventFileOrigin = Readonly<{
++  eventId: string
++  eventType: string
++  link: string
++}>
++
++export type EventFileReference = Readonly<{
++  fileId: string
++  origins: readonly EventFileOrigin[]
++}>
++
++export function collectEventFileReferences(
++  events: readonly ContextEvent[],
++): readonly EventFileReference[] {
++  const files = new Map<string, EventFileOrigin[]>()
++  for (const event of events) {
++    for (const [alias, value] of Object.entries(event.links)) {
++      if (event.physicalLinks[alias]?.target !== "$files") continue
++      const ids = Array.isArray(value) ? value : [value]
++      for (const fileId of ids) {
++        if (typeof fileId !== "string" || !fileId) continue
++        const origins = files.get(fileId) ?? []
++        origins.push(Object.freeze({
++          eventId: event.id,
++          eventType: event.type,
++          link: alias,
++        }))
++        files.set(fileId, origins)
++      }
++    }
++  }
++  return Object.freeze([...files.entries()].map(([fileId, origins]) => Object.freeze({
++    fileId,
++    origins: Object.freeze(origins),
++  })))
++}
+diff --git a/packages/reactor/src/reaction-view.ts b/packages/reactor/src/reaction-view.ts
+index d32706b..10e84ce 100644
+--- a/packages/reactor/src/reaction-view.ts
++++ b/packages/reactor/src/reaction-view.ts
+@@ -186,6 +186,22 @@ async function appendLinkedFiles(
+         size: typeof file.size === "number" ? file.size : undefined,
+       }),
+     })
++    if (isTextMediaType(mediaType) && typeof file.url === "string") {
++      const text = await readLinkedTextFile(file.url, file.size)
++      if (text !== undefined) {
++        content.push({
++          type: "text",
++          text: [
++            "### File content",
++            "",
++            codeJson({ fileId, filename, mediaType }),
++            "",
++            text,
++          ].join("\n"),
++        })
++      }
++      continue
++    }
+     appendFileBlock(content, {
+       type: "file",
+       fileId,
+@@ -196,6 +212,25 @@ async function appendLinkedFiles(
+   }
+ }
+ 
++const MAX_INLINE_TEXT_FILE_BYTES = 512 * 1_024
++
++function isTextMediaType(mediaType: string) {
++  return mediaType.startsWith("text/") || mediaType.includes("json")
++}
++
++async function readLinkedTextFile(url: string, size: unknown) {
++  if (typeof size === "number" && size > MAX_INLINE_TEXT_FILE_BYTES) return undefined
++  try {
++    const response = await fetch(url)
++    if (!response.ok) return undefined
++    const bytes = new Uint8Array(await response.arrayBuffer())
++    if (bytes.byteLength > MAX_INLINE_TEXT_FILE_BYTES) return undefined
++    return new TextDecoder().decode(bytes)
++  } catch {
++    return undefined
++  }
++}
++
+ function appendFileBlock(content: any[], file: any) {
+   const mediaType = typeof file.mediaType === "string"
+     ? file.mediaType
+@@ -207,9 +242,7 @@ function appendFileBlock(content: any[], file: any) {
+     return
+   }
+   if (
+-    mediaType === "application/pdf" ||
+-    mediaType.startsWith("text/") ||
+-    mediaType.includes("json")
++    mediaType === "application/pdf"
+   ) {
+     content.push({
+       type: "file",
+diff --git a/packages/reactor/src/reaction.operation.ts b/packages/reactor/src/reaction.operation.ts
+index cc5d49e..a3b4fd9 100644
+--- a/packages/reactor/src/reaction.operation.ts
++++ b/packages/reactor/src/reaction.operation.ts
+@@ -10,6 +10,7 @@ import {
+ import {
+   Events,
+   Part,
++  contextEventFilesPhysicalLink,
+   getContextRuntimeServices,
+   type ContextEvent,
+   type ContextPartEnvelope,
+@@ -20,6 +21,8 @@ import { Sandbox } from "@ekairos/sandbox/sandbox"
+ import { z } from "zod"
+ 
+ import { runReactionEngineAgent } from "./agent.js"
++import { resolveCausalEvents } from "./reaction-causality.js"
++import { collectEventFileReferences } from "./reaction-files.js"
+ import { buildAgentModelMessages } from "./reaction-view.js"
+ import {
+   openReactionStream,
+@@ -33,11 +36,21 @@ import type {
+   ReactorGitCommitOutput,
+   ReactorGitPushOutput,
+   ReactorInitialContext,
++  ReactorLoadFilesOutput,
+   ReactorShellRunInput,
+   ReactorShellRunOutput,
+-  ReactorWorkspaceInput,
+-  ReactorWorkspaceOutput,
++  ReactorStoreFilesInput,
++  ReactorStoreFilesOutput,
++  ReactorWorkspace,
+ } from "./reactor.js"
++import {
++  appendWorkspacePath,
++  contextWorkspacePath,
++  relativeWorkspaceFile,
++  resolveContextWorkspacePath,
++  workspaceKey,
++  type ReactorPath,
++} from "./workspace-path.js"
+ import type {
+   DatasetAdapterHandle,
+   DatasetAdapterProvider,
+@@ -54,14 +67,14 @@ export type ReactionOperationActionRef = Readonly<{
+ export type ReactionGitInput =
+   | Readonly<{
+       operation: "clone"
+-      target: string
++      key: string
+       url: string
+       ref?: string
+       depth?: number
+     }>
+   | Readonly<{
+       operation: "commit"
+-      repository: string
++      path: ReactorPath
+       message: string
+       all?: boolean
+       authorName?: string
+@@ -69,7 +82,7 @@ export type ReactionGitInput =
+     }>
+   | Readonly<{
+       operation: "push"
+-      repository: string
++      path: ReactorPath
+       remote?: string
+       ref: string
+       forceWithLease?: boolean
+@@ -80,6 +93,7 @@ export type ReactionOperation =
+   | Readonly<{
+       kind: "agent"
+       instruction: string
++      path?: ReactorPath
+       outputSchema?: unknown
+       actions: readonly ReactionOperationActionRef[]
+       model?: ReactionModel
+@@ -96,7 +110,8 @@ export type ReactionOperation =
+       recordSchema: unknown
+       source: DatasetAdapterSource
+     }>
+-  | Readonly<{ kind: "workspace"; input: ReactorWorkspaceInput }>
++  | Readonly<{ kind: "loadFiles" }>
++  | Readonly<{ kind: "storeFiles"; input: ReactorStoreFilesInput }>
+   | Readonly<{ kind: "shell"; input: ReactorShellRunInput }>
+   | Readonly<{ kind: "git"; input: ReactionGitInput }>
+   | Readonly<{
+@@ -215,12 +230,15 @@ async function runOperation(
+       : undefined
+     const actions = resolveEngineActions(request.runtime, operation.actions)
+     const sandbox = await openSandbox(request)
++    const workspace = sandbox ? await prepareReactionWorkspace(request, sandbox) : undefined
++    if (operation.path && !workspace) throw new Error("reaction_agent_path_requires_sandbox")
++    const given = await hydrateEvents(request.runtime, request.causeIds)
+     const messages = await buildAgentModelMessages({
+       runtime: request.runtime,
+       reactionKey: request.definition,
+       instruction: operation.instruction,
+       context: request.context,
+-      events: await hydrateEvents(request.runtime, request.causeIds),
++      events: given,
+     })
+     const result = await runReactionEngineAgent({
+       engine: request.engine,
+@@ -231,7 +249,7 @@ async function runOperation(
+         trigger: request.trigger,
+         sessionId: request.sessionId,
+         reactionId: request.reactionId,
+-        given: await hydrateEvents(request.runtime, request.causeIds),
++        given,
+         messages,
+         instruction: operation.instruction,
+         ...(output ? { output } : {}),
+@@ -239,7 +257,20 @@ async function runOperation(
+         ...(operation.maxRounds === undefined ? {} : { maxRounds: operation.maxRounds }),
+         actions,
+         ...(stream ? { stream } : {}),
+-        ...(sandbox ? { sandbox, workspaceRoot: sandbox.workspaceRoot } : {}),
++        ...(sandbox && workspace
++          ? {
++              sandbox,
++              workspaceRoot: resolveContextWorkspacePath(
++                sandbox.workspaceRoot,
++                request.context.ref.id,
++                operation.path ?? workspace.contextPath,
++              ),
++              workspace: {
++                ...workspace,
++                path: operation.path ?? workspace.contextPath,
++              },
++            }
++          : {}),
+       },
+     })
+     return await createOperationEvent(request, result.output, result.parts ?? [], {
+@@ -341,11 +372,22 @@ async function runOperation(
+     })
+   }
+ 
+-  if (operation.kind === "workspace") {
+-    const result = await materializeWorkspace(request, operation.input)
++  if (operation.kind === "loadFiles") {
++    const result = await loadFiles(request)
+     return await createOperationEvent(request, result, [Part.json(result)])
+   }
+ 
++  if (operation.kind === "storeFiles") {
++    const result = await storeFiles(request, operation.input)
++    return await createOperationEvent(
++      request,
++      result.output,
++      [Part.json(result.output)],
++      {},
++      result.fileIds,
++    )
++  }
++
+   if (operation.kind === "shell") {
+     const result = await runShell(request, operation.input)
+     return await createOperationEvent(request, result, [Part.json(result)])
+@@ -360,6 +402,7 @@ async function createOperationEvent(
+   payload: unknown,
+   parts: readonly ContextPartEnvelope[] = [],
+   metadata: Readonly<Record<string, unknown>> = {},
++  fileIds: readonly string[] = [],
+ ) {
+   return await Events(request.runtime).create({
+     id: request.eventId,
+@@ -367,6 +410,12 @@ async function createOperationEvent(
+     payload,
+     contextId: request.context.ref.id,
+     metadata: { ...operationMetadata(request), ...metadata },
++    ...(fileIds.length > 0
++      ? {
++          links: { files: [...fileIds] },
++          physicalLinks: { files: contextEventFilesPhysicalLink },
++        }
++      : {}),
+     parts,
+   })
+ }
+@@ -439,13 +488,11 @@ async function hydrateEvents(
+   ids: readonly string[],
+ ) {
+   const { store } = await getContextRuntimeServices(runtime)
+-  const events: ContextEvent[] = []
+-  for (const id of ids) {
+-    const event = await store.getEvent(id)
+-    if (!event) throw new Error(`reaction_given_event_not_found:${id}`)
+-    events.push(event)
+-  }
+-  return Object.freeze(events)
++  return await resolveCausalEvents({
++    sourceIds: ids,
++    getEvent: id => store.getEvent(id),
++    getReaction: id => store.getReaction(id),
++  })
+ }
+ 
+ export function deriveDatasetSource(events: readonly ContextEvent[]): DatasetAdapterSource {
+@@ -457,6 +504,14 @@ export function deriveDatasetSource(events: readonly ContextEvent[]): DatasetAda
+         if (typeof id === "string") files.add(id)
+       }
+     }
++    if (event.type === "context.loadFiles") {
++      const rows = Array.isArray((event.payload as any)?.files)
++        ? (event.payload as any).files
++        : []
++      for (const row of rows) {
++        if (typeof row?.fileId === "string" && row.fileId) files.add(row.fileId)
++      }
++    }
+   }
+   if (files.size > 0) {
+     return Object.freeze({
+@@ -493,10 +548,76 @@ async function openSandbox(request: ReactionOperationRequest) {
+   return await Sandbox.open(request.runtime as any, request.sandboxId)
+ }
+ 
+-async function requireSandbox(request: ReactionOperationRequest) {
++async function requireReactionWorkspace(request: ReactionOperationRequest) {
+   const sandbox = await openSandbox(request)
+   if (!sandbox) throw new Error("reaction_sandbox_not_configured")
+-  return sandbox
++  const workspace = await prepareReactionWorkspace(request, sandbox)
++  return Object.freeze({ sandbox, workspace })
++}
++
++async function prepareReactionWorkspace(
++  request: ReactionOperationRequest,
++  sandbox: NonNullable<Awaited<ReturnType<typeof openSandbox>>>,
++): Promise<ReactorWorkspace> {
++  const contextPath = contextWorkspacePath(request.context.ref.id)
++  const sessionKey = workspaceKey(request.sessionId)
++  const reactionKey = workspaceKey(request.reactionId)
++  const artifactsPath = contextWorkspacePath(
++    request.context.ref.id,
++    "artifacts",
++    sessionKey,
++    reactionKey,
++  )
++  const tmpPath = contextWorkspacePath(
++    request.context.ref.id,
++    "tmp",
++    sessionKey,
++    reactionKey,
++  )
++  await ensureWorkspaceManifest(
++    sandbox,
++    resolveContextWorkspacePath(
++      sandbox.workspaceRoot,
++      request.context.ref.id,
++      appendWorkspacePath(contextPath, "manifest.json"),
++    ),
++    {
++      schema: "ekairos.context-workspace/v1",
++      contextId: request.context.ref.id,
++    },
++  )
++  await ensureWorkspaceManifest(
++    sandbox,
++    resolveContextWorkspacePath(
++      sandbox.workspaceRoot,
++      request.context.ref.id,
++      appendWorkspacePath(artifactsPath, "manifest.json"),
++    ),
++    {
++      schema: "ekairos.reaction-artifacts/v1",
++      contextId: request.context.ref.id,
++      sessionId: request.sessionId,
++      reactionId: request.reactionId,
++    },
++  )
++  return Object.freeze({
++    contextPath,
++    path: contextPath,
++    artifactsPath,
++    tmpPath,
++  })
++}
++
++async function ensureWorkspaceManifest(
++  sandbox: NonNullable<Awaited<ReturnType<typeof openSandbox>>>,
++  path: string,
++  value: Readonly<Record<string, string>>,
++) {
++  if (await sandbox.exists(path)) return
++  await sandbox.writeFile({
++    path,
++    content: `${JSON.stringify(value, null, 2)}\n`,
++  })
+ }
+ 
+ async function runShell(
+@@ -504,13 +625,35 @@ async function runShell(
+   input: ReactorShellRunInput,
+ ): Promise<ReactorShellRunOutput> {
+   if (!input.command?.trim()) throw new Error("reaction_shell_command_required")
+-  const sandbox = await requireSandbox(request)
+-  const cwd = resolveWorkspacePath(sandbox.workspaceRoot, input.cwd)
++  const { sandbox, workspace } = await requireReactionWorkspace(request)
++  const path = input.path ?? workspace.contextPath
++  const physicalPath = resolveContextWorkspacePath(
++    sandbox.workspaceRoot,
++    request.context.ref.id,
++    path,
++  )
+   const result: any = await sandbox.exec({
+     command: input.command,
+     args: [...(input.args ?? [])],
+-    cwd,
+-    env: input.env ? { ...input.env } : undefined,
++    cwd: physicalPath,
++    env: {
++      ...(input.env ?? {}),
++      EKAIROS_CONTEXT: resolveContextWorkspacePath(
++        sandbox.workspaceRoot,
++        request.context.ref.id,
++        workspace.contextPath,
++      ),
++      EKAIROS_ARTIFACTS: resolveContextWorkspacePath(
++        sandbox.workspaceRoot,
++        request.context.ref.id,
++        workspace.artifactsPath,
++      ),
++      EKAIROS_TMP: resolveContextWorkspacePath(
++        sandbox.workspaceRoot,
++        request.context.ref.id,
++        workspace.tmpPath,
++      ),
++    },
+     timeoutMs: input.timeoutMs,
+   })
+   const exitCode = typeof result.exitCode === "number" ? result.exitCode : result.success === false ? 1 : 0
+@@ -520,87 +663,200 @@ async function runShell(
+     output: typeof result.output === "string" ? result.output : "",
+     error: typeof result.error === "string" ? result.error : "",
+     command: [input.command, ...(input.args ?? [])].join(" "),
+-    ...(cwd ? { cwd } : {}),
++    path,
+   })
+ }
+ 
+-async function materializeWorkspace(
++async function loadFiles(
+   request: ReactionOperationRequest,
+-  input: ReactorWorkspaceInput,
+-): Promise<ReactorWorkspaceOutput> {
+-  const sandbox = await requireSandbox(request)
+-  const refs = [...new Set(
+-    (Array.isArray(input.files) ? input.files : [input.files])
+-      .map(value => String(value).trim())
+-      .filter(Boolean),
+-  )]
+-  if (refs.length === 0) throw new Error("reaction_workspace_files_required")
+-  const directory = normalizeRelativePath(input.directory ?? "files")
+-  const root = sandbox.workspaceRoot
++): Promise<ReactorLoadFilesOutput> {
++  const { sandbox } = await requireReactionWorkspace(request)
++  const events = await hydrateEvents(request.runtime, request.causeIds)
++  const refs = collectEventFileReferences(events)
++  const path = contextWorkspacePath(request.context.ref.id, "files")
+   const db = await request.runtime.db()
+-  const files: any[] = []
++  const files: ReactorLoadFilesOutput["files"][number][] = []
+ 
+   for (const ref of refs) {
+-    const result = await db.query({ $files: { $: { where: { id: ref }, limit: 1 } } } as any)
++    const result = await db.query({
++      $files: { $: { where: { id: ref.fileId }, limit: 1 } },
++    } as any)
+     const file = result?.$files?.[0]
+-    if (!file) throw new Error(`reaction_workspace_file_not_found:${ref}`)
++    if (!file) throw new Error(`reaction_file_not_found:${ref.fileId}`)
+     const fileId = String(file.id)
+-    const filename = safeFilename(String(file.path ?? file.name ?? fileId))
+-    const path = joinPath(root, directory, filename)
++    const name = safeFilename(String(file.path ?? file.name ?? fileId))
++    const filePath = contextWorkspacePath(
++      request.context.ref.id,
++      "files",
++      workspaceKey(fileId),
++      name,
++    )
++    const physicalPath = resolveContextWorkspacePath(
++      sandbox.workspaceRoot,
++      request.context.ref.id,
++      filePath,
++    )
+     const bytes = await loadFileBytes(fileId, file.url)
+-    const exists = await sandbox.exists(path)
+-    let status: "created" | "reused" | "replaced" = "created"
++    const exists = await sandbox.exists(physicalPath)
++    let status: "created" | "reused" = "created"
+     if (exists) {
+-      if (input.conflict === "error") {
+-        throw new Error(`reaction_workspace_file_conflict:${path}`)
+-      }
+-      const current = await sandbox.readFile(path)
++      const current = await sandbox.readFile(physicalPath)
+       if (sameBytes(current, bytes)) {
+         status = "reused"
+-      } else if (input.conflict === "replace") {
+-        await sandbox.writeFile({ path, content: bytes })
+-        status = "replaced"
+       } else {
+-        throw new Error(`reaction_workspace_file_conflict:${path}`)
++        throw new Error(`reaction_file_identity_conflict:${fileId}`)
+       }
+     } else {
+-      await sandbox.writeFile({ path, content: bytes })
++      await sandbox.writeFile({ path: physicalPath, content: bytes })
+     }
+     files.push(Object.freeze({
+-      ref,
+       fileId,
+-      filename,
++      name,
+       ...(file["content-type"] ?? file.contentType
+         ? { mediaType: String(file["content-type"] ?? file.contentType) }
+         : {}),
+-      path,
++      path: filePath,
+       status,
+       size: bytes.byteLength,
++      origins: ref.origins,
++    }))
++  }
++
++  return Object.freeze({ path, files: Object.freeze(files) })
++}
++
++async function storeFiles(
++  request: ReactionOperationRequest,
++  input: ReactorStoreFilesInput,
++): Promise<Readonly<{
++  output: ReactorStoreFilesOutput
++  fileIds: readonly string[]
++}>> {
++  const { sandbox } = await requireReactionWorkspace(request)
++  resolveContextWorkspacePath(
++    sandbox.workspaceRoot,
++    request.context.ref.id,
++    input.path,
++  )
++  const selected = (Array.isArray(input.files) ? input.files : [input.files])
++    .map(relativeWorkspaceFile)
++  if (selected.length === 0) throw new Error("reaction_store_files_required")
++  const db = await request.runtime.db()
++  const files: ReactorStoreFilesOutput["files"][number][] = []
++  const fileIds: string[] = []
++
++  for (const [index, relative] of selected.entries()) {
++    const logicalPath = appendWorkspacePath(input.path, ...relative.split("/"))
++    const physicalPath = resolveContextWorkspacePath(
++      sandbox.workspaceRoot,
++      request.context.ref.id,
++      logicalPath,
++    )
++    if (!await sandbox.exists(physicalPath)) {
++      throw new Error(`reaction_store_file_not_found:${logicalPath}`)
++    }
++    const bytes = await sandbox.readFile(physicalPath)
++    const name = safeFilename(relative)
++    const mediaType = mediaTypeForFilename(name)
++    const uploaded = await db.storage.uploadFile(
++      `/contexts/${request.context.ref.id}/events/${request.eventId}/${index}-${name}`,
++      Buffer.from(bytes),
++      { contentType: mediaType, contentDisposition: name },
++    )
++    const fileId = String((uploaded as any)?.data?.id ?? "")
++    if (!fileId) throw new Error(`reaction_store_file_upload_failed:${logicalPath}`)
++    fileIds.push(fileId)
++    files.push(Object.freeze({
++      fileId,
++      name,
++      mediaType,
++      path: logicalPath,
++      size: bytes.byteLength,
+     }))
+   }
+ 
+-  return Object.freeze({ root, directory, files: Object.freeze(files) })
++  return Object.freeze({
++    output: Object.freeze({ path: input.path, files: Object.freeze(files) }),
++    fileIds: Object.freeze(fileIds),
++  })
+ }
+ 
+ async function runGit(
+   request: ReactionOperationRequest,
+   input: ReactionGitInput,
+ ): Promise<ReactorGitCloneOutput | ReactorGitCommitOutput | ReactorGitPushOutput> {
+-  const sandbox = await requireSandbox(request)
++  const { sandbox } = await requireReactionWorkspace(request)
+   if (input.operation === "clone") {
+-    const target = normalizeRelativePath(input.target)
+-    const path = joinPath(sandbox.workspaceRoot, target)
+-    const reused = await sandbox.exists(joinPath(path, ".git"))
++    if (!input.key?.trim()) throw new Error("reaction_git_repository_key_required")
++    if (!input.url?.trim()) throw new Error("reaction_git_repository_url_required")
++    const path = contextWorkspacePath(
++      request.context.ref.id,
++      "repositories",
++      workspaceKey(input.key),
++      "checkout",
++    )
++    const physicalPath = resolveContextWorkspacePath(
++      sandbox.workspaceRoot,
++      request.context.ref.id,
++      path,
++    )
++    const metadataPath = resolveContextWorkspacePath(
++      sandbox.workspaceRoot,
++      request.context.ref.id,
++      contextWorkspacePath(
++        request.context.ref.id,
++        "repositories",
++        workspaceKey(input.key),
++        "repository.json",
++      ),
++    )
++    const reused = await sandbox.exists(joinPath(physicalPath, ".git"))
+     if (!reused) {
+       const args = ["clone"]
+       if (input.depth !== undefined) args.push("--depth", String(input.depth))
+       if (input.ref) args.push("--branch", input.ref)
+-      args.push("--", input.url, path)
+-      await assertCommand(sandbox, "git", args, sandbox.workspaceRoot)
++      args.push("--", input.url, physicalPath)
++      const contextPhysicalPath = resolveContextWorkspacePath(
++        sandbox.workspaceRoot,
++        request.context.ref.id,
++        contextWorkspacePath(request.context.ref.id),
++      )
++      await assertCommand(sandbox, "git", args, contextPhysicalPath)
++      await sandbox.writeFile({
++        path: metadataPath,
++        content: `${JSON.stringify({
++          schema: "ekairos.repository/v1",
++          key: input.key,
++          url: input.url,
++          ref: input.ref ?? null,
++        }, null, 2)}\n`,
++      })
++    } else {
++      if (!await sandbox.exists(metadataPath)) {
++        throw new Error(`reaction_git_repository_metadata_missing:${input.key}`)
++      }
++      const metadata = JSON.parse(Buffer.from(await sandbox.readFile(metadataPath)).toString("utf8"))
++      if (metadata.url !== input.url || (metadata.ref ?? undefined) !== input.ref) {
++        throw new Error(`reaction_git_repository_identity_conflict:${input.key}`)
++      }
++      const remote = (await assertCommand(
++        sandbox,
++        "git",
++        ["remote", "get-url", "origin"],
++        physicalPath,
++      )).output.trim()
++      if (remote !== input.url) {
++        throw new Error(`reaction_git_repository_remote_conflict:${input.key}`)
++      }
+     }
+-    const sha = (await assertCommand(sandbox, "git", ["rev-parse", "HEAD"], path)).output.trim()
++    const sha = (await assertCommand(
++      sandbox,
++      "git",
++      ["rev-parse", "HEAD"],
++      physicalPath,
++    )).output.trim()
+     return Object.freeze({
+-      target,
++      key: input.key,
+       path,
+       url: input.url,
+       ...(input.ref ? { ref: input.ref } : {}),
+@@ -609,9 +865,17 @@ async function runGit(
+     })
+   }
+ 
+-  const path = resolveWorkspacePath(sandbox.workspaceRoot, input.repository)
++  const path = input.path
++  const physicalPath = resolveContextWorkspacePath(
++    sandbox.workspaceRoot,
++    request.context.ref.id,
++    path,
++  )
++  if (!await sandbox.exists(joinPath(physicalPath, ".git"))) {
++    throw new Error(`reaction_git_repository_not_found:${path}`)
++  }
+   if (input.operation === "commit") {
+-    const status = await assertCommand(sandbox, "git", ["status", "--porcelain"], path)
++    const status = await assertCommand(sandbox, "git", ["status", "--porcelain"], physicalPath)
+     const changedFiles = status.output
+       .split(/\r?\n/)
+       .filter(Boolean)
+@@ -619,13 +883,18 @@ async function runGit(
+     if (changedFiles.length === 0) {
+       return Object.freeze({ path, status: "unchanged", message: input.message, changedFiles: [] })
+     }
+-    if (input.all !== false) await assertCommand(sandbox, "git", ["add", "-A"], path)
++    if (input.all !== false) await assertCommand(sandbox, "git", ["add", "-A"], physicalPath)
+     const env = {
+       ...(input.authorName ? { GIT_AUTHOR_NAME: input.authorName, GIT_COMMITTER_NAME: input.authorName } : {}),
+       ...(input.authorEmail ? { GIT_AUTHOR_EMAIL: input.authorEmail, GIT_COMMITTER_EMAIL: input.authorEmail } : {}),
+     }
+-    await assertCommand(sandbox, "git", ["commit", "-m", input.message], path, env)
+-    const sha = (await assertCommand(sandbox, "git", ["rev-parse", "HEAD"], path)).output.trim()
++    await assertCommand(sandbox, "git", ["commit", "-m", input.message], physicalPath, env)
++    const sha = (await assertCommand(
++      sandbox,
++      "git",
++      ["rev-parse", "HEAD"],
++      physicalPath,
++    )).output.trim()
+     return Object.freeze({
+       path,
+       status: "committed",
+@@ -640,7 +909,7 @@ async function runGit(
+   if (input.setUpstream) args.push("--set-upstream")
+   if (input.forceWithLease) args.push("--force-with-lease")
+   args.push(remote, input.ref)
+-  const pushed = await assertCommand(sandbox, "git", args, path)
++  const pushed = await assertCommand(sandbox, "git", args, physicalPath)
+   return Object.freeze({
+     path,
+     remote,
+@@ -665,32 +934,28 @@ async function assertCommand(
+   return result
+ }
+ 
+-function resolveWorkspacePath(root: string, value: string | undefined) {
+-  if (!value?.trim()) return root
+-  const normalized = value.trim().replace(/\\/g, "/")
+-  if (/^[a-zA-Z]:\//.test(normalized) || normalized.startsWith("/")) {
+-    const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "")
+-    if (normalized !== normalizedRoot && !normalized.startsWith(`${normalizedRoot}/`)) {
+-      throw new Error(`reaction_workspace_path_outside_root:${value}`)
+-    }
+-    return value
+-  }
+-  return joinPath(root, normalizeRelativePath(normalized))
+-}
+-
+-function normalizeRelativePath(value: string) {
+-  const normalized = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
+-  if (!normalized || normalized.split("/").some(part => part === ".." || part === ".")) {
+-    throw new Error(`reaction_workspace_path_invalid:${value}`)
+-  }
+-  return normalized
+-}
+-
+ function safeFilename(value: string) {
+   const filename = value.replace(/\\/g, "/").split("/").pop() ?? "file"
+   return filename.replace(/[^a-zA-Z0-9._-]+/g, "-") || "file"
+ }
+ 
++function mediaTypeForFilename(filename: string) {
++  const extension = filename.toLowerCase().split(".").pop()
++  const types: Readonly<Record<string, string>> = {
++    csv: "text/csv",
++    gif: "image/gif",
++    jpeg: "image/jpeg",
++    jpg: "image/jpeg",
++    json: "application/json",
++    md: "text/markdown",
++    pdf: "application/pdf",
++    png: "image/png",
++    txt: "text/plain",
++    webp: "image/webp",
++  }
++  return extension && types[extension] ? types[extension] : "application/octet-stream"
++}
++
+ function joinPath(root: string, ...parts: string[]) {
+   const separator = root.includes("\\") && !root.startsWith("/") ? "\\" : "/"
+   return [root.replace(/[\\/]+$/, ""), ...parts.map(part => part.replace(/^[\\/]+|[\\/]+$/g, ""))]
+diff --git a/packages/reactor/src/reaction.ts b/packages/reactor/src/reaction.ts
+index 4060dcf..af5a486 100644
+--- a/packages/reactor/src/reaction.ts
++++ b/packages/reactor/src/reaction.ts
+@@ -35,12 +35,14 @@ import type {
+   ReactorGitCommitOutput,
+   ReactorGitPushOutput,
+   ReactorInitialContext,
++  ReactorLoadFilesOutput,
+   ReactorShellRunInput,
+   ReactorShellRunOutput,
+-  ReactorWorkspaceInput,
+-  ReactorWorkspaceOutput,
++  ReactorStoreFilesInput,
++  ReactorStoreFilesOutput,
+   TriggerEventItem,
+ } from "./reactor.js"
++import type { ReactorPath } from "./workspace-path.js"
+ import {
+   persistReactionWorkflowRun,
+   readReactionWorkflowReturnValue,
+@@ -83,6 +85,7 @@ export type ReactionAgentInput<
+   TScope,
+ > = Readonly<{
+   instruction: string
++  path?: ReactorPath
+   output: z.ZodType<TOutput>
+   actions?: { readonly [Index in keyof TActions]: ActionAllowedInScope<TActions[Index], TScope> }
+   model?: ReactionModel
+@@ -94,6 +97,7 @@ export type ReactionTextAgentInput<
+   TScope,
+ > = Readonly<{
+   instruction: string
++  path?: ReactorPath
+   output?: never
+   actions?: { readonly [Index in keyof TActions]: ActionAllowedInScope<TActions[Index], TScope> }
+   model?: ReactionModel
+@@ -125,7 +129,8 @@ export interface GivenOperations<TScope extends DomainLike> {
+   dataset<TRecord>(
+     input: ReactionDatasetInput<TRecord>,
+   ): Promise<ContextEvent<ReactionDatasetHandle<TRecord>>>
+-  workspace(input: ReactorWorkspaceInput): Promise<ContextEvent<ReactorWorkspaceOutput>>
++  loadFiles(): Promise<ContextEvent<ReactorLoadFilesOutput>>
++  storeFiles(input: ReactorStoreFilesInput): Promise<ContextEvent<ReactorStoreFilesOutput>>
+   shell(input: ReactorShellRunInput): Promise<ContextEvent<ReactorShellRunOutput>>
+   git<const TInput extends ReactionGitInput>(
+     input: TInput,
+@@ -292,6 +297,7 @@ class ActiveReaction<
+         return await this.operation(events, {
+           kind: "agent",
+           instruction: requiredInstruction(config.instruction),
++          ...(config.path ? { path: config.path } : {}),
+           ...(config.output
+             ? { outputSchema: z.toJSONSchema(config.output, { target: "draft-7" }) }
+             : {}),
+@@ -318,9 +324,13 @@ class ActiveReaction<
+           source: deriveDatasetSource(events),
+         })
+       },
+-      workspace: async (config: ReactorWorkspaceInput) => {
++      loadFiles: async () => {
+         this.assertSandbox()
+-        return await this.operation(events, { kind: "workspace", input: config })
++        return await this.operation(events, { kind: "loadFiles" })
++      },
++      storeFiles: async (config: ReactorStoreFilesInput) => {
++        this.assertSandbox()
++        return await this.operation(events, { kind: "storeFiles", input: config })
+       },
+       shell: async (config: ReactorShellRunInput) => {
+         this.assertSandbox()
+diff --git a/packages/reactor/src/reactor.ts b/packages/reactor/src/reactor.ts
+index bdedade..804ccf9 100644
+--- a/packages/reactor/src/reactor.ts
++++ b/packages/reactor/src/reactor.ts
+@@ -11,6 +11,8 @@ import type {
+ } from "@ekairos/events"
+ import type { z } from "zod"
+ 
++import type { ReactorPath } from "./workspace-path.js"
++
+ export type ReactionModel = string | (() => Promise<LanguageModel>)
+ 
+ export type ReactionToolAction = Readonly<{
+@@ -61,6 +63,7 @@ export type ReactionEngineInput<
+   stream?: ReactionEngineStream
+   sandbox?: ContextSandboxHandle
+   workspaceRoot?: string
++  workspace?: ReactorWorkspace
+ }>
+ 
+ export type ReactionEngineResult<TOutput = unknown> = Readonly<{
+@@ -141,10 +144,17 @@ export type TriggerEventItem<TTrigger extends DomainEventConstructor<any, any, a
+       : never
+   }
+ 
++export type ReactorWorkspace = Readonly<{
++  contextPath: ReactorPath
++  path: ReactorPath
++  artifactsPath: ReactorPath
++  tmpPath: ReactorPath
++}>
++
+ export type ReactorShellRunInput = Readonly<{
+   command: string
+   args?: readonly string[]
+-  cwd?: string
++  path?: ReactorPath
+   env?: Readonly<Record<string, string>>
+   timeoutMs?: number
+ }>
+@@ -155,34 +165,51 @@ export type ReactorShellRunOutput = Readonly<{
+   output: string
+   error: string
+   command: string
+-  cwd?: string
++  path: ReactorPath
+ }>
+ 
+-export type ReactorWorkspaceInput = Readonly<{
+-  files: string | readonly string[]
+-  directory?: string
+-  conflict?: "verify" | "replace" | "error"
++export type ReactorFileOrigin = Readonly<{
++  eventId: string
++  eventType: string
++  link: string
+ }>
+ 
+-export type ReactorWorkspaceFile = Readonly<{
+-  ref: string
++export type ReactorLoadedFile = Readonly<{
+   fileId: string
+-  filename: string
++  name: string
+   mediaType?: string
+-  path: string
+-  status: "created" | "reused" | "replaced"
++  path: ReactorPath
++  status: "created" | "reused"
++  size: number
++  origins: readonly ReactorFileOrigin[]
++}>
++
++export type ReactorLoadFilesOutput = Readonly<{
++  path: ReactorPath
++  files: readonly ReactorLoadedFile[]
++}>
++
++export type ReactorStoreFilesInput = Readonly<{
++  path: ReactorPath
++  files: string | readonly string[]
++}>
++
++export type ReactorStoredFile = Readonly<{
++  fileId: string
++  name: string
++  mediaType: string
++  path: ReactorPath
+   size: number
+ }>
+ 
+-export type ReactorWorkspaceOutput = Readonly<{
+-  root: string
+-  directory: string
+-  files: readonly ReactorWorkspaceFile[]
++export type ReactorStoreFilesOutput = Readonly<{
++  path: ReactorPath
++  files: readonly ReactorStoredFile[]
+ }>
+ 
+ export type ReactorGitCloneOutput = Readonly<{
+-  target: string
+-  path: string
++  key: string
++  path: ReactorPath
+   url: string
+   ref?: string
+   commitSha?: string
+@@ -190,7 +217,7 @@ export type ReactorGitCloneOutput = Readonly<{
+ }>
+ 
+ export type ReactorGitCommitOutput = Readonly<{
+-  path: string
++  path: ReactorPath
+   status: "committed" | "unchanged"
+   message: string
+   commitSha?: string
+@@ -198,7 +225,7 @@ export type ReactorGitCommitOutput = Readonly<{
+ }>
+ 
+ export type ReactorGitPushOutput = Readonly<{
+-  path: string
++  path: ReactorPath
+   remote: string
+   ref: string
+   status: "pushed"
+diff --git a/packages/reactor/src/tests/reaction-causality.test.ts b/packages/reactor/src/tests/reaction-causality.test.ts
+new file mode 100644
+index 0000000..91e6699
+--- /dev/null
++++ b/packages/reactor/src/tests/reaction-causality.test.ts
+@@ -0,0 +1,70 @@
++import type { ContextEvent, ContextReaction } from "@ekairos/events"
++import { describe, expect, it } from "vitest"
++
++import { resolveCausalEvents } from "../reaction-causality.js"
++
++function event(id: string, producer?: string): ContextEvent {
++  return {
++    id,
++    type: `test.${id}`,
++    createdAt: new Date("2026-07-17T12:00:00.000Z"),
++    payload: { id },
++    links: {},
++    physicalLinks: {},
++    metadata: producer ? { reactionId: producer } : {},
++    eventParts: [],
++  }
++}
++
++function reaction(id: string, causeIds: string[]): ContextReaction {
++  return {
++    id,
++    sessionId: "session",
++    type: "test",
++    status: "completed",
++    position: 1,
++    depth: 1,
++    causeIds,
++    effectIds: [],
++    createdAt: new Date("2026-07-17T12:00:00.000Z"),
++  }
++}
++
++describe("Reaction causal input", () => {
++  const events = new Map([
++    ["trigger", event("trigger")],
++    ["repository", event("repository", "clone")],
++    ["attachments", event("attachments", "load-files")],
++    ["findings", event("findings", "dataset")],
++  ])
++  const reactions = new Map([
++    ["clone", reaction("clone", ["trigger"])],
++    ["load-files", reaction("load-files", ["trigger"])],
++    ["dataset", reaction("dataset", ["attachments"])],
++  ])
++
++  const resolve = (sourceIds: readonly string[]) => resolveCausalEvents({
++    sourceIds,
++    getEvent: async id => events.get(id) ?? null,
++    getReaction: async id => reactions.get(id) ?? null,
++  })
++
++  it("includes transitive ancestors in causal order", async () => {
++    expect((await resolve(["findings"])).map(row => row.id))
++      .toEqual(["trigger", "attachments", "findings"])
++  })
++
++  it("does not include a sibling until the caller performs fan-in", async () => {
++    expect((await resolve(["repository", "findings"])).map(row => row.id))
++      .toEqual(["trigger", "repository", "attachments", "findings"])
++  })
++
++  it("fails when graph metadata references a missing producer", async () => {
++    const broken = new Map(events).set("broken", event("broken", "missing"))
++    await expect(resolveCausalEvents({
++      sourceIds: ["broken"],
++      getEvent: async id => broken.get(id) ?? null,
++      getReaction: async id => reactions.get(id) ?? null,
++    })).rejects.toThrow("reaction_given_producer_not_found:missing")
++  })
++})
+diff --git a/packages/reactor/src/tests/reaction-dataset-source.test.ts b/packages/reactor/src/tests/reaction-dataset-source.test.ts
+new file mode 100644
+index 0000000..82e647b
+--- /dev/null
++++ b/packages/reactor/src/tests/reaction-dataset-source.test.ts
+@@ -0,0 +1,31 @@
++import type { ContextEvent } from "@ekairos/events"
++import { describe, expect, it } from "vitest"
++
++import { deriveDatasetSource } from "../reaction.operation.js"
++
++function loadedFilesEvent(): ContextEvent {
++  return {
++    id: "loaded",
++    type: "context.loadFiles",
++    createdAt: new Date("2026-07-17T12:00:00.000Z"),
++    payload: {
++      path: "contexts/context-1/files",
++      files: [
++        { fileId: "file-1", path: "contexts/context-1/files/file-1/request.md" },
++        { fileId: "file-2", path: "contexts/context-1/files/file-2/spec.pdf" },
++      ],
++    },
++    links: {},
++    physicalLinks: {},
++    metadata: {},
++    eventParts: [],
++  }
++}
++
++describe("Reaction Dataset source", () => {
++  it("keeps loadFiles as an explicit file source instead of treating its manifest as rows", () => {
++    expect(deriveDatasetSource([loadedFilesEvent()])).toEqual({
++      files: [{ fileId: "file-1" }, { fileId: "file-2" }],
++    })
++  })
++})
+diff --git a/packages/reactor/src/tests/reaction-files.test.ts b/packages/reactor/src/tests/reaction-files.test.ts
+new file mode 100644
+index 0000000..4dbc86d
+--- /dev/null
++++ b/packages/reactor/src/tests/reaction-files.test.ts
+@@ -0,0 +1,59 @@
++import type { ContextEvent } from "@ekairos/events"
++import { describe, expect, it } from "vitest"
++
++import { collectEventFileReferences } from "../reaction-files.js"
++
++function event(
++  id: string,
++  links: ContextEvent["links"],
++  aliases: Record<string, string>,
++): ContextEvent {
++  return {
++    id,
++    type: `test.${id}`,
++    createdAt: new Date("2026-07-17T12:00:00.000Z"),
++    payload: {},
++    links,
++    physicalLinks: Object.freeze(Object.fromEntries(Object.entries(aliases).map(([alias, target]) => [
++      alias,
++      {
++        alias,
++        key: `event__test__${alias}`,
++        target,
++        has: Array.isArray(links[alias]) ? "many" : "one",
++        forwardLabel: `test_${alias}`,
++        reverseLabel: `test_events_as_${alias}`,
++      },
++    ]))),
++    metadata: {},
++    eventParts: [],
++  }
++}
++
++describe("Event file references", () => {
++  it("deduplicates physical files while preserving every Event origin", () => {
++    const references = collectEventFileReferences([
++      event("first", { attachments: ["file-1", "file-2"] }, { attachments: "$files" }),
++      event("second", { source: "file-1", owner: "person-1" }, {
++        source: "$files",
++        owner: "people",
++      }),
++    ])
++
++    expect(references).toEqual([
++      {
++        fileId: "file-1",
++        origins: [
++          { eventId: "first", eventType: "test.first", link: "attachments" },
++          { eventId: "second", eventType: "test.second", link: "source" },
++        ],
++      },
++      {
++        fileId: "file-2",
++        origins: [
++          { eventId: "first", eventType: "test.first", link: "attachments" },
++        ],
++      },
++    ])
++  })
++})
+diff --git a/packages/reactor/src/tests/reaction-view.events.test.ts b/packages/reactor/src/tests/reaction-view.events.test.ts
+index 9ec0500..8dd0608 100644
+--- a/packages/reactor/src/tests/reaction-view.events.test.ts
++++ b/packages/reactor/src/tests/reaction-view.events.test.ts
+@@ -55,4 +55,54 @@ describe("Reaction model view", () => {
+     expect(messages[1].content.some((part: any) => part.type === "file")).toBe(true)
+     expect(messages[2].content[0].text).toContain("Answer with facts.")
+   })
++
++  it("projects linked text files as text instead of unsupported file parts", async () => {
++    const runtime: any = {
++      async db() {
++        return {
++          async query() {
++            return {
++              $files: [{
++                id: "file-markdown",
++                path: "request.md",
++                url: "data:text/markdown;base64,IyBSZXF1ZXN0CgotIDEyIG5vdGVib29rcw==",
++                "content-type": "text/markdown",
++                size: 25,
++              }],
++            }
++          },
++        }
++      },
++    }
++    const event: any = {
++      id: "event-text",
++      type: "requisition.messageReceived",
++      domain: "requisition",
++      name: "messageReceived",
++      channel: "email",
++      createdAt: new Date("2026-07-16T12:00:00.000Z"),
++      payload: { message: "Review" },
++      metadata: {},
++      links: { files: ["file-markdown"] },
++      physicalLinks: { files: { target: "$files" } },
++      eventParts: [],
++    }
++
++    const messages: any[] = await buildAgentModelMessages({
++      runtime,
++      reactionKey: "award.review",
++      instruction: "Extract items.",
++      context: {
++        ref: { id: "context-1", key: "requisition:1" },
++        content: { requisitionId: "REQ-1" },
++      },
++      events: [event],
++    })
++
++    expect(messages[1].content.some((part: any) => part.type === "file")).toBe(false)
++    expect(messages[1].content.some((part: any) =>
++      part.type === "text" && part.text.includes("12 notebooks"))).toBe(true)
++    expect(messages[1].content.some((part: any) =>
++      part.type === "text" && part.text.includes('"fileId": "file-markdown"'))).toBe(true)
++  })
+ })
+diff --git a/packages/reactor/src/tests/workspace-path.test.ts b/packages/reactor/src/tests/workspace-path.test.ts
+new file mode 100644
+index 0000000..74479a4
+--- /dev/null
++++ b/packages/reactor/src/tests/workspace-path.test.ts
+@@ -0,0 +1,39 @@
++import { describe, expect, it } from "vitest"
++
++import {
++  contextWorkspacePath,
++  resolveContextWorkspacePath,
++  workspaceKey,
++} from "../workspace-path.js"
++
++describe("Context workspace paths", () => {
++  it("builds portable Context-owned paths and resolves them under the provider root", () => {
++    const path = contextWorkspacePath("context-1", "repositories", "platform")
++
++    expect(path).toBe("contexts/context-1/repositories/platform")
++    expect(resolveContextWorkspacePath("/workspace", "context-1", path))
++      .toBe("/workspace/contexts/context-1/repositories/platform")
++    expect(resolveContextWorkspacePath("C:\\workspace", "context-1", path))
++      .toBe("C:\\workspace\\contexts\\context-1\\repositories\\platform")
++  })
++
++  it("rejects absolute, traversing, and cross-Context paths", () => {
++    expect(() => resolveContextWorkspacePath("/workspace", "context-1", "/workspace/repo" as never))
++      .toThrow("reaction_path_must_be_relative")
++    expect(() => resolveContextWorkspacePath(
++      "/workspace",
++      "context-1",
++      "contexts/context-1/../context-2/repo" as never,
++    )).toThrow("reaction_path_invalid")
++    expect(() => resolveContextWorkspacePath(
++      "/workspace",
++      "context-1",
++      "contexts/context-2/repositories/platform" as never,
++    )).toThrow("reaction_path_outside_context")
++  })
++
++  it("encodes identifiers so they cannot create path segments", () => {
++    expect(contextWorkspacePath("../context", "files", workspaceKey("../file"), "quote.pdf"))
++      .toBe("contexts/%2E%2E%2Fcontext/files/%2E%2E%2Ffile/quote.pdf")
++  })
++})
+diff --git a/packages/reactor/src/workspace-path.ts b/packages/reactor/src/workspace-path.ts
+new file mode 100644
+index 0000000..d37022b
+--- /dev/null
++++ b/packages/reactor/src/workspace-path.ts
+@@ -0,0 +1,65 @@
++const REACTOR_PATH = Symbol("@ekairos/reactor/path")
++
++export type ReactorPath = string & Readonly<{ [REACTOR_PATH]: true }>
++
++export function workspaceKey(value: string) {
++  const text = String(value).trim()
++  if (!text) throw new Error("reaction_path_segment_required")
++  return encodeURIComponent(text).replace(/\./g, "%2E")
++}
++
++function literalSegment(value: string) {
++  const text = String(value).trim()
++  if (!text || text === "." || text === ".." || /[\\/]/.test(text)) {
++    throw new Error(`reaction_path_segment_invalid:${value}`)
++  }
++  return text
++}
++
++function normalizeLogicalPath(value: string): string {
++  const text = String(value).trim()
++  if (/^[a-zA-Z]:[\\/]/.test(text) || text.startsWith("/") || text.startsWith("\\")) {
++    throw new Error(`reaction_path_must_be_relative:${value}`)
++  }
++  if (text.includes("\\")) throw new Error(`reaction_path_invalid:${value}`)
++  const parts = text.split("/")
++  if (parts.length === 0 || parts.some(part => !part || part === "." || part === "..")) {
++    throw new Error(`reaction_path_invalid:${value}`)
++  }
++  return parts.join("/")
++}
++
++export function contextWorkspacePath(
++  contextId: string,
++  ...segments: readonly string[]
++): ReactorPath {
++  const parts = ["contexts", workspaceKey(contextId), ...segments.map(literalSegment)]
++  return parts.join("/") as ReactorPath
++}
++
++export function appendWorkspacePath(
++  base: ReactorPath,
++  ...segments: readonly string[]
++): ReactorPath {
++  return `${normalizeLogicalPath(base)}/${segments.map(literalSegment).join("/")}` as ReactorPath
++}
++
++export function resolveContextWorkspacePath(
++  providerRoot: string,
++  contextId: string,
++  value?: ReactorPath,
++): string {
++  const logical = normalizeLogicalPath(value ?? contextWorkspacePath(contextId))
++  const contextRoot = contextWorkspacePath(contextId)
++  if (logical !== contextRoot && !logical.startsWith(`${contextRoot}/`)) {
++    throw new Error(`reaction_path_outside_context:${logical}`)
++  }
++  const windows = /^[a-zA-Z]:[\\/]/.test(providerRoot) || providerRoot.includes("\\")
++  const separator = windows ? "\\" : "/"
++  const root = providerRoot.replace(/[\\/]+$/, "")
++  return [root, ...logical.split("/")].join(separator)
++}
++
++export function relativeWorkspaceFile(value: string) {
++  return normalizeLogicalPath(value)
++}
+
+*** End Git Diff
+*** End ECU Patch

@@ -90,6 +90,9 @@ packages/reactors/openai-reactor/.workflow-vitest/
 # local codex reactor audit artifacts
 packages/reactors/openai-reactor/.tmp-audit-*.json
 
+# local model review captures and scripts
+/.claude/
+
 # local sensitive migration artifacts
 /skills/esolbay-context-migration/artifacts/
 /skills/esolbay-context-migration/.migration-audit/

@@ -26,14 +26,23 @@ schema.
    revision.
 3. A Session is one invocation of a Reaction definition in one Context.
 4. A Reaction links one or more cause Events to one or more effect Events.
-5. Every observable operation is represented by a child Reaction and an effect
-   Event. There are no Steps, Points, or Executions.
-6. Event Parts are the ordered, streamable content of an Event: messages,
+5. Every observable operation is represented by a child Reaction. Most
+   operations produce one effect Event; `agent` records every model round and
+   executed action as ordered effect Events of that same Reaction. There are no
+   Steps, Points, or Executions.
+6. A Reaction owns zero or one provisional InstantDB stream. Each event-scoped
+   stream entry carries the deterministic effect Event id it projects. Durable
+   Events replace their provisional projections independently as they complete.
+7. Event Parts are the ordered, streamable content of an Event: messages,
    reasoning, sources, actions, and structured values.
-7. `reaction.given(event)` selects explicit causal input. An Event array is the
+8. `reaction.given(event)` selects explicit causal input. An Event array is the
    explicit fan-in form.
-8. `agent`, `action`, `dataset`, `workspace`, `shell`, `git`, and `emit` all
+9. `agent`, `action`, `dataset`, `workspace`, `shell`, `git`, and `emit` all
    return Events. Later operations consume those Events.
+10. Reactor passes only the invoking `reactionId` into a domain action. An
+    action resolves the owning Context explicitly when it must emit an effect
+    or start a child Reaction; executable Reactor capabilities never enter the
+    action contract.
 
 ## Composition
 

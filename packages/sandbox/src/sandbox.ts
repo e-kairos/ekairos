@@ -10,6 +10,7 @@ import {
 } from "./contract.js"
 import type { CommandResult } from "./commands.js"
 import type { SandboxConfig, SandboxProvider } from "./types.js"
+import { sandboxDomain } from "./actions.js"
 
 type AnyDomainRuntime = EkairosRuntime<Record<string, unknown>, any, any>
 type SandboxRuntimeHandle<Runtime extends AnyDomainRuntime> = Runtime & {
@@ -59,7 +60,9 @@ function asPorts(value: unknown): number[] | undefined {
 }
 
 function defaultWorkspaceRoot(provider: SandboxProvider | undefined) {
-  return provider === "vercel" ? "/vercel/sandbox" : "/workspace"
+  if (provider === "vercel") return "/vercel/sandbox"
+  if (provider === "daytona") return "/home/daytona"
+  return "/workspace"
 }
 
 async function readSandboxState(
@@ -90,7 +93,7 @@ async function resolveSandboxDomain(runtime: SandboxRuntimeHandle<any>) {
   if (!rootDomain) {
     throw new Error("sandbox_domain_required")
   }
-  const scoped = await runtime.use(rootDomain)
+  const scoped = await runtime.use(sandboxDomain)
   if (!scoped.actions) {
     throw new Error("sandbox_actions_required")
   }

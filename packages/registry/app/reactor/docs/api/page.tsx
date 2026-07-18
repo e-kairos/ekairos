@@ -16,7 +16,11 @@ export default function ApiPage() {
 }, async reaction => effectEvent)
 
 context.react(triggerEvent, definition)
-context.react(triggerEvent, definition, { workflow })
+
+export async function workflow(context, triggerEvent) {
+  "use workflow"
+  return await context.react(triggerEvent, definition)
+}
 
 reaction.id
 reaction.trigger
@@ -47,7 +51,7 @@ reaction.given([firstEvent, secondEvent]).agent({ instruction })`}</Code>
         <Code>{`@ekairos/domain   // domain, defineEvent, defineDomainAction, runtime
 @ekairos/events   // contextDomain, Events, ContextHandle, Part, React hook
 @ekairos/context  // Context(runtime) and ReactionContextHandle
-@ekairos/reactor  // defineReaction, ai, Workflow helpers
+@ekairos/reactor  // defineReaction, ai
 @ekairos/dataset  // dataset(schema), datasetDomain, runtime adapter`}</Code>
       </Section>
 

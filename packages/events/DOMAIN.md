@@ -24,8 +24,13 @@ Canonical domain: `contextDomain`
    Reaction.
 5. Every Reaction belongs to one Session and stores ordered cause/effect ids in
    addition to real InstantDB links.
-6. Event Parts are ordered by `index` and are the canonical UI/model trace.
-7. Context content contains no implicit files, workspace, engine, sandbox, or
+6. A Reaction has zero or one linked `$stream`. The stream is a resumable,
+   provisional journal; it is never the durable result of the Reaction.
+7. Every event-scoped stream entry identifies the deterministic effect Event it
+   projects. Once an Event and its Parts are durable, clients replace only that
+   provisional projection instead of rendering both versions.
+8. Event Parts are ordered by `index` and are the canonical UI/model trace.
+9. Context content contains no implicit files, workspace, engine, sandbox, or
    tool state.
 
 Reaction execution and model projection belong to `@ekairos/reactor`.

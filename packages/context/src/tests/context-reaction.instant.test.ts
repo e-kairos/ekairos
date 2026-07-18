@@ -22,7 +22,7 @@ import {
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
 
-const emailDomain = domain("email")
+const emailCore = domain("email")
   .includes(contextDomain)
   .withSchema({
     entities: {
@@ -50,19 +50,56 @@ const emailDomain = domain("email")
       links: { message: { on: "email_messages", has: "one" } },
     }),
   })
+
+const completeOrder = defineDomainAction({
+  description: "Complete one extracted order.",
+  input: z.object({ orderId: z.string().uuid(), code: z.string() }),
+  output: z.object({ orderId: z.string().uuid(), code: z.string(), status: z.literal("completed") }),
+  execute: async ({ input, domain: activeDomain }) => {
+    const db = (activeDomain as any).db
+    await db.transact([
+      db.tx.email_orders[input.orderId].update({ code: input.code, status: "completed" }),
+    ])
+    return { ...input, status: "completed" as const }
+  },
+})
+
+const extractFromAction = defineDomainAction({
+  description: "Start a causally linked extraction Reaction from this action.",
+  input: z.object({ messageId: z.string().uuid(), orderCode: z.string() }),
+  output: z.object({ eventId: z.string().uuid(), orderCode: z.string() }),
+  execute: async ({ input, runtime, reactionId }) => {
+    if (!reactionId) throw new Error("email_extraction_reaction_required")
+    const context = await Context(runtime as any).fromReaction(reactionId)
+    const requested = await context.emit(
+      emailCore.events.extractionRequested({ orderCode: input.orderCode })
+        .link({ message: input.messageId }),
+      { key: "extraction-requested" },
+    )
+    const completed = await context.react(
+      requested,
+      defineReaction(
+        emailCore.events.extractionRequested,
+        {
+          key: "email.extract-from-action",
+          scope: emailCore,
+          engine: false,
+          sandbox: false,
+        },
+        async child => await child.given(child.trigger).emit(
+          emailCore.events.orderExtracted({ orderCode: child.trigger.payload.orderCode })
+            .link({ message: input.messageId }),
+        ),
+      ),
+    )
+    return { eventId: completed.id, orderCode: completed.payload.orderCode }
+  },
+})
+
+const emailDomain = emailCore
   .withActions({
-    completeOrder: defineDomainAction({
-      description: "Complete one extracted order.",
-      input: z.object({ orderId: z.string().uuid(), code: z.string() }),
-      output: z.object({ orderId: z.string().uuid(), code: z.string(), status: z.literal("completed") }),
-      execute: async ({ input, domain: activeDomain }) => {
-        const db = (activeDomain as any).db
-        await db.transact([
-          db.tx.email_orders[input.orderId].update({ code: input.code, status: "completed" }),
-        ])
-        return { ...input, status: "completed" as const }
-      },
-    }),
+    completeOrder,
+    extractFromAction,
   })
 
 const appDomain = domain("context-test-app")
@@ -221,5 +258,66 @@ describeInstant("@ekairos/context", () => {
       row.type === "child" && row.instruction === "email.extract"
     )))
       .toBe(true)
+  }, 60_000)
+
+  itInstant("starts a child Reaction from an action using only reactionId", async () => {
+    const runtime = new ContextTestRuntime({ appId, adminToken })
+    const messageId = randomUUID()
+    await db.transact([
+      db.tx.email_messages[messageId].create({ subject: "OC 7700" }),
+    ])
+    const context = await Context(runtime).create({
+      key: `email:action-child:${messageId}`,
+      content: { mailbox: "purchasing" },
+    })
+    const trigger = await Events(runtime).emit(
+      emailDomain.events.received({ from: "supplier@example.com", subject: "OC 7700" })
+        .link({ message: messageId }),
+      { id: randomUUID(), contextId: context.id },
+    )
+    const parent = defineReaction(
+      emailDomain.events.received,
+      {
+        key: "email.process-with-action-child",
+        scope: emailDomain,
+        engine: false,
+        sandbox: false,
+      },
+      async reaction => {
+        const extracted = await reaction.given(reaction.trigger).action(
+          emailDomain.actions.extractFromAction,
+          { messageId, orderCode: "7700" },
+        )
+        return await reaction.given(extracted).emit(
+          emailDomain.events.processingCompleted({ orderCode: extracted.payload.orderCode })
+            .link({ message: messageId }),
+        )
+      },
+    )
+
+    const completed = await context.react(trigger, parent)
+    expect(completed.payload.orderCode).toBe("7700")
+
+    const graph = await db.query({
+      context_sessions: {
+        $: { where: { context: context.id } },
+        parent: {},
+        trigger: {},
+        reactions: { effects: {} },
+        children: { parent: {}, trigger: {}, rootReaction: { effects: {} } },
+      },
+    } as any)
+    const parentSession = graph.context_sessions.find((row: any) => !row.parent)
+    const actionReaction = parentSession.reactions.find((row: any) => row.type === "action")
+
+    expect(parentSession.children).toHaveLength(1)
+    expect(parentSession.children[0].parent.id).toBe(parentSession.id)
+    expect(parentSession.children[0].trigger.type).toBe("email.extractionRequested")
+    expect(parentSession.children[0].rootReaction.effects[0].type).toBe(
+      "email.orderExtracted",
+    )
+    expect(actionReaction.effects.map((event: any) => event.type)).toContain(
+      "email.extractionRequested",
+    )
   }, 60_000)
 })

@@ -1,0 +1,1601 @@
+*** Begin ECU Patch
+Key: 021-workbench-causal-conversation
+Title: Demonstrate and inspect the complete causal runtime
+Purpose: Provide a real gpt-5.6-sol Workbench scenario and compact conversation/timeline projections that make parallel, multi-effect, and nested Reactions understandable without flattening them into chat messages.
+
+*** Begin Context
+The review scenario clones and loads in parallel, materializes a typed Dataset, runs an action-capable agent, joins findings, writes and stores a Markdown artifact, commits it, executes a scoped domain action, and starts a child verification Reaction. Conversation renders one user turn and one assistant Reaction response, then embeds semantic ordered stages. The inspector uses a compact Event timeline with lanes, producers, child markers, durations, exact trace selection, and a deterministic preview fixture. Manual inspection is not overridden by stream auto-follow.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/packages/workbench-v3/app/globals.css b/packages/workbench-v3/app/globals.css
+index 96b5218..2278f58 100644
+--- a/packages/workbench-v3/app/globals.css
++++ b/packages/workbench-v3/app/globals.css
+@@ -85,6 +85,34 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+ .reasoning-part { border-left: 2px solid var(--violet); }
+ .action-part { border-left: 2px solid var(--amber); }
+ .raw-part { white-space: pre-wrap; overflow-wrap: anywhere; }
++.conversation-turn { max-width: 760px; margin: 0 auto 26px; }
++.conversation-turn > .message { max-width: none; margin-bottom: 14px; }
++.reaction-message { max-width: none; margin: 0; padding-left: 12px; border-left: 2px solid #3f7650; }
++.reaction-pending { display: flex; align-items: center; gap: 7px; min-height: 34px; color: var(--muted); font-size: 10px; }
++.conversation-causal { margin-top: 14px; border: 1px solid #2b3132; background: #0c0e0f; }
++.conversation-causal-header { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px; border-bottom: 1px solid #252a2b; background: #121516; }
++.conversation-causal-header > span { display: inline-flex; align-items: center; gap: 6px; color: #cfd5d3; font-size: 9px; font-weight: 700; text-transform: uppercase; }
++.conversation-causal-header > span svg { color: var(--cyan); }
++.conversation-causal-header code { color: #7f8987; font-size: 8px; }
++.conversation-stages { padding: 8px; }
++.conversation-stage { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 7px; }
++.conversation-stage:not(:last-child) { padding-bottom: 9px; }
++.conversation-stage:not(:last-child)::after { content: ""; position: absolute; left: 10px; top: 20px; bottom: -1px; width: 1px; background: #394144; }
++.conversation-stage-index { position: relative; z-index: 1; width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid #465053; border-radius: 50%; background: #171b1c; color: #aab3b1; font: 8px/1 monospace; }
++.conversation-stage-grid { position: relative; min-width: 0; display: grid; gap: 6px; }
++.conversation-stage-grid.parallel { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding-top: 13px; }
++.parallel-label { position: absolute; top: 0; left: 0; color: var(--cyan); font: 700 7px/1 monospace; text-transform: uppercase; }
++.conversation-reaction { min-width: 0; display: grid; gap: 5px; padding: 7px 8px; border: 1px solid #303637; border-radius: 3px; background: #151819; color: #dce1df; text-align: left; cursor: pointer; }
++.conversation-reaction:hover { border-color: #526064; background: #181d1e; }
++.conversation-reaction.selected { border-color: #3f8790; box-shadow: inset 2px 0 var(--cyan); }
++.conversation-reaction.nested { border-style: dashed; border-color: #526a70; background: #12191b; }
++.conversation-reaction-title { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; }
++.conversation-reaction-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
++.conversation-reaction-meta { min-width: 0; display: flex; align-items: center; gap: 5px; color: #818a88; font-size: 7px; }
++.conversation-reaction-meta code { margin-right: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a9b2b0; }
++.conversation-reaction-meta span { padding: 2px 4px; border: 1px solid #353d3f; background: #101314; white-space: nowrap; }
++.conversation-event-types { min-width: 0; display: flex; flex-wrap: wrap; gap: 3px; }
++.conversation-event-types code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 2px 4px; border-left: 2px solid #47737a; background: #101416; color: #9fc2c6; font-size: 7px; white-space: nowrap; }
+ .chat-empty { height: 100%; min-height: 240px; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--muted); text-align: center; }
+ .chat-empty svg { color: var(--green); }
+ .chat-empty strong { color: #dfe3e2; font-size: 13px; }
+@@ -112,35 +140,36 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+ 
+ .traces { display: grid; grid-template-rows: 39px minmax(280px, 55%) minmax(0, 1fr); overflow: hidden; background: #101213; }
+ .reaction-flow { overflow: auto; border-bottom: 1px solid var(--line); background: #0e1011; }
+-.event-graph { height: 100%; min-width: 0; display: grid; grid-template-rows: 42px minmax(0, 1fr); }
+-.event-graph-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); background: #121516; }
+-.event-graph-toolbar > div:first-child { min-width: 0; display: grid; gap: 2px; }
+-.event-graph-toolbar strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dde2e0; font-size: 9px; }
+-.event-graph-toolbar span { color: var(--muted); font-size: 7px; }
+-.graph-zoom { flex: 0 0 auto; display: grid; grid-template-columns: 24px 34px 24px; align-items: center; border: 1px solid #303537; background: #0d0f10; }
+-.graph-zoom button { width: 24px; height: 23px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: #9da5a3; cursor: pointer; }
+-.graph-zoom button:hover { color: var(--cyan); background: #172022; }
+-.graph-zoom span { text-align: center; color: #aeb5b3; font: 7px/1 monospace; }
+-.event-graph-viewport { min-height: 0; overflow: auto; background-color: #0b0d0e; background-image: linear-gradient(#202426 1px, transparent 1px), linear-gradient(90deg, #202426 1px, transparent 1px); background-size: 20px 20px; }
+-.event-graph-scaled { position: relative; margin: 12px auto 30px; }
+-.event-graph-canvas { position: absolute; inset: 0 auto auto 0; transform-origin: top left; }
+-.event-graph-canvas > svg { position: absolute; inset: 0; z-index: 0; overflow: visible; pointer-events: none; }
+-.event-graph-canvas > svg path { fill: none; stroke: #4b5557; stroke-width: 1.35; }
+-.event-graph-canvas > svg path.selected { stroke: var(--cyan); stroke-width: 2; }
+-.event-graph-canvas > svg marker path { fill: #687274; stroke: none; }
+-.event-node { position: absolute; z-index: 2; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 5px; padding: 8px; overflow: hidden; border: 1px solid #3a4143; border-radius: 3px; background: #15191a; color: #dce1df; text-align: left; box-shadow: 0 5px 14px #0008; cursor: pointer; }
+-.event-node:hover { border-color: #617073; background: #192021; }
+-.event-node.durability-streaming { border-color: #327680; box-shadow: 0 0 0 1px #46c9d42b, 0 5px 14px #0008; }
+-.event-node.durability-optimistic { border-color: #725f37; }
+-.event-node-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #86d5dc; font: 700 8px/1.2 monospace; }
+-.event-node > strong { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: #e0e5e3; font-size: 9px; font-weight: 600; line-height: 1.35; }
+-.event-node-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: #7f8987; font-size: 7px; }
+-.event-node-meta code { margin-right: auto; overflow: hidden; text-overflow: ellipsis; }
+-.reaction-edge { position: absolute; z-index: 3; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 5px; padding: 0 7px; overflow: hidden; border: 1px solid #4b5355; border-radius: 3px; background: #202426; color: #d6dcda; box-shadow: 0 3px 9px #000a; cursor: pointer; }
+-.reaction-edge strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 7px/1 monospace; text-transform: uppercase; }
+-.reaction-edge > span:last-child { color: #8d9694; font: 7px/1 monospace; }
+-.reaction-edge:hover, .reaction-edge.selected { border-color: var(--cyan); background: #172a2d; }
+-.reaction-edge.reaction-failed { border-color: #8d4642; }
++.event-timeline { height: 100%; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
++.timeline-toolbar { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); background: #121516; }
++.timeline-toolbar strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dde2e0; font-size: 10px; }
++.timeline-toolbar span { margin-left: auto; flex: 0 0 auto; color: var(--muted); font: 8px/1 monospace; }
++.timeline { list-style: none; margin: 0; padding: 6px 0 14px; min-height: 0; overflow: auto; background: #0c0e0f; }
++.timeline-row { position: relative; width: 100%; display: flex; align-items: center; gap: 9px; padding: 0 12px 0 0; height: 27px; overflow: hidden; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
++.timeline-row > * { flex: 0 0 auto; white-space: nowrap; }
++.timeline-row:hover { background: #14181a; }
++.timeline-row.selected { background: #14262a; box-shadow: inset 2px 0 0 var(--cyan); }
++.timeline-row.cause { background: #101c1e; }
++.timeline-rail { flex: 0 0 34px; position: relative; align-self: stretch; }
++.timeline-rail::before { content: ""; position: absolute; top: 0; bottom: 0; left: 15px; width: 1px; background: #2b3234; }
++.timeline li:first-child .timeline-rail::before { top: 50%; }
++.timeline li:last-child .timeline-rail::before { bottom: 50%; }
++.timeline-dot { position: absolute; top: 50%; left: calc(15px + var(--lane, 0) * 9px); transform: translate(-50%, -50%); width: 7px; height: 7px; border-radius: 50%; background: #0c0e0f; border: 1.5px solid #6b7679; }
++.timeline-rail::after { content: ""; position: absolute; top: 50%; left: 15px; width: calc(var(--lane, 0) * 9px); height: 1px; background: #2b3234; }
++.timeline-row.selected .timeline-dot { border-color: var(--cyan); background: #143034; }
++.timeline-row.cause .timeline-dot { border-color: #4d8f96; }
++.timeline-row.durability-streaming .timeline-dot { border-color: var(--cyan); box-shadow: 0 0 6px #46c9d466; }
++.timeline-row.durability-optimistic .timeline-dot { border-color: #a3853f; }
++.timeline-row.failed .timeline-dot { border-color: #b0524c; }
++.timeline-row.running .timeline-dot { border-color: var(--cyan); animation: pulse 1.2s ease-in-out infinite; }
++.timeline-type { overflow: hidden; text-overflow: ellipsis; max-width: 170px; color: #86d5dc; font: 600 9px/1 monospace; }
++.timeline-row.child .timeline-type { color: #9fb8d9; }
++.timeline-summary { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #8b9492; font-size: 9px; }
++.timeline-badge { padding: 1px 5px; border: 1px solid #33465c; border-radius: 8px; color: #9fb8d9; font: 7px/1.4 monospace; text-transform: uppercase; }
++.timeline-reaction { color: #737d7b; font: 8px/1 monospace; }
++.timeline-row.failed .timeline-reaction { color: #c07a75; }
++.timeline-row time { color: #5d6664; font: 8px/1 monospace; }
++@keyframes pulse { 50% { opacity: .35; } }
+ .session-flow { padding: 9px; }
+ .session-flow.nested { margin-top: 10px; padding: 8px; border-left: 2px solid #3b545a; background: #111619; }
+ .session-flow-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 0 2px 8px; }
+diff --git a/packages/workbench-v3/app/timeline-preview/page.tsx b/packages/workbench-v3/app/timeline-preview/page.tsx
+new file mode 100644
+index 0000000..a83a2fd
+--- /dev/null
++++ b/packages/workbench-v3/app/timeline-preview/page.tsx
+@@ -0,0 +1,139 @@
++"use client"
++
++// Dev-only fixture page to iterate the causal timeline without running a
++// real Reaction. Not linked from the app.
++import type {
++  ContextEventForUI,
++  ContextReactionForUI,
++  ContextSessionForUI,
++} from "@ekairos/events/react"
++import { useState } from "react"
++
++import { EventTimelineView } from "@/src/components/workbench"
++
++function event(
++  id: string,
++  type: string,
++  createdAt: string,
++  payload: unknown = {},
++  durability: ContextEventForUI["durability"] = "durable",
++): ContextEventForUI {
++  return {
++    id,
++    type,
++    createdAt,
++    payload,
++    links: {},
++    metadata: {},
++    eventParts: [],
++    durability,
++  }
++}
++
++function reaction(input: {
++  id: string
++  type: string
++  position: number
++  causes: ContextEventForUI[]
++  effects: ContextEventForUI[]
++  status?: ContextReactionForUI["status"]
++  instruction?: string
++  parent?: ContextReactionForUI | null
++}): ContextReactionForUI {
++  return {
++    id: input.id,
++    type: input.type,
++    status: input.status ?? "completed",
++    createdAt: "2026-07-17T12:00:00.000Z",
++    updatedAt: "2026-07-17T12:00:04.200Z",
++    position: input.position,
++    depth: input.position === 0 ? 0 : 1,
++    causeIds: input.causes.map(row => row.id),
++    effectIds: input.effects.map(row => row.id),
++    ...(input.instruction ? { instruction: input.instruction } : {}),
++    causes: input.causes,
++    effects: input.effects,
++    stream: null,
++    liveEffects: [],
++    parent: input.parent ? { id: input.parent.id, type: input.parent.type } : null,
++  }
++}
++
++const trigger = event("trigger", "workbench.messageReceived", "2026-07-17T12:00:00.000Z", {
++  text: "Revisar esta solicitud de compra: 12 notebooks empresariales...",
++})
++const cloned = event("cloned", "context.git.clone", "2026-07-17T12:00:01.000Z", { summary: "repository checkout ready" })
++const loaded = event("loaded", "context.loadFiles", "2026-07-17T12:00:01.200Z", { summary: "request.pdf copied to sandbox" })
++const dataset = event("dataset", "context.dataset", "2026-07-17T12:00:02.000Z", { summary: "12 items materialized" })
++const analysis = event("analysis", "context.action", "2026-07-17T12:00:02.300Z", { summary: "budget analysis completed" })
++const decision = event("decision", "context.model", "2026-07-17T12:00:03.000Z", { summary: "Approve with two observations on delivery time" })
++const requested = event("verify-requested", "workbench.reviewVerificationRequested", "2026-07-17T12:00:03.400Z", { summary: "verification requested" })
++const childModel = event("child-model", "context.model", "2026-07-17T12:00:03.800Z", { summary: "review verified against dataset" }, "streaming")
++const verified = event("verified", "workbench.reviewVerificationCompleted", "2026-07-17T12:00:04.100Z", { summary: "verification passed" })
++const completed = event("completed", "workbench.reviewCompleted", "2026-07-17T12:00:04.500Z", { summary: "workbench-review.md published" }, "optimistic")
++
++const root = reaction({ id: "root", type: "workbench.review-request", position: 0, causes: [trigger], effects: [completed] })
++const clone = reaction({ id: "clone", type: "action", position: 1, causes: [trigger], effects: [cloned] })
++const load = reaction({ id: "load", type: "action", position: 2, causes: [trigger], effects: [loaded] })
++const materialize = reaction({ id: "materialize", type: "dataset", position: 3, causes: [loaded], effects: [dataset] })
++const analyze = reaction({ id: "analyze", type: "action", position: 4, causes: [cloned, loaded], effects: [analysis] })
++const decide = reaction({
++  id: "decide",
++  type: "agent",
++  position: 5,
++  causes: [dataset, analysis],
++  effects: [decision, requested],
++  instruction: "Decide whether the purchase request should be approved.",
++})
++const childRoot = reaction({ id: "child-root", type: "workbench.verify-recorded-review", position: 0, causes: [requested], effects: [verified], parent: decide })
++const childAgent = reaction({
++  id: "child-agent",
++  type: "agent",
++  position: 1,
++  causes: [requested],
++  effects: [childModel],
++  status: "running",
++  instruction: "Verify the recorded review.",
++  parent: childRoot,
++})
++const childEmit = reaction({ id: "child-emit", type: "emit", position: 2, causes: [childModel], effects: [verified], parent: childRoot })
++const emit = reaction({ id: "emit", type: "emit", position: 6, causes: [decision, verified], effects: [completed] })
++
++const childSession: ContextSessionForUI = {
++  id: "child-session",
++  definition: "workbench.verify-recorded-review",
++  status: "running",
++  parentSessionId: "session",
++  parentReactionId: "decide",
++  createdAt: "2026-07-17T12:00:03.400Z",
++  trigger: requested,
++  rootReaction: childRoot,
++  reactions: [childRoot, childAgent, childEmit],
++  children: [],
++}
++
++const session: ContextSessionForUI = {
++  id: "session",
++  definition: "workbench.review-request",
++  status: "running",
++  createdAt: "2026-07-17T12:00:00.000Z",
++  trigger,
++  rootReaction: root,
++  reactions: [root, clone, load, materialize, analyze, decide, emit],
++  children: [childSession],
++}
++
++export default function TimelinePreview() {
++  const [selectedId, setSelectedId] = useState<string | null>("decide")
++  return (
++    <main style={{ display: "grid", placeItems: "center", minHeight: "100vh" }}>
++      <div style={{ width: 640, height: 560, overflow: "hidden", border: "1px solid #23282a", background: "#101213" }}>
++        <EventTimelineView
++          session={session}
++          selectedId={selectedId}
++          onSelect={setSelectedId}
++        />
++      </div>
++    </main>
++  )
++}
+diff --git a/packages/workbench-v3/src/chat-reaction.ts b/packages/workbench-v3/src/chat-reaction.ts
+index ea13180..f7376a4 100644
+--- a/packages/workbench-v3/src/chat-reaction.ts
++++ b/packages/workbench-v3/src/chat-reaction.ts
+@@ -86,10 +86,12 @@ function createReviewReaction(resolveSandbox: () => Promise<string>) {
+         }),
+         reaction.given(attachments).agent({
+           instruction: [
++            "Before producing the analysis, call workbench.readReviewPolicy with focus risks and apply its result.",
+             "Identify the objective, explicit constraints, and concrete procurement risks.",
+             "Return no more than eight concise constraints and eight concise risks.",
+           ].join(" "),
+           output: workbenchAnalysisSchema,
++          actions: [workbenchDomain.actions.readReviewPolicy],
+         }),
+       ])
+ 
+@@ -164,6 +166,7 @@ function createReviewReaction(resolveSandbox: () => Promise<string>) {
+           itemCount,
+           recommendation: decision.payload.recommendation,
+           artifactCount: published.payload.files.length,
++          verification: recorded.payload.verification,
+           ...(committed.payload.commitSha
+             ? { repositoryCommit: committed.payload.commitSha }
+             : {}),
+diff --git a/packages/workbench-v3/src/components/workbench.tsx b/packages/workbench-v3/src/components/workbench.tsx
+index b266de8..998ce17 100644
+--- a/packages/workbench-v3/src/components/workbench.tsx
++++ b/packages/workbench-v3/src/components/workbench.tsx
+@@ -26,16 +26,16 @@ import {
+   TerminalSquare,
+   User,
+   X,
+-  ZoomIn,
+-  ZoomOut,
+ } from "lucide-react"
+-import { FormEvent, useEffect, useMemo, useRef, useState } from "react"
++import { CSSProperties, FormEvent, useEffect, useMemo, useRef, useState } from "react"
+ import { Streamdown } from "streamdown"
+ 
+ import { workbenchClientSchema } from "@/src/client-schema"
+ import {
+-  buildEventGraph,
++  buildEventTimeline,
++  buildReactionStages,
+   reactionDurationMs,
++  reactionEventTypes,
+   reactionTitle,
+ } from "@/src/reaction-graph"
+ 
+@@ -72,6 +72,16 @@ function time(value: string | Date | undefined) {
+   }).format(new Date(value))
+ }
+ 
++function clock(value: string | Date | undefined) {
++  if (!value) return "-"
++  return new Intl.DateTimeFormat("en-GB", {
++    hour: "2-digit",
++    minute: "2-digit",
++    second: "2-digit",
++    hourCycle: "h23",
++  }).format(new Date(value))
++}
++
+ function json(value: unknown) {
+   try { return JSON.stringify(value, null, 2) }
+   catch { return String(value) }
+@@ -153,7 +163,32 @@ function Message({ event }: { event: ContextEventForUI }) {
+   )
+ }
+ 
+-function EventGraphView({
++function allSessionReactions(session: ContextSessionForUI): ContextReactionForUI[] {
++  const rows = [
++    ...session.reactions,
++    ...session.children.flatMap(allSessionReactions),
++  ]
++  return [...new Map(rows.map(reaction => [reaction.id, reaction])).values()]
++}
++
++function childSessionReactionIds(session: ContextSessionForUI): string[] {
++  return session.children.flatMap(child => [
++    ...child.reactions.map(reaction => reaction.id),
++    ...childSessionReactionIds(child),
++  ])
++}
++
++function sessionResponse(session: ContextSessionForUI) {
++  const durable = session.rootReaction?.effects.at(-1)
++  if (durable) return durable
++  return allSessionReactions(session)
++    .flatMap(reaction => [...reaction.effects, ...reaction.liveEffects])
++    .filter(event => event.type === "context.model")
++    .sort((left, right) => new Date(left.createdAt).valueOf() - new Date(right.createdAt).valueOf())
++    .at(-1) ?? null
++}
++
++function ConversationCausalGraph({
+   session,
+   selectedId,
+   onSelect,
+@@ -162,115 +197,176 @@ function EventGraphView({
+   selectedId: string | null
+   onSelect(id: string): void
+ }) {
+-  const graph = useMemo(() => buildEventGraph(session), [session])
+-  const [scale, setScale] = useState(0.82)
+-  const producers = useMemo(() => new Map(
+-    graph.reactions.flatMap(edge =>
+-      edge.reaction.effectIds.map(eventId => [eventId, edge.reaction.id] as const)),
+-  ), [graph])
++  const stages = useMemo(() => buildReactionStages(session), [session])
++  const nestedIds = useMemo(
++    () => new Set(childSessionReactionIds(session)),
++    [session],
++  )
++  const reactions = allSessionReactions(session)
++  const effectCount = reactions.reduce((sum, reaction) =>
++    sum + Math.max(reaction.effects.length, reaction.liveEffects.length), 0)
+   return (
+-    <section className="event-graph">
+-      <header className="event-graph-toolbar">
+-        <div>
+-          <strong>{session.definition}</strong>
+-          <span>{graph.nodes.length} Events / {graph.reactions.length} Reactions</span>
+-        </div>
+-        <div className="graph-zoom">
+-          <button aria-label="Zoom out" onClick={() => setScale(value => Math.max(0.5, value - 0.1))}>
+-            <ZoomOut size={13} />
+-          </button>
+-          <span>{Math.round(scale * 100)}%</span>
+-          <button aria-label="Zoom in" onClick={() => setScale(value => Math.min(1.2, value + 0.1))}>
+-            <ZoomIn size={13} />
+-          </button>
+-        </div>
++    <section className="conversation-causal" aria-label="Causal graph">
++      <header className="conversation-causal-header">
++        <span><GitFork size={12} />Causal path</span>
++        <code>{reactions.length} reactions / {effectCount} effects</code>
+       </header>
+-      <div className="event-graph-viewport">
+-        <div
+-          className="event-graph-scaled"
+-          style={{ width: graph.width * scale, height: graph.height * scale }}
+-        >
+-          <div
+-            className="event-graph-canvas"
+-            style={{
+-              width: graph.width,
+-              height: graph.height,
+-              transform: `scale(${scale})`,
+-            }}
+-          >
+-            <svg aria-hidden="true" height={graph.height} width={graph.width}>
+-              <defs>
+-                <marker id="graph-arrow" markerHeight="6" markerWidth="6" orient="auto" refX="5" refY="3">
+-                  <path d="M0,0 L6,3 L0,6 Z" />
+-                </marker>
+-              </defs>
+-              {graph.connectors.map(connector => {
+-                const middleY = (connector.fromY + connector.toY) / 2
++      <div className="conversation-stages">
++        {stages.map((stage, stageIndex) => (
++          <div className="conversation-stage" key={stage.rank}>
++            <div
++              className="conversation-stage-index"
++              title={`Causal depth ${stage.rank}`}
++            >
++              {stageIndex + 1}
++            </div>
++            <div className={`conversation-stage-grid ${stage.parallel ? "parallel" : ""}`}>
++              {stage.parallel ? <span className="parallel-label">parallel</span> : null}
++              {stage.reactions.map(reaction => {
++                const effects = reaction.effects.length > 0
++                  ? reaction.effects
++                  : reaction.liveEffects
++                const models = effects.filter(event => event.type === "context.model").length
++                const actions = effects.filter(event => event.type === "context.action").length
++                const nested = nestedIds.has(reaction.id)
+                 return (
+-                  <path
+-                    className={connector.reactionId === selectedId ? "selected" : ""}
+-                    d={`M ${connector.fromX} ${connector.fromY} C ${connector.fromX} ${middleY}, ${connector.toX} ${middleY}, ${connector.toX} ${connector.toY}`}
+-                    key={connector.id}
+-                    markerEnd="url(#graph-arrow)"
+-                  />
++                  <button
++                    className={`conversation-reaction ${reaction.id === selectedId ? "selected" : ""} ${nested ? "nested" : ""}`}
++                    key={reaction.id}
++                    onClick={() => onSelect(reaction.id)}
++                    type="button"
++                  >
++                    <span className="conversation-reaction-title">
++                      <StatusDot status={reaction.status} />
++                      <strong>{reactionTitle(reaction)}</strong>
++                    </span>
++                    <span className="conversation-reaction-meta">
++                      <code>{reaction.type}</code>
++                      {models > 0 ? <span>{models} model</span> : null}
++                      {actions > 0 ? <span>{actions} action</span> : null}
++                      {effects.length > models + actions ? <span>{effects.length} effects</span> : null}
++                    </span>
++                    <span className="conversation-event-types">
++                      {reactionEventTypes(reaction, "effects").slice(0, 4).map(type => (
++                        <code key={type}>{type}</code>
++                      ))}
++                    </span>
++                  </button>
+                 )
+               })}
+-            </svg>
+-            {graph.nodes.map(node => {
+-              const fileCount = linkedFileCount(node.event)
+-              const producer = producers.get(node.id)
+-              return (
+-                <button
+-                  className={`event-node durability-${node.event.durability ?? "durable"}`}
+-                  data-event-id={node.id}
+-                  key={node.id}
+-                  onClick={() => producer && onSelect(producer)}
+-                  style={{
+-                    left: node.x,
+-                    top: node.y,
+-                    width: node.width,
+-                    height: node.height,
+-                  }}
+-                  title={node.id}
+-                >
+-                  <span className="event-node-type">{node.event.type}</span>
+-                  <strong>{eventSummary(node.event)}</strong>
+-                  <span className="event-node-meta">
+-                    <code>{short(node.id, 10)}</code>
+-                    <span>{node.event.eventParts.length} parts</span>
+-                    {fileCount > 0 ? <span>{fileCount} files</span> : null}
+-                  </span>
+-                </button>
+-              )
+-            })}
+-            {graph.reactions.map(edge => {
+-              const duration = reactionDurationMs(edge.reaction)
+-              return (
+-                <button
+-                  className={`reaction-edge reaction-${edge.reaction.status} ${edge.id === selectedId ? "selected" : ""}`}
+-                  key={edge.id}
+-                  onClick={() => onSelect(edge.id)}
+-                  style={{
+-                    left: edge.x,
+-                    top: edge.y,
+-                    width: edge.width,
+-                    height: edge.height,
+-                  }}
+-                  title={reactionTitle(edge.reaction)}
+-                >
+-                  <StatusDot status={edge.reaction.status} />
+-                  <strong>{edge.reaction.type}</strong>
+-                  <span>{duration === null ? "-" : `${(duration / 1000).toFixed(1)}s`}</span>
+-                </button>
+-              )
+-            })}
++            </div>
+           </div>
+-        </div>
++        ))}
+       </div>
+     </section>
+   )
+ }
+ 
++function ConversationTurn({
++  session,
++  selectedId,
++  onSelect,
++}: {
++  session: ContextSessionForUI
++  selectedId: string | null
++  onSelect(id: string): void
++}) {
++  const response = sessionResponse(session)
++  return (
++    <div className="conversation-turn">
++      {session.trigger ? <Message event={session.trigger} /> : null}
++      <article className="message message-assistant reaction-message">
++        <header>
++          <span className="message-author"><Bot size={14} /></span>
++          <strong>Reaction</strong>
++          <span>{time(response?.createdAt ?? session.createdAt)}</span>
++          <StatusDot status={session.status} />
++          <span>{session.status}</span>
++        </header>
++        {response ? (
++          response.eventParts.length > 0
++            ? response.eventParts.map(part => <PartView key={part.id} part={part} />)
++            : <div className="markdown"><Streamdown>{eventText(response)}</Streamdown></div>
++        ) : (
++          <div className="reaction-pending"><LoaderCircle className="spin" size={14} />Building effects...</div>
++        )}
++        <ConversationCausalGraph
++          session={session}
++          selectedId={selectedId}
++          onSelect={onSelect}
++        />
++      </article>
++    </div>
++  )
++}
++
++export function EventTimelineView({
++  session,
++  selectedId,
++  onSelect,
++}: {
++  session: ContextSessionForUI
++  selectedId: string | null
++  onSelect(id: string): void
++}) {
++  const rows = useMemo(() => buildEventTimeline(session), [session])
++  const selected = useMemo(
++    () => allSessionReactions(session).find(reaction => reaction.id === selectedId) ?? null,
++    [session, selectedId],
++  )
++  const causeIds = useMemo(() => new Set(selected?.causeIds ?? []), [selected])
++  const reactionCount = new Set(rows.map(row => row.producer?.id).filter(Boolean)).size
++  return (
++    <section className="event-timeline">
++      <header className="timeline-toolbar">
++        <strong>{session.definition}</strong>
++        <span>{rows.length} Events / {reactionCount} Reactions</span>
++      </header>
++      <ol className="timeline">
++        {rows.map(row => {
++          const producer = row.producer
++          const duration = producer ? reactionDurationMs(producer) : null
++          const classNames = [
++            "timeline-row",
++            producer && producer.id === selectedId ? "selected" : "",
++            causeIds.has(row.event.id) ? "cause" : "",
++            row.child ? "child" : "",
++            `durability-${row.event.durability ?? "durable"}`,
++            producer?.status === "failed" ? "failed" : "",
++            producer?.status === "running" ? "running" : "",
++          ].filter(Boolean).join(" ")
++          return (
++            <li key={row.event.id}>
++              <button
++                className={classNames}
++                onClick={() => producer && onSelect(producer.id)}
++                title={producer ? reactionTitle(producer) : row.event.id}
++                type="button"
++              >
++                <span
++                  className="timeline-rail"
++                  style={{ "--lane": row.lane } as CSSProperties}
++                >
++                  <span className="timeline-dot" />
++                </span>
++                <span className="timeline-type">{row.event.type}</span>
++                <span className="timeline-summary">{eventSummary(row.event)}</span>
++                {row.child ? <span className="timeline-badge">child</span> : null}
++                <span className="timeline-reaction">
++                  {producer
++                    ? `${producer.type}${duration === null ? "" : ` ${(duration / 1000).toFixed(1)}s`}`
++                    : "trigger"}
++                </span>
++                <time>{clock(row.event.createdAt)}</time>
++              </button>
++            </li>
++          )
++        })}
++      </ol>
++    </section>
++  )
++}
++
+ function linkedFileCount(event: ContextEventForUI) {
+   const value = event.links.files
+   if (Array.isArray(value)) return value.length
+@@ -383,17 +479,29 @@ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+   const [attachment, setAttachment] = useState<File | null>(null)
+   const fileInput = useRef<HTMLInputElement>(null)
+   const bottom = useRef<HTMLDivElement>(null)
+-  const chatEvents = useMemo(() => context.events.filter(event =>
+-    event.type === "workbench.messageReceived" ||
+-    event.type === "user.message" ||
+-    event.type === "context.agent" ||
+-    event.type === "workbench.reviewCompleted"), [context.events])
+-  const rootIds = useMemo(() => new Set(context.sessions.flatMap(function collect(session): string[] {
+-    return [session.rootReaction?.id ?? "", ...session.children.flatMap(collect)]
+-  })), [context.sessions])
++  const conversationSessions = useMemo(() => context.sessions
++    .filter(session => !session.parentSessionId)
++    .sort((left, right) =>
++      new Date(left.createdAt).valueOf() - new Date(right.createdAt).valueOf()),
++  [context.sessions])
++  const sessionTriggerIds = useMemo(
++    () => new Set(conversationSessions.flatMap(session => session.trigger?.id ?? [])),
++    [conversationSessions],
++  )
++  const pendingMessages = useMemo(() => context.events.filter(event =>
++    (event.type === "workbench.messageReceived" || event.type === "user.message") &&
++    !sessionTriggerIds.has(event.id)), [context.events, sessionTriggerIds])
++  const rootIds = useMemo(() => new Set(context.sessions
++    .filter(session => !session.parentSessionId)
++    .map(session => session.rootReaction?.id ?? "")), [context.sessions])
++  const graphReactions = useMemo(() => [
++    ...new Map(context.sessions
++      .flatMap(allSessionReactions)
++      .map(reaction => [reaction.id, reaction])).values(),
++  ], [context.sessions])
+   const operationReactions = useMemo(
+-    () => context.reactions.filter(reaction => !rootIds.has(reaction.id)),
+-    [context.reactions, rootIds],
++    () => graphReactions.filter(reaction => !rootIds.has(reaction.id)),
++    [graphReactions, rootIds],
+   )
+   const selected = operationReactions.find(reaction => reaction.id === selectedId)
+     ?? operationReactions.find(reaction => reaction.status === "running")
+@@ -403,15 +511,16 @@ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+   const activeSession = context.context?.currentSession ?? context.sessions[0] ?? null
+ 
+   useEffect(() => {
++    if (selectedId) return
+     const runningStream = operationReactions.find(reaction =>
+       reaction.status === "running" && reaction.stream)
+-    if (runningStream && runningStream.id !== selectedId) {
++    if (runningStream) {
+       setSelectedId(runningStream.id)
+       return
+     }
+-    if (!selectedId && selected) setSelectedId(selected.id)
++    if (selected) setSelectedId(selected.id)
+   }, [operationReactions, selected, selectedId])
+-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }) }, [chatEvents])
++  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }) }, [conversationSessions, pendingMessages])
+ 
+   async function submit(event: FormEvent) {
+     event.preventDefault()
+@@ -428,6 +537,7 @@ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+     }
+     setDraft("")
+     setAttachment(null)
++    setSelectedId(null)
+     await context.append({ parts }).catch(() => undefined)
+   }
+ 
+@@ -485,9 +595,23 @@ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+             </span>
+           </div>
+           <div className="messages">
+-            {chatEvents.length === 0 ? (
++            {conversationSessions.length === 0 && pendingMessages.length === 0 ? (
+               <div className="chat-empty"><Bot size={28} /><strong>Start a real Reaction</strong><span>The response will stream through InstantDB while its durable Event is being built.</span></div>
+-            ) : chatEvents.map(event => <Message event={event} key={`${event.id}:${event.durability}`} />)}
++            ) : (
++              <>
++                {conversationSessions.map(session => (
++                  <ConversationTurn
++                    key={session.id}
++                    session={session}
++                    selectedId={selected?.id ?? null}
++                    onSelect={setSelectedId}
++                  />
++                ))}
++                {pendingMessages.map(event => (
++                  <Message event={event} key={`${event.id}:${event.durability}`} />
++                ))}
++              </>
++            )}
+             <div ref={bottom} />
+           </div>
+           {context.sendError ? <div className="error-banner"><CircleAlert size={15} />{context.sendError}</div> : null}
+@@ -569,7 +693,7 @@ function LiveWorkbench({ bootstrap }: { bootstrap: Bootstrap }) {
+           <div className="panel-title"><span>Causal graph</span><GitFork size={15} /></div>
+           <div className="reaction-flow">
+             {activeSession ? (
+-              <EventGraphView
++              <EventTimelineView
+                 session={activeSession}
+                 selectedId={selected?.id ?? null}
+                 onSelect={setSelectedId}
+diff --git a/packages/workbench-v3/src/domain.ts b/packages/workbench-v3/src/domain.ts
+index c4b1995..64161e8 100644
+--- a/packages/workbench-v3/src/domain.ts
++++ b/packages/workbench-v3/src/domain.ts
+@@ -5,10 +5,18 @@ import {
+   domain,
+ } from "@ekairos/domain"
+ import { contextDomain } from "@ekairos/events"
++import {
++  ai,
++  defineReaction,
++  emitActionEffect,
++  reactFromAction,
++} from "@ekairos/reactor"
+ import { sandboxDomain } from "@ekairos/sandbox"
+ import { i } from "@instantdb/core"
+ import { z } from "zod"
+ 
++import { getAzureModel } from "./azure"
++
+ export const workbenchScenarioSchema = z.enum(["chat", "review"])
+ export type WorkbenchScenario = z.infer<typeof workbenchScenarioSchema>
+ 
+@@ -33,6 +41,11 @@ export const workbenchDecisionSchema = z.object({
+   answer: z.string().min(1).max(3_000),
+ })
+ 
++export const workbenchVerificationSchema = z.object({
++  valid: z.boolean(),
++  summary: z.string().min(1).max(500),
++})
++
+ const workbenchCore = domain("workbench")
+   .includes(contextDomain)
+   .includes(datasetDomain)
+@@ -81,14 +94,114 @@ const workbenchCore = domain("workbench")
+         recommendation: z.enum(["proceed", "clarify", "reject"]),
+         artifactCount: z.number().int().nonnegative(),
+         repositoryCommit: z.string().optional(),
++        verification: workbenchVerificationSchema,
+       }),
+       links: {
+         review: { on: "workbench_reviews", has: "one" },
+         files: { on: "$files", has: "many" },
+       },
+     }),
++    reviewVerificationRequested: defineEvent({
++      payload: z.object({
++        reviewId: z.string().min(1),
++        datasetId: z.string().min(1),
++        itemCount: z.number().int().nonnegative(),
++        riskCount: z.number().int().nonnegative(),
++        recommendation: z.enum(["proceed", "clarify", "reject"]),
++      }),
++      links: {
++        review: { on: "workbench_reviews", has: "one" },
++      },
++    }),
++    reviewVerificationCompleted: defineEvent({
++      payload: z.object({
++        reviewId: z.string().min(1),
++        valid: z.boolean(),
++        summary: z.string().min(1).max(500),
++      }),
++      links: {
++        review: { on: "workbench_reviews", has: "one" },
++      },
++    }),
+   })
+ 
++const readReviewPolicy = defineDomainAction({
++  description: "Return the durable review policy that must be applied before recommending a decision.",
++  input: z.object({
++    focus: z.enum(["items", "risks", "decision"]),
++  }),
++  output: z.object({
++    maximumUnresolvedRisks: z.number().int().nonnegative(),
++    requireExplicitNextStep: z.boolean(),
++    focus: z.enum(["items", "risks", "decision"]),
++  }),
++  execute: async ({ input }) => ({
++    maximumUnresolvedRisks: 2,
++    requireExplicitNextStep: true,
++    focus: input.focus,
++  }),
++})
++
++const workbenchReactionDomain = workbenchCore
++  .withActions({ readReviewPolicy })
++  .withActions(datasetDomain.actions)
++  .withActions(sandboxDomain.actions)
++
++const verifyReview = defineReaction(
++  workbenchReactionDomain.events.reviewVerificationRequested,
++  {
++    key: "workbench.verify-recorded-review",
++    scope: workbenchReactionDomain,
++    engine: ai({ model: async () => getAzureModel(), maxRounds: 4 }),
++    sandbox: false,
++  },
++  async reaction => {
++    const verification = await reaction.given(reaction.trigger).agent({
++      instruction: [
++        "Verify that the persisted review is internally consistent.",
++        "A review is valid when item and risk counts are nonnegative and the recommendation is coherent.",
++        "Return a short factual summary; do not perform or request any action.",
++      ].join(" "),
++      output: workbenchVerificationSchema,
++    })
++    return await reaction.given(verification).emit(
++      workbenchReactionDomain.events.reviewVerificationCompleted({
++        reviewId: reaction.trigger.payload.reviewId,
++        valid: verification.payload.valid,
++        summary: verification.payload.summary,
++      }).link({ review: reaction.trigger.payload.reviewId }),
++    )
++  },
++)
++
++async function verifyRecordedReview(input: {
++  runtime: any
++  execution: Parameters<typeof emitActionEffect>[1]
++  reviewId: string
++  datasetId: string
++  itemCount: number
++  riskCount: number
++  recommendation: "proceed" | "clarify" | "reject"
++}): Promise<z.infer<typeof workbenchVerificationSchema> & { eventId: string }> {
++  const requested = await emitActionEffect(input.runtime, input.execution, {
++    key: "review-verification-requested",
++    draft: workbenchReactionDomain.events.reviewVerificationRequested({
++      reviewId: input.reviewId,
++      datasetId: input.datasetId,
++      itemCount: input.itemCount,
++      riskCount: input.riskCount,
++      recommendation: input.recommendation,
++    }).link({ review: input.reviewId }),
++  })
++  const completed = await reactFromAction(
++    input.runtime,
++    input.execution,
++    requested,
++    verifyReview,
++  )
++  return { ...completed.payload, eventId: completed.id }
++}
++
+ const recordReview = defineDomainAction({
+   description: "Persist the reviewed request and link it to its validated formal Dataset.",
+   input: z.object({
+@@ -103,8 +216,9 @@ const recordReview = defineDomainAction({
+     reviewId: z.string(),
+     datasetId: z.string(),
+     status: z.literal("recorded"),
++    verification: workbenchVerificationSchema.extend({ eventId: z.string() }),
+   }),
+-  execute: async ({ input, domain: activeDomain }) => {
++  execute: async ({ input, domain: activeDomain, runtime, execution }) => {
+     "use step"
+ 
+     const db = (activeDomain as any).db
+@@ -138,17 +252,26 @@ const recordReview = defineDomainAction({
+         })
+         .link({ dataset: datasetEntity.id }),
+     ])
++    const verification = await verifyRecordedReview({
++      runtime: runtime as any,
++      execution,
++      reviewId: input.reviewId,
++      datasetId: input.items.datasetId,
++      itemCount: input.itemCount,
++      riskCount: input.riskCount,
++      recommendation: input.decision.recommendation,
++    })
+     return {
+       reviewId: input.reviewId,
+       datasetId: input.items.datasetId,
+       status: "recorded" as const,
++      verification,
+     }
+   },
+ })
+ 
+ export const workbenchDomain = workbenchCore
++  .withActions(workbenchReactionDomain.actions)
+   .withActions({ recordReview })
+-  .withActions(datasetDomain.actions)
+-  .withActions(sandboxDomain.actions)
+ 
+ export const workbenchSchema = workbenchDomain.instantSchema()
+diff --git a/packages/workbench-v3/src/reaction-graph.test.ts b/packages/workbench-v3/src/reaction-graph.test.ts
+index e80bdb9..013ae20 100644
+--- a/packages/workbench-v3/src/reaction-graph.test.ts
++++ b/packages/workbench-v3/src/reaction-graph.test.ts
+@@ -6,19 +6,24 @@ import type {
+ import { describe, expect, it } from "vitest"
+ 
+ import {
+-  buildEventGraph,
++  buildEventTimeline,
+   buildReactionStages,
+   reactionTitle,
+ } from "./reaction-graph"
+ 
+-function event(id: string, type: string): ContextEventForUI {
++function event(
++  id: string,
++  type: string,
++  producer?: string,
++  createdAt = "2026-07-16T12:00:00.000Z",
++): ContextEventForUI {
+   return {
+     id,
+     type,
+-    createdAt: "2026-07-16T12:00:00.000Z",
++    createdAt,
+     payload: {},
+     links: {},
+-    metadata: {},
++    metadata: producer ? { reactionId: producer } : {},
+     eventParts: [],
+     durability: "durable",
+   }
+@@ -31,6 +36,7 @@ function reaction(input: {
+   causes: ContextEventForUI[]
+   effects: ContextEventForUI[]
+   instruction?: string
++  parent?: ContextReactionForUI | null
+ }): ContextReactionForUI {
+   return {
+     id: input.id,
+@@ -46,8 +52,8 @@ function reaction(input: {
+     causes: input.causes,
+     effects: input.effects,
+     stream: null,
+-    liveEffect: null,
+-    parent: null,
++    liveEffects: [],
++    parent: input.parent ? { id: input.parent.id, type: input.parent.type } : null,
+   }
+ }
+ 
+@@ -91,17 +97,19 @@ describe("Workbench causal graph", () => {
+     expect(stages.slice(1).every(stage => !stage.parallel)).toBe(true)
+     expect(reactionTitle(rows[6]!)).toBe("Publish reviewCompleted")
+ 
+-    const graph = buildEventGraph(session)
+-    expect(graph.nodes.map(node => [node.id, node.rank])).toEqual([
+-      ["trigger", 0],
+-      ["dataset", 1],
+-      ["requirements", 1],
+-      ["risks", 1],
+-      ["decision", 2],
+-      ["recorded", 3],
+-      ["completed", 4],
++    const timeline = buildEventTimeline(session)
++    expect(timeline.map(row => [row.event.id, row.rank, row.lane])).toEqual([
++      ["trigger", 0, 0],
++      ["dataset", 1, 0],
++      ["requirements", 1, 1],
++      ["risks", 1, 2],
++      ["decision", 2, 0],
++      ["recorded", 3, 0],
++      ["completed", 4, 0],
+     ])
+-    expect(graph.reactions.map(edge => edge.id)).toEqual([
++    expect(timeline[0]?.producer).toBeNull()
++    expect(timeline.map(row => row.producer?.id ?? null)).toEqual([
++      null,
+       "items",
+       "requirements",
+       "risks",
+@@ -109,8 +117,215 @@ describe("Workbench causal graph", () => {
+       "record",
+       "emit",
+     ])
+-    expect(graph.connectors.filter(edge => edge.reactionId === "decision")).toHaveLength(4)
+-    expect(graph.width).toBeGreaterThan(600)
+-    expect(graph.height).toBeGreaterThan(600)
++    expect(timeline.every(row => !row.child)).toBe(true)
++  })
++
++  it("renders ordered agent effects and a nested child Reaction in the same graph", () => {
++    const trigger = event("trigger", "workbench.messageReceived")
++    const model0 = event("model-0", "context.model", "agent")
++    const requested = event("verify-requested", "workbench.reviewVerificationRequested", "agent")
++    const childModel = event("child-model", "context.model", "child-agent")
++    const verified = event("verified", "workbench.reviewVerificationCompleted", "child-emit")
++    const action0 = event("action-0", "context.action", "agent")
++    const model1 = event("model-1", "context.model", "agent")
++    const completed = event("completed", "workbench.reviewCompleted", "emit")
++    const root = reaction({
++      id: "root",
++      type: "workbench.review-request",
++      position: 0,
++      causes: [trigger],
++      effects: [completed],
++    })
++    const agent = reaction({
++      id: "agent",
++      type: "agent",
++      position: 1,
++      causes: [trigger],
++      effects: [model0, requested, verified, action0, model1],
++      instruction: "Analyze with policy.",
++    })
++    const childRoot = reaction({
++      id: "child-root",
++      type: "workbench.verify-recorded-review",
++      position: 0,
++      causes: [requested],
++      effects: [verified],
++      parent: agent,
++    })
++    const childAgent = reaction({
++      id: "child-agent",
++      type: "agent",
++      position: 1,
++      causes: [requested],
++      effects: [childModel],
++      instruction: "Verify the review.",
++      parent: childRoot,
++    })
++    const childEmit = reaction({
++      id: "child-emit",
++      type: "emit",
++      position: 2,
++      causes: [childModel],
++      effects: [verified],
++      parent: childRoot,
++    })
++    const emit = reaction({
++      id: "emit",
++      type: "emit",
++      position: 2,
++      causes: [model1],
++      effects: [completed],
++    })
++    const child: ContextSessionForUI = {
++      id: "child-session",
++      definition: "workbench.verify-recorded-review",
++      status: "completed",
++      parentSessionId: "session",
++      parentReactionId: "agent",
++      createdAt: "2026-07-16T12:00:00.500Z",
++      trigger: requested,
++      rootReaction: childRoot,
++      reactions: [childRoot, childAgent, childEmit],
++      children: [],
++    }
++    const session: ContextSessionForUI = {
++      id: "session",
++      definition: "workbench.review-request",
++      status: "completed",
++      createdAt: "2026-07-16T12:00:00.000Z",
++      trigger,
++      rootReaction: root,
++      reactions: [root, agent, emit],
++      children: [child],
++    }
++
++    const rows = buildEventTimeline(session)
++    expect(rows.map(row => [row.event.id, row.rank])).toEqual([
++      ["trigger", 0],
++      ["model-0", 1],
++      ["verify-requested", 2],
++      ["child-model", 3],
++      ["verified", 4],
++      ["action-0", 5],
++      ["model-1", 6],
++      ["completed", 7],
++    ])
++    expect(rows.filter(row => row.child).map(row => row.event.id)).toEqual([
++      "verify-requested",
++      "child-model",
++      "verified",
++    ])
++    const stages = buildReactionStages(session)
++    expect(stages.map(stage => stage.reactions.map(row => row.id)))
++      .toEqual([
++        ["agent"],
++        ["child-root", "child-agent"],
++        ["child-emit"],
++        ["emit"],
++      ])
++    expect(stages.every(stage => !stage.parallel)).toBe(true)
++  })
++
++  it("anchors an unproduced child-Session trigger by time instead of rank 0", () => {
++    const trigger = event("trigger", "workbench.messageReceived", undefined, "2026-07-16T12:00:00.000Z")
++    const model0 = event("model-0", "context.model", "agent", "2026-07-16T12:00:01.000Z")
++    const requested = event("verify-requested", "workbench.reviewVerificationRequested", undefined, "2026-07-16T12:00:02.000Z")
++    const action0 = event("action-0", "context.action", "agent", "2026-07-16T12:00:03.000Z")
++    const model1 = event("model-1", "context.model", "agent", "2026-07-16T12:00:04.000Z")
++    const childModel = event("child-model", "context.model", "child-agent", "2026-07-16T12:00:05.000Z")
++    const verified = event("verified", "workbench.reviewVerificationCompleted", "child-emit", "2026-07-16T12:00:06.000Z")
++    const completed = event("completed", "workbench.reviewCompleted", "emit", "2026-07-16T12:00:07.000Z")
++    const root = reaction({
++      id: "root",
++      type: "workbench.review-request",
++      position: 0,
++      causes: [trigger],
++      effects: [completed],
++    })
++    // The verification request is emitted from inside the Action, so no
++    // Reaction in the graph lists it as an effect.
++    const agent = reaction({
++      id: "agent",
++      type: "agent",
++      position: 1,
++      causes: [trigger],
++      effects: [model0, action0, model1],
++    })
++    const childRoot = reaction({
++      id: "child-root",
++      type: "workbench.verify-recorded-review",
++      position: 0,
++      causes: [requested],
++      effects: [verified],
++      parent: agent,
++    })
++    const childAgent = reaction({
++      id: "child-agent",
++      type: "agent",
++      position: 1,
++      causes: [requested],
++      effects: [childModel],
++      parent: childRoot,
++    })
++    const childEmit = reaction({
++      id: "child-emit",
++      type: "emit",
++      position: 2,
++      causes: [childModel],
++      effects: [verified],
++      parent: childRoot,
++    })
++    const emit = reaction({
++      id: "emit",
++      type: "emit",
++      position: 2,
++      causes: [model1],
++      effects: [completed],
++    })
++    const child: ContextSessionForUI = {
++      id: "child-session",
++      definition: "workbench.verify-recorded-review",
++      status: "completed",
++      parentSessionId: "session",
++      parentReactionId: "agent",
++      createdAt: "2026-07-16T12:00:02.000Z",
++      trigger: requested,
++      rootReaction: childRoot,
++      reactions: [childRoot, childAgent, childEmit],
++      children: [],
++    }
++    const session: ContextSessionForUI = {
++      id: "session",
++      definition: "workbench.review-request",
++      status: "completed",
++      createdAt: "2026-07-16T12:00:00.000Z",
++      trigger,
++      rootReaction: root,
++      reactions: [root, agent, emit],
++      children: [child],
++    }
++
++    const rows = buildEventTimeline(session)
++    const rankOf = new Map(rows.map(row => [row.event.id, row.rank]))
++    expect(rankOf.get("trigger")).toBe(0)
++    // The orphan sits below every Event created before it, never at the top.
++    expect(rankOf.get("verify-requested")!).toBeGreaterThan(rankOf.get("model-0")!)
++    // Its downstream effects stay underneath it.
++    expect(rankOf.get("child-model")!).toBeGreaterThan(rankOf.get("verify-requested")!)
++    expect(rankOf.get("verified")!).toBeGreaterThan(rankOf.get("child-model")!)
++    // Rows read oldest at the top, newest at the bottom.
++    expect(rows.map(row => row.event.id)).toEqual([
++      "trigger",
++      "model-0",
++      "verify-requested",
++      "action-0",
++      "model-1",
++      "child-model",
++      "verified",
++      "completed",
++    ])
++    // The orphan has no producer; everything else resolves one.
++    expect(rows.find(row => row.event.id === "verify-requested")?.producer).toBeNull()
++    expect(rows.find(row => row.event.id === "child-model")?.producer?.id).toBe("child-agent")
+   })
+ })
+diff --git a/packages/workbench-v3/src/reaction-graph.ts b/packages/workbench-v3/src/reaction-graph.ts
+index 63c61cc..7853d0f 100644
+--- a/packages/workbench-v3/src/reaction-graph.ts
++++ b/packages/workbench-v3/src/reaction-graph.ts
+@@ -10,83 +10,48 @@ export type ReactionStage = Readonly<{
+   parallel: boolean
+ }>
+ 
+-export type EventGraphNode = Readonly<{
+-  id: string
++export type TimelineRow = Readonly<{
+   event: ContextEventForUI
+   rank: number
+-  x: number
+-  y: number
+-  width: number
+-  height: number
++  lane: number
++  lanes: number
++  producer: ContextReactionForUI | null
++  child: boolean
+ }>
+ 
+-export type EventGraphReaction = Readonly<{
+-  id: string
+-  reaction: ContextReactionForUI
+-  x: number
+-  y: number
+-  width: number
+-  height: number
+-}>
+-
+-export type EventGraphConnector = Readonly<{
+-  id: string
+-  reactionId: string
+-  fromX: number
+-  fromY: number
+-  toX: number
+-  toY: number
+-}>
+-
+-export type EventGraph = Readonly<{
+-  width: number
+-  height: number
+-  nodes: readonly EventGraphNode[]
+-  reactions: readonly EventGraphReaction[]
+-  connectors: readonly EventGraphConnector[]
+-}>
+-
+-const EVENT_WIDTH = 184
+-const EVENT_HEIGHT = 78
+-const REACTION_WIDTH = 122
+-const REACTION_HEIGHT = 26
+-const COLUMN_GAP = 28
+-const RANK_GAP = 92
+-const GRAPH_PADDING = 24
+-
+-export function buildEventGraph(session: ContextSessionForUI): EventGraph {
++export function buildEventTimeline(session: ContextSessionForUI): readonly TimelineRow[] {
+   const rootId = session.rootReaction?.id
+-  const reactions = session.reactions
++  const sessions = collectSessions(session)
++  const reactions = uniqueReactions(sessions.flatMap(row => row.reactions))
+     .filter(reaction => reaction.id !== rootId)
+     .sort((left, right) => left.position - right.position)
+   const events = new Map<string, ContextEventForUI>()
+-  if (session.trigger) events.set(session.trigger.id, session.trigger)
++  for (const row of sessions) {
++    if (row.trigger) events.set(row.trigger.id, row.trigger)
++  }
+   for (const reaction of reactions) {
+     reaction.causes.forEach(event => events.set(event.id, event))
+     reaction.effects.forEach(event => events.set(event.id, event))
+-    if (reaction.liveEffect) events.set(reaction.liveEffect.id, reaction.liveEffect)
++    reaction.liveEffects.forEach(event => events.set(event.id, event))
+   }
+ 
+-  const ranks = new Map<string, number>()
+-  if (session.trigger) ranks.set(session.trigger.id, 0)
+-  for (const event of events.values()) {
+-    if (!ranks.has(event.id)) ranks.set(event.id, 0)
++  const ranks = computeEventRanks(reactions, events, session.trigger)
++
++  const producers = new Map<string, ContextReactionForUI>()
++  for (const reaction of reactions) {
++    const effects = reaction.effects.length > 0 ? reaction.effects : reaction.liveEffects
++    for (const effect of effects) {
++      if (!producers.has(effect.id)) producers.set(effect.id, reaction)
++    }
+   }
+-  for (let pass = 0; pass <= reactions.length; pass += 1) {
+-    let changed = false
+-    for (const reaction of reactions) {
+-      const causeRank = Math.max(0, ...reaction.causeIds.map(id => ranks.get(id) ?? 0))
+-      const nextRank = causeRank + 1
+-      const effects = reaction.effects.length > 0
+-        ? reaction.effects
+-        : reaction.liveEffect ? [reaction.liveEffect] : []
+-      for (const effect of effects) {
+-        if ((ranks.get(effect.id) ?? -1) >= nextRank) continue
+-        ranks.set(effect.id, nextRank)
+-        changed = true
+-      }
++
++  const childEventIds = new Set<string>()
++  for (const child of session.children.flatMap(collectSessions)) {
++    if (child.trigger) childEventIds.add(child.trigger.id)
++    for (const reaction of child.reactions) {
++      reaction.effects.forEach(event => childEventIds.add(event.id))
++      reaction.liveEffects.forEach(event => childEventIds.add(event.id))
+     }
+-    if (!changed) break
+   }
+ 
+   const grouped = new Map<number, ContextEventForUI[]>()
+@@ -94,112 +59,38 @@ export function buildEventGraph(session: ContextSessionForUI): EventGraph {
+     const rank = ranks.get(event.id) ?? 0
+     grouped.set(rank, [...(grouped.get(rank) ?? []), event])
+   }
+-  const rows = [...grouped.entries()]
++  return Object.freeze([...grouped.entries()]
+     .sort(([left], [right]) => left - right)
+-    .map(([rank, values]) => [rank, values.sort(eventOrder)] as const)
+-  const widest = Math.max(1, ...rows.map(([, values]) => values.length))
+-  const width = Math.max(
+-    420,
+-    GRAPH_PADDING * 2 + widest * EVENT_WIDTH + (widest - 1) * COLUMN_GAP,
+-  )
+-  const nodes: EventGraphNode[] = []
+-  for (const [rank, values] of rows) {
+-    const rowWidth = values.length * EVENT_WIDTH + (values.length - 1) * COLUMN_GAP
+-    const startX = (width - rowWidth) / 2
+-    values.forEach((event, index) => nodes.push(Object.freeze({
+-      id: event.id,
+-      event,
+-      rank,
+-      x: startX + index * (EVENT_WIDTH + COLUMN_GAP),
+-      y: GRAPH_PADDING + rank * (EVENT_HEIGHT + RANK_GAP),
+-      width: EVENT_WIDTH,
+-      height: EVENT_HEIGHT,
+-    })))
+-  }
+-  const byId = new Map(nodes.map(node => [node.id, node]))
+-  const reactionLayouts: EventGraphReaction[] = []
+-  const connectors: EventGraphConnector[] = []
+-  for (const reaction of reactions) {
+-    const sources = reaction.causeIds
+-      .map(id => byId.get(id))
+-      .filter((value): value is EventGraphNode => Boolean(value))
+-    const effectEvents = reaction.effects.length > 0
+-      ? reaction.effects
+-      : reaction.liveEffect ? [reaction.liveEffect] : []
+-    const targets = effectEvents
+-      .map(event => byId.get(event.id))
+-      .filter((value): value is EventGraphNode => Boolean(value))
+-    if (sources.length === 0 || targets.length === 0) continue
+-    const centerX = average([
+-      ...sources.map(node => node.x + node.width / 2),
+-      ...targets.map(node => node.x + node.width / 2),
+-    ])
+-    const sourceBottom = Math.max(...sources.map(node => node.y + node.height))
+-    const targetTop = Math.min(...targets.map(node => node.y))
+-    const centerY = (sourceBottom + targetTop) / 2
+-    const layout = Object.freeze({
+-      id: reaction.id,
+-      reaction,
+-      x: centerX - REACTION_WIDTH / 2,
+-      y: centerY - REACTION_HEIGHT / 2,
+-      width: REACTION_WIDTH,
+-      height: REACTION_HEIGHT,
+-    })
+-    reactionLayouts.push(layout)
+-    sources.forEach((source, index) => connectors.push(Object.freeze({
+-      id: `${reaction.id}:cause:${source.id}:${index}`,
+-      reactionId: reaction.id,
+-      fromX: source.x + source.width / 2,
+-      fromY: source.y + source.height,
+-      toX: centerX,
+-      toY: layout.y,
+-    })))
+-    targets.forEach((target, index) => connectors.push(Object.freeze({
+-      id: `${reaction.id}:effect:${target.id}:${index}`,
+-      reactionId: reaction.id,
+-      fromX: centerX,
+-      fromY: layout.y + layout.height,
+-      toX: target.x + target.width / 2,
+-      toY: target.y,
+-    })))
+-  }
+-  const maxRank = Math.max(0, ...nodes.map(node => node.rank))
+-  return Object.freeze({
+-    width,
+-    height: GRAPH_PADDING * 2 + (maxRank + 1) * EVENT_HEIGHT + maxRank * RANK_GAP,
+-    nodes: Object.freeze(nodes),
+-    reactions: Object.freeze(reactionLayouts),
+-    connectors: Object.freeze(connectors),
+-  })
++    .flatMap(([rank, values]) => {
++      const ordered = values.sort(eventOrder)
++      return ordered.map((event, lane) => Object.freeze({
++        event,
++        rank,
++        lane,
++        lanes: ordered.length,
++        producer: producers.get(event.id) ?? null,
++        child: childEventIds.has(event.id),
++      }))
++    }))
+ }
+ 
+ export function buildReactionStages(session: ContextSessionForUI): readonly ReactionStage[] {
+   const rootId = session.rootReaction?.id
+-  const reactions = session.reactions
++  const reactions = uniqueReactions(collectSessions(session).flatMap(row => row.reactions))
+     .filter(reaction => reaction.id !== rootId)
+     .sort((left, right) => left.position - right.position)
+-  const producer = new Map<string, ContextReactionForUI>()
+-  reactions.forEach(reaction => reaction.effectIds.forEach(id => producer.set(id, reaction)))
+-  const memo = new Map<string, number>()
+-
+-  function rank(reaction: ContextReactionForUI, visiting = new Set<string>()): number {
+-    const cached = memo.get(reaction.id)
+-    if (cached !== undefined) return cached
+-    if (visiting.has(reaction.id)) return 0
+-    const nextVisiting = new Set(visiting).add(reaction.id)
+-    const parents = reaction.causeIds
+-      .map(id => producer.get(id))
+-      .filter((value): value is ContextReactionForUI => Boolean(value))
+-    const value = parents.length === 0
+-      ? 0
+-      : Math.max(...parents.map(parent => rank(parent, nextVisiting))) + 1
+-    memo.set(reaction.id, value)
+-    return value
+-  }
++  const events = new Map<string, ContextEventForUI>()
++  if (session.trigger) events.set(session.trigger.id, session.trigger)
++  reactions.forEach(reaction => {
++    reaction.causes.forEach(event => events.set(event.id, event))
++    reaction.effects.forEach(event => events.set(event.id, event))
++    reaction.liveEffects.forEach(event => events.set(event.id, event))
++  })
++  const ranks = computeEventRanks(reactions, events, session.trigger)
+ 
+   const grouped = new Map<number, ContextReactionForUI[]>()
+   reactions.forEach(reaction => {
+-    const value = rank(reaction)
++    const value = Math.max(0, ...reaction.causeIds.map(id => ranks.get(id) ?? 0))
+     grouped.set(value, [...(grouped.get(value) ?? []), reaction])
+   })
+   return Object.freeze([...grouped.entries()]
+@@ -207,16 +98,18 @@ export function buildReactionStages(session: ContextSessionForUI): readonly Reac
+     .map(([value, rows]) => Object.freeze({
+       rank: value,
+       reactions: Object.freeze(rows.sort((left, right) => left.position - right.position)),
+-      parallel: rows.length > 1,
++      parallel: isParallelStage(rows),
+     })))
+ }
+ 
+ export function reactionTitle(reaction: ContextReactionForUI) {
+   if (reaction.type === "emit") {
+-    return `Publish ${shortType(reaction.effects[0]?.type ?? reaction.liveEffect?.type ?? "Event")}`
++    return `Publish ${shortType(reaction.effects[0]?.type ?? reaction.liveEffects[0]?.type ?? "Event")}`
+   }
+   if (reaction.type === "action") {
+-    const name = actionName(reaction.effects[0] ?? reaction.liveEffect)
++    const name = [...reaction.effects, ...reaction.liveEffects]
++      .map(actionName)
++      .find(Boolean)
+     return name ? `Execute ${name}` : "Execute domain action"
+   }
+   if (reaction.type === "dataset") return "Materialize formal Dataset"
+@@ -230,7 +123,7 @@ export function reactionEventTypes(reaction: ContextReactionForUI, side: "causes
+     ? reaction.causes
+     : reaction.effects.length > 0
+       ? reaction.effects
+-      : reaction.liveEffect ? [reaction.liveEffect] : []
++      : reaction.liveEffects
+   return unique(events.map(event => event.type))
+ }
+ 
+@@ -265,11 +158,82 @@ function unique(values: readonly string[]) {
+   return [...new Set(values)]
+ }
+ 
+-function average(values: readonly number[]) {
+-  return values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1)
+-}
+-
+ function eventOrder(left: ContextEventForUI, right: ContextEventForUI) {
+   const created = new Date(left.createdAt).valueOf() - new Date(right.createdAt).valueOf()
+   return created || left.id.localeCompare(right.id)
+ }
++
++function computeEventRanks(
++  reactions: readonly ContextReactionForUI[],
++  events: ReadonlyMap<string, ContextEventForUI>,
++  trigger: ContextEventForUI | null,
++) {
++  const ranks = new Map<string, number>()
++  if (trigger) ranks.set(trigger.id, 0)
++  for (const event of events.values()) ranks.set(event.id, ranks.get(event.id) ?? 0)
++
++  const produced = new Set<string>()
++  for (const reaction of reactions) {
++    const effects = reaction.effects.length > 0 ? reaction.effects : reaction.liveEffects
++    for (const effect of effects) produced.add(effect.id)
++  }
++
++  propagateEffectRanks(reactions, ranks)
++
++  // Events no Reaction in the graph produces (e.g. a child-Session trigger
++  // emitted from inside an Action) would keep the default rank 0 and render
++  // above older Events. Anchor them below the newest anchored Event that
++  // precedes them in time, then propagate again so their effects follow.
++  for (const orphan of events.values()) {
++    if (orphan.id === trigger?.id || produced.has(orphan.id)) continue
++    const at = new Date(orphan.createdAt).valueOf()
++    const floor = Math.max(0, ...[...events.values()]
++      .filter(event => event.id !== orphan.id)
++      .filter(event => event.id === trigger?.id || produced.has(event.id))
++      .filter(event => new Date(event.createdAt).valueOf() <= at)
++      .map(event => ranks.get(event.id) ?? 0))
++    ranks.set(orphan.id, Math.max(ranks.get(orphan.id) ?? 0, floor + 1))
++  }
++  propagateEffectRanks(reactions, ranks)
++  return ranks
++}
++
++function propagateEffectRanks(
++  reactions: readonly ContextReactionForUI[],
++  ranks: Map<string, number>,
++) {
++  const effectCount = reactions.reduce((sum, reaction) =>
++    sum + Math.max(reaction.effects.length, reaction.liveEffects.length), 0)
++  for (let pass = 0; pass <= reactions.length + effectCount; pass += 1) {
++    let changed = false
++    for (const reaction of reactions) {
++      let previousRank = Math.max(0, ...reaction.causeIds.map(id => ranks.get(id) ?? 0))
++      const effects = reaction.effects.length > 0
++        ? reaction.effects
++        : reaction.liveEffects
++      for (const effect of effects) {
++        const nextRank = Math.max(previousRank + 1, ranks.get(effect.id) ?? 0)
++        if ((ranks.get(effect.id) ?? -1) < nextRank) {
++          ranks.set(effect.id, nextRank)
++          changed = true
++        }
++        previousRank = nextRank
++      }
++    }
++    if (!changed) break
++  }
++}
++
++function isParallelStage(reactions: readonly ContextReactionForUI[]) {
++  if (reactions.length < 2) return false
++  const ids = new Set(reactions.map(reaction => reaction.id))
++  return reactions.every(reaction => !reaction.parent?.id || !ids.has(reaction.parent.id))
++}
++
++function collectSessions(session: ContextSessionForUI): ContextSessionForUI[] {
++  return [session, ...session.children.flatMap(collectSessions)]
++}
++
++function uniqueReactions(reactions: readonly ContextReactionForUI[]) {
++  return [...new Map(reactions.map(reaction => [reaction.id, reaction])).values()]
++}
+
+*** End Git Diff
+*** End ECU Patch

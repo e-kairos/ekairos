@@ -10,17 +10,25 @@ import {
 import {
   Events,
   Part,
+  contextEventFilesPhysicalLink,
   getContextRuntimeServices,
   type ContextEvent,
   type ContextPartEnvelope,
   type ContextRuntimeServiceHandle,
   type DomainEventDraftLike,
+  uuidV5,
 } from "@ekairos/events"
 import { Sandbox } from "@ekairos/sandbox/sandbox"
 import { z } from "zod"
 
 import { runReactionEngineAgent } from "./agent.js"
+import { resolveCausalEvents } from "./reaction-causality.js"
+import { collectEventFileReferences } from "./reaction-files.js"
 import { buildAgentModelMessages } from "./reaction-view.js"
+import {
+  openReactionStream,
+  type ReactionStreamController,
+} from "./reaction.stream.js"
 import type {
   AnyReactionEngine,
   ReactionModel,
@@ -29,122 +37,42 @@ import type {
   ReactorGitCommitOutput,
   ReactorGitPushOutput,
   ReactorInitialContext,
+  ReactorLoadFilesOutput,
   ReactorShellRunInput,
   ReactorShellRunOutput,
-  ReactorWorkspaceInput,
-  ReactorWorkspaceOutput,
+  ReactorStoreFilesInput,
+  ReactorStoreFilesOutput,
+  ReactorWorkspace,
 } from "./reactor.js"
+import {
+  appendWorkspacePath,
+  contextWorkspacePath,
+  relativeWorkspaceFile,
+  resolveContextWorkspacePath,
+  workspaceKey,
+  type ReactorPath,
+} from "./workspace-path.js"
 import type {
   DatasetAdapterHandle,
-  DatasetAdapterProvider,
-  DatasetAdapterSource,
 } from "./dataset-adapter.js"
+import type {
+  ReactionGitInput,
+  ReactionOperation,
+  ReactionOperationActionRef,
+  ReactionOperationRequest,
+  ReactionOperationResult,
+} from "./reaction.operation.contract.js"
 
 type AnyDomainAction = DomainActionRegistration<any, any, any, any>
+const AGENT_EFFECT_EVENT_NAMESPACE = "d86ced13-b64c-449c-a4c0-c41bd1241068"
 
-export type ReactionOperationActionRef = Readonly<{
-  id: string
-  boundInput: Readonly<Record<string, unknown>>
-}>
-
-export type ReactionGitInput =
-  | Readonly<{
-      operation: "clone"
-      target: string
-      url: string
-      ref?: string
-      depth?: number
-    }>
-  | Readonly<{
-      operation: "commit"
-      repository: string
-      message: string
-      all?: boolean
-      authorName?: string
-      authorEmail?: string
-    }>
-  | Readonly<{
-      operation: "push"
-      repository: string
-      remote?: string
-      ref: string
-      forceWithLease?: boolean
-      setUpstream?: boolean
-    }>
-
-export type ReactionOperation =
-  | Readonly<{
-      kind: "agent"
-      instruction: string
-      outputSchema?: unknown
-      actions: readonly ReactionOperationActionRef[]
-      model?: ReactionModel
-      maxRounds?: number
-    }>
-  | Readonly<{
-      kind: "action"
-      action: ReactionOperationActionRef
-      input: unknown
-    }>
-  | Readonly<{
-      kind: "dataset"
-      instruction: string
-      recordSchema: unknown
-      source: DatasetAdapterSource
-    }>
-  | Readonly<{ kind: "workspace"; input: ReactorWorkspaceInput }>
-  | Readonly<{ kind: "shell"; input: ReactorShellRunInput }>
-  | Readonly<{ kind: "git"; input: ReactionGitInput }>
-  | Readonly<{
-      kind: "emit"
-      draft: DomainEventDraftLike
-      channel?: string
-    }>
-
-export type ReactionOperationRequest = Readonly<{
-  runtime: ContextRuntimeServiceHandle & {
-    use(domain: unknown, options?: unknown): Promise<unknown>
-    env?: unknown
-    materializeDataset?: DatasetAdapterProvider
-  }
-  context: ReactorInitialContext<unknown>
-  trigger: ContextEvent
-  definition: string
-  sessionId: string
-  rootReactionId: string
-  reactionId: string
-  eventId: string
-  position: number
-  causeIds: readonly string[]
-  engine: AnyReactionEngine<unknown> | false
-  sandboxId: string | false
-  operation: ReactionOperation
-}>
-
-export type ReactionOperationResult = Readonly<{
-  event: ContextEvent
-}>
-
-export function toReactionOperationActionRef(
-  action: AnyDomainAction,
-): ReactionOperationActionRef {
-  const binding = getDomainActionBinding(action)
-  if (!binding) throw new Error("reaction_action_registration_required")
-  return Object.freeze({
-    id: binding.id,
-    boundInput: Object.freeze({ ...binding.boundInput }),
-  })
-}
-
-export async function executeReactionOperation(
+export async function runReactionOperation(
   request: ReactionOperationRequest,
 ): Promise<ReactionOperationResult> {
-  "use step"
-
   const { store } = await getContextRuntimeServices(request.runtime)
   const existingReaction = await store.getReaction(request.reactionId)
   if (existingReaction?.status === "completed") {
-    const effectId = existingReaction.effectIds[0]
+    const effectId = existingReaction.effectIds[existingReaction.effectIds.length - 1]
     const event = effectId ? await store.getEvent(effectId) : null
     if (!event) throw new Error(`reaction_operation_effect_not_found:${request.reactionId}`)
     return Object.freeze({ event })
@@ -166,17 +94,38 @@ export async function executeReactionOperation(
       : {}),
   })
 
+  let stream: ReactionStreamController | undefined
   try {
-    const event = await runOperation(request)
-    await store.completeReaction(request.reactionId, "completed", [event.id])
+    if (request.operation.kind === "agent") {
+      stream = await openReactionStream({
+        runtime: request.runtime,
+        reactionId: request.reactionId,
+      })
+    }
+    const event = await runOperation(request, stream)
+    await stream?.complete()
+    await store.appendReactionEffect(request.reactionId, event.id)
+    const current = await store.getReaction(request.reactionId)
+    const effectIds = current?.effectIds ?? [event.id]
+    await store.completeReaction(request.reactionId, "completed", effectIds)
     return Object.freeze({ event })
   } catch (error) {
-    await store.completeReaction(request.reactionId, "failed", [], error).catch(() => undefined)
+    await stream?.fail(error).catch(() => undefined)
+    const current = await store.getReaction(request.reactionId).catch(() => null)
+    await store.completeReaction(
+      request.reactionId,
+      "failed",
+      current?.effectIds ?? [],
+      error,
+    ).catch(() => undefined)
     throw error
   }
 }
 
-async function runOperation(request: ReactionOperationRequest): Promise<ContextEvent> {
+async function runOperation(
+  request: ReactionOperationRequest,
+  stream?: ReactionStreamController,
+): Promise<ContextEvent> {
   const operation = request.operation
   if (operation.kind === "emit") {
     return await Events(request.runtime).emit(operation.draft, {
@@ -194,14 +143,17 @@ async function runOperation(request: ReactionOperationRequest): Promise<ContextE
     const output = operation.outputSchema
       ? schemaFromJson(operation.outputSchema, "reaction_agent_output")
       : undefined
-    const actions = resolveEngineActions(request.runtime, operation.actions)
+    const actions = resolveEngineActions(request, operation.actions)
     const sandbox = await openSandbox(request)
+    const workspace = sandbox ? await prepareReactionWorkspace(request, sandbox) : undefined
+    if (operation.path && !workspace) throw new Error("reaction_agent_path_requires_sandbox")
+    const given = await hydrateEvents(request.runtime, request.causeIds)
     const messages = await buildAgentModelMessages({
       runtime: request.runtime,
       reactionKey: request.definition,
       instruction: operation.instruction,
       context: request.context,
-      events: await hydrateEvents(request.runtime, request.causeIds),
+      events: given,
     })
     const result = await runReactionEngineAgent({
       engine: request.engine,
@@ -212,20 +164,54 @@ async function runOperation(request: ReactionOperationRequest): Promise<ContextE
         trigger: request.trigger,
         sessionId: request.sessionId,
         reactionId: request.reactionId,
-        given: await hydrateEvents(request.runtime, request.causeIds),
+        given,
         messages,
         instruction: operation.instruction,
         ...(output ? { output } : {}),
         ...(operation.model ? { model: operation.model } : {}),
         ...(operation.maxRounds === undefined ? {} : { maxRounds: operation.maxRounds }),
         actions,
-        ...(sandbox ? { sandbox, workspaceRoot: sandbox.workspaceRoot } : {}),
+        ...(stream ? { stream } : {}),
+        ...(sandbox && workspace
+          ? {
+              sandbox,
+              workspaceRoot: resolveContextWorkspacePath(
+                sandbox.workspaceRoot,
+                request.context.ref.id,
+                operation.path ?? workspace.contextPath,
+              ),
+              workspace: {
+                ...workspace,
+                path: operation.path ?? workspace.contextPath,
+              },
+            }
+          : {}),
+      },
+      effects: {
+        id: key => uuidV5(`${request.eventId}:${key}`, AGENT_EFFECT_EVENT_NAMESPACE),
+        async record(draft) {
+          const event = await Events(request.runtime).create({
+            id: draft.id,
+            type: draft.type,
+            payload: draft.payload,
+            contextId: request.context.ref.id,
+            metadata: {
+              ...operationMetadata(request),
+              instruction: operation.instruction,
+              ...draft.metadata,
+              ...(stream
+                ? { streamId: stream.streamId, streamClientId: stream.clientId }
+                : {}),
+            },
+            parts: draft.parts,
+          })
+          const { store } = await getContextRuntimeServices(request.runtime)
+          await store.appendReactionEffect(request.reactionId, event.id)
+          return event
+        },
       },
     })
-    return await createOperationEvent(request, result.output, result.parts ?? [], {
-      ...(result.metadata ?? {}),
-      instruction: operation.instruction,
-    })
+    return result.event
   }
 
   if (operation.kind === "action") {
@@ -250,6 +236,7 @@ async function runOperation(request: ReactionOperationRequest): Promise<ContextE
         request.runtime as any,
         action,
         prepared,
+        { reactionId: request.reactionId },
       )
       const parsed = action.output.parse(executed.output)
       return await createOperationEvent(request, parsed, [
@@ -318,9 +305,20 @@ async function runOperation(request: ReactionOperationRequest): Promise<ContextE
     })
   }
 
-  if (operation.kind === "workspace") {
-    const result = await materializeWorkspace(request, operation.input)
+  if (operation.kind === "loadFiles") {
+    const result = await materializeFiles(request)
     return await createOperationEvent(request, result, [Part.json(result)])
+  }
+
+  if (operation.kind === "storeFiles") {
+    const result = await persistFiles(request, operation.input)
+    return await createOperationEvent(
+      request,
+      result.output,
+      [Part.json(result.output)],
+      {},
+      result.fileIds,
+    )
   }
 
   if (operation.kind === "shell") {
@@ -337,6 +335,7 @@ async function createOperationEvent(
   payload: unknown,
   parts: readonly ContextPartEnvelope[] = [],
   metadata: Readonly<Record<string, unknown>> = {},
+  fileIds: readonly string[] = [],
 ) {
   return await Events(request.runtime).create({
     id: request.eventId,
@@ -344,6 +343,12 @@ async function createOperationEvent(
     payload,
     contextId: request.context.ref.id,
     metadata: { ...operationMetadata(request), ...metadata },
+    ...(fileIds.length > 0
+      ? {
+          links: { files: [...fileIds] },
+          physicalLinks: { files: contextEventFilesPhysicalLink },
+        }
+      : {}),
     parts,
   })
 }
@@ -392,19 +397,28 @@ function resolveAction(
 }
 
 function resolveEngineActions(
-  runtime: ReactionOperationRequest["runtime"],
+  request: ReactionOperationRequest,
   refs: readonly ReactionOperationActionRef[],
 ) {
   return Object.freeze(Object.fromEntries(refs.map(ref => {
-    const action = resolveAction(runtime, ref)
+    const action = resolveAction(request.runtime, ref)
     const binding = getDomainActionBinding(action)!
     const tool: ReactionToolAction = Object.freeze({
       description: action.description,
       input: action.input,
       output: action.output,
-      async execute(input: unknown) {
-        const prepared = await prepareDomainActionExecution(runtime as any, action, input as any)
-        return (await executeDomainAction(runtime as any, action, prepared)).output
+      async execute(input: unknown, reactionId) {
+        const prepared = await prepareDomainActionExecution(
+          request.runtime as any,
+          action,
+          input as any,
+        )
+        return (await executeDomainAction(
+          request.runtime as any,
+          action,
+          prepared,
+          { reactionId },
+        )).output
       },
     })
     return [binding.id, tool]
@@ -416,52 +430,10 @@ async function hydrateEvents(
   ids: readonly string[],
 ) {
   const { store } = await getContextRuntimeServices(runtime)
-  const events: ContextEvent[] = []
-  for (const id of ids) {
-    const event = await store.getEvent(id)
-    if (!event) throw new Error(`reaction_given_event_not_found:${id}`)
-    events.push(event)
-  }
-  return Object.freeze(events)
-}
-
-export function deriveDatasetSource(events: readonly ContextEvent[]): DatasetAdapterSource {
-  const files = new Set<string>()
-  for (const event of events) {
-    for (const [alias, value] of Object.entries(event.links)) {
-      if (event.physicalLinks[alias]?.target !== "$files") continue
-      for (const id of Array.isArray(value) ? value : [value]) {
-        if (typeof id === "string") files.add(id)
-      }
-    }
-  }
-  if (files.size > 0) {
-    return Object.freeze({
-      files: Object.freeze([...files].map(fileId => Object.freeze({ fileId }))),
-    })
-  }
-
-  const datasets = new Set<string>()
-  const visit = (value: unknown) => {
-    if (Array.isArray(value)) return value.forEach(visit)
-    if (!value || typeof value !== "object") return
-    const datasetId = (value as any).datasetId
-    if (typeof datasetId === "string" && datasetId) datasets.add(datasetId)
-  }
-  events.forEach(event => visit(event.payload))
-  if (datasets.size > 0) {
-    return Object.freeze({
-      datasets: Object.freeze([...datasets].map(datasetId => Object.freeze({ datasetId }))),
-    })
-  }
-
-  const rows = events.length === 1 && Array.isArray(events[0]!.payload)
-    ? events[0]!.payload
-    : events.map(event => event.payload)
-  return Object.freeze({
-    rows: Object.freeze([...rows]),
-    name: "causal-events.jsonl",
-    description: "Payloads selected explicitly through reaction.given(...).",
+  return await resolveCausalEvents({
+    sourceIds: ids,
+    getEvent: id => store.getEvent(id),
+    getReaction: id => store.getReaction(id),
   })
 }
 
@@ -470,10 +442,76 @@ async function openSandbox(request: ReactionOperationRequest) {
   return await Sandbox.open(request.runtime as any, request.sandboxId)
 }
 
-async function requireSandbox(request: ReactionOperationRequest) {
+async function requireReactionWorkspace(request: ReactionOperationRequest) {
   const sandbox = await openSandbox(request)
   if (!sandbox) throw new Error("reaction_sandbox_not_configured")
-  return sandbox
+  const workspace = await prepareReactionWorkspace(request, sandbox)
+  return Object.freeze({ sandbox, workspace })
+}
+
+async function prepareReactionWorkspace(
+  request: ReactionOperationRequest,
+  sandbox: NonNullable<Awaited<ReturnType<typeof openSandbox>>>,
+): Promise<ReactorWorkspace> {
+  const contextPath = contextWorkspacePath(request.context.ref.id)
+  const sessionKey = workspaceKey(request.sessionId)
+  const reactionKey = workspaceKey(request.reactionId)
+  const artifactsPath = contextWorkspacePath(
+    request.context.ref.id,
+    "artifacts",
+    sessionKey,
+    reactionKey,
+  )
+  const tmpPath = contextWorkspacePath(
+    request.context.ref.id,
+    "tmp",
+    sessionKey,
+    reactionKey,
+  )
+  await ensureWorkspaceManifest(
+    sandbox,
+    resolveContextWorkspacePath(
+      sandbox.workspaceRoot,
+      request.context.ref.id,
+      appendWorkspacePath(contextPath, "manifest.json"),
+    ),
+    {
+      schema: "ekairos.context-workspace/v1",
+      contextId: request.context.ref.id,
+    },
+  )
+  await ensureWorkspaceManifest(
+    sandbox,
+    resolveContextWorkspacePath(
+      sandbox.workspaceRoot,
+      request.context.ref.id,
+      appendWorkspacePath(artifactsPath, "manifest.json"),
+    ),
+    {
+      schema: "ekairos.reaction-artifacts/v1",
+      contextId: request.context.ref.id,
+      sessionId: request.sessionId,
+      reactionId: request.reactionId,
+    },
+  )
+  return Object.freeze({
+    contextPath,
+    path: contextPath,
+    artifactsPath,
+    tmpPath,
+  })
+}
+
+async function ensureWorkspaceManifest(
+  sandbox: NonNullable<Awaited<ReturnType<typeof openSandbox>>>,
+  path: string,
+  value: Readonly<Record<string, string>>,
+) {
+  if (await sandbox.exists(path)) return
+  await sandbox.writeFile({
+    path,
+    content: `${JSON.stringify(value, null, 2)}\n`,
+  })
 }
 
 async function runShell(
@@ -481,13 +519,35 @@ async function runShell(
   input: ReactorShellRunInput,
 ): Promise<ReactorShellRunOutput> {
   if (!input.command?.trim()) throw new Error("reaction_shell_command_required")
-  const sandbox = await requireSandbox(request)
-  const cwd = resolveWorkspacePath(sandbox.workspaceRoot, input.cwd)
+  const { sandbox, workspace } = await requireReactionWorkspace(request)
+  const path = input.path ?? workspace.contextPath
+  const physicalPath = resolveContextWorkspacePath(
+    sandbox.workspaceRoot,
+    request.context.ref.id,
+    path,
+  )
   const result: any = await sandbox.exec({
     command: input.command,
     args: [...(input.args ?? [])],
-    cwd,
-    env: input.env ? { ...input.env } : undefined,
+    cwd: physicalPath,
+    env: {
+      ...(input.env ?? {}),
+      EKAIROS_CONTEXT: resolveContextWorkspacePath(
+        sandbox.workspaceRoot,
+        request.context.ref.id,
+        workspace.contextPath,
+      ),
+      EKAIROS_ARTIFACTS: resolveContextWorkspacePath(
+        sandbox.workspaceRoot,
+        request.context.ref.id,
+        workspace.artifactsPath,
+      ),
+      EKAIROS_TMP: resolveContextWorkspacePath(
+        sandbox.workspaceRoot,
+        request.context.ref.id,
+        workspace.tmpPath,
+      ),
+    },
     timeoutMs: input.timeoutMs,
   })
   const exitCode = typeof result.exitCode === "number" ? result.exitCode : result.success === false ? 1 : 0
@@ -497,87 +557,200 @@ async function runShell(
     output: typeof result.output === "string" ? result.output : "",
     error: typeof result.error === "string" ? result.error : "",
     command: [input.command, ...(input.args ?? [])].join(" "),
-    ...(cwd ? { cwd } : {}),
+    path,
   })
 }
 
-async function materializeWorkspace(
+async function materializeFiles(
   request: ReactionOperationRequest,
-  input: ReactorWorkspaceInput,
-): Promise<ReactorWorkspaceOutput> {
-  const sandbox = await requireSandbox(request)
-  const refs = [...new Set(
-    (Array.isArray(input.files) ? input.files : [input.files])
-      .map(value => String(value).trim())
-      .filter(Boolean),
-  )]
-  if (refs.length === 0) throw new Error("reaction_workspace_files_required")
-  const directory = normalizeRelativePath(input.directory ?? "files")
-  const root = sandbox.workspaceRoot
+): Promise<ReactorLoadFilesOutput> {
+  const { sandbox } = await requireReactionWorkspace(request)
+  const events = await hydrateEvents(request.runtime, request.causeIds)
+  const refs = collectEventFileReferences(events)
+  const path = contextWorkspacePath(request.context.ref.id, "files")
   const db = await request.runtime.db()
-  const files: any[] = []
+  const files: ReactorLoadFilesOutput["files"][number][] = []
 
   for (const ref of refs) {
-    const result = await db.query({ $files: { $: { where: { id: ref }, limit: 1 } } } as any)
+    const result = await db.query({
+      $files: { $: { where: { id: ref.fileId }, limit: 1 } },
+    } as any)
     const file = result?.$files?.[0]
-    if (!file) throw new Error(`reaction_workspace_file_not_found:${ref}`)
+    if (!file) throw new Error(`reaction_file_not_found:${ref.fileId}`)
     const fileId = String(file.id)
-    const filename = safeFilename(String(file.path ?? file.name ?? fileId))
-    const path = joinPath(root, directory, filename)
+    const name = safeFilename(String(file.path ?? file.name ?? fileId))
+    const filePath = contextWorkspacePath(
+      request.context.ref.id,
+      "files",
+      workspaceKey(fileId),
+      name,
+    )
+    const physicalPath = resolveContextWorkspacePath(
+      sandbox.workspaceRoot,
+      request.context.ref.id,
+      filePath,
+    )
     const bytes = await loadFileBytes(fileId, file.url)
-    const exists = await sandbox.exists(path)
-    let status: "created" | "reused" | "replaced" = "created"
+    const exists = await sandbox.exists(physicalPath)
+    let status: "created" | "reused" = "created"
     if (exists) {
-      if (input.conflict === "error") {
-        throw new Error(`reaction_workspace_file_conflict:${path}`)
-      }
-      const current = await sandbox.readFile(path)
+      const current = await sandbox.readFile(physicalPath)
       if (sameBytes(current, bytes)) {
         status = "reused"
-      } else if (input.conflict === "replace") {
-        await sandbox.writeFile({ path, content: bytes })
-        status = "replaced"
       } else {
-        throw new Error(`reaction_workspace_file_conflict:${path}`)
+        throw new Error(`reaction_file_identity_conflict:${fileId}`)
       }
     } else {
-      await sandbox.writeFile({ path, content: bytes })
+      await sandbox.writeFile({ path: physicalPath, content: bytes })
     }
     files.push(Object.freeze({
-      ref,
       fileId,
-      filename,
+      name,
       ...(file["content-type"] ?? file.contentType
         ? { mediaType: String(file["content-type"] ?? file.contentType) }
         : {}),
-      path,
+      path: filePath,
       status,
+      size: bytes.byteLength,
+      origins: ref.origins,
+    }))
+  }
+
+  return Object.freeze({ path, files: Object.freeze(files) })
+}
+
+async function persistFiles(
+  request: ReactionOperationRequest,
+  input: ReactorStoreFilesInput,
+): Promise<Readonly<{
+  output: ReactorStoreFilesOutput
+  fileIds: readonly string[]
+}>> {
+  const { sandbox } = await requireReactionWorkspace(request)
+  resolveContextWorkspacePath(
+    sandbox.workspaceRoot,
+    request.context.ref.id,
+    input.path,
+  )
+  const selected = (Array.isArray(input.files) ? input.files : [input.files])
+    .map(relativeWorkspaceFile)
+  if (selected.length === 0) throw new Error("reaction_store_files_required")
+  const db = await request.runtime.db()
+  const files: ReactorStoreFilesOutput["files"][number][] = []
+  const fileIds: string[] = []
+
+  for (const [index, relative] of selected.entries()) {
+    const logicalPath = appendWorkspacePath(input.path, ...relative.split("/"))
+    const physicalPath = resolveContextWorkspacePath(
+      sandbox.workspaceRoot,
+      request.context.ref.id,
+      logicalPath,
+    )
+    if (!await sandbox.exists(physicalPath)) {
+      throw new Error(`reaction_store_file_not_found:${logicalPath}`)
+    }
+    const bytes = await sandbox.readFile(physicalPath)
+    const name = safeFilename(relative)
+    const mediaType = mediaTypeForFilename(name)
+    const uploaded = await db.storage.uploadFile(
+      `/contexts/${request.context.ref.id}/events/${request.eventId}/${index}-${name}`,
+      Buffer.from(bytes),
+      { contentType: mediaType, contentDisposition: name },
+    )
+    const fileId = String((uploaded as any)?.data?.id ?? "")
+    if (!fileId) throw new Error(`reaction_store_file_upload_failed:${logicalPath}`)
+    fileIds.push(fileId)
+    files.push(Object.freeze({
+      fileId,
+      name,
+      mediaType,
+      path: logicalPath,
       size: bytes.byteLength,
     }))
   }
 
-  return Object.freeze({ root, directory, files: Object.freeze(files) })
+  return Object.freeze({
+    output: Object.freeze({ path: input.path, files: Object.freeze(files) }),
+    fileIds: Object.freeze(fileIds),
+  })
 }
 
 async function runGit(
   request: ReactionOperationRequest,
   input: ReactionGitInput,
 ): Promise<ReactorGitCloneOutput | ReactorGitCommitOutput | ReactorGitPushOutput> {
-  const sandbox = await requireSandbox(request)
+  const { sandbox } = await requireReactionWorkspace(request)
   if (input.operation === "clone") {
-    const target = normalizeRelativePath(input.target)
-    const path = joinPath(sandbox.workspaceRoot, target)
-    const reused = await sandbox.exists(joinPath(path, ".git"))
+    if (!input.key?.trim()) throw new Error("reaction_git_repository_key_required")
+    if (!input.url?.trim()) throw new Error("reaction_git_repository_url_required")
+    const path = contextWorkspacePath(
+      request.context.ref.id,
+      "repositories",
+      workspaceKey(input.key),
+      "checkout",
+    )
+    const physicalPath = resolveContextWorkspacePath(
+      sandbox.workspaceRoot,
+      request.context.ref.id,
+      path,
+    )
+    const metadataPath = resolveContextWorkspacePath(
+      sandbox.workspaceRoot,
+      request.context.ref.id,
+      contextWorkspacePath(
+        request.context.ref.id,
+        "repositories",
+        workspaceKey(input.key),
+        "repository.json",
+      ),
+    )
+    const reused = await sandbox.exists(joinPath(physicalPath, ".git"))
     if (!reused) {
       const args = ["clone"]
       if (input.depth !== undefined) args.push("--depth", String(input.depth))
       if (input.ref) args.push("--branch", input.ref)
-      args.push("--", input.url, path)
-      await assertCommand(sandbox, "git", args, sandbox.workspaceRoot)
+      args.push("--", input.url, physicalPath)
+      const contextPhysicalPath = resolveContextWorkspacePath(
+        sandbox.workspaceRoot,
+        request.context.ref.id,
+        contextWorkspacePath(request.context.ref.id),
+      )
+      await assertCommand(sandbox, "git", args, contextPhysicalPath)
+      await sandbox.writeFile({
+        path: metadataPath,
+        content: `${JSON.stringify({
+          schema: "ekairos.repository/v1",
+          key: input.key,
+          url: input.url,
+          ref: input.ref ?? null,
+        }, null, 2)}\n`,
+      })
+    } else {
+      if (!await sandbox.exists(metadataPath)) {
+        throw new Error(`reaction_git_repository_metadata_missing:${input.key}`)
+      }
+      const metadata = JSON.parse(Buffer.from(await sandbox.readFile(metadataPath)).toString("utf8"))
+      if (metadata.url !== input.url || (metadata.ref ?? undefined) !== input.ref) {
+        throw new Error(`reaction_git_repository_identity_conflict:${input.key}`)
+      }
+      const remote = (await assertCommand(
+        sandbox,
+        "git",
+        ["remote", "get-url", "origin"],
+        physicalPath,
+      )).output.trim()
+      if (remote !== input.url) {
+        throw new Error(`reaction_git_repository_remote_conflict:${input.key}`)
+      }
     }
-    const sha = (await assertCommand(sandbox, "git", ["rev-parse", "HEAD"], path)).output.trim()
+    const sha = (await assertCommand(
+      sandbox,
+      "git",
+      ["rev-parse", "HEAD"],
+      physicalPath,
+    )).output.trim()
     return Object.freeze({
-      target,
+      key: input.key,
       path,
       url: input.url,
       ...(input.ref ? { ref: input.ref } : {}),
@@ -586,9 +759,17 @@ async function runGit(
     })
   }
 
-  const path = resolveWorkspacePath(sandbox.workspaceRoot, input.repository)
+  const path = input.path
+  const physicalPath = resolveContextWorkspacePath(
+    sandbox.workspaceRoot,
+    request.context.ref.id,
+    path,
+  )
+  if (!await sandbox.exists(joinPath(physicalPath, ".git"))) {
+    throw new Error(`reaction_git_repository_not_found:${path}`)
+  }
   if (input.operation === "commit") {
-    const status = await assertCommand(sandbox, "git", ["status", "--porcelain"], path)
+    const status = await assertCommand(sandbox, "git", ["status", "--porcelain"], physicalPath)
     const changedFiles = status.output
       .split(/\r?\n/)
       .filter(Boolean)
@@ -596,13 +777,18 @@ async function runGit(
     if (changedFiles.length === 0) {
       return Object.freeze({ path, status: "unchanged", message: input.message, changedFiles: [] })
     }
-    if (input.all !== false) await assertCommand(sandbox, "git", ["add", "-A"], path)
+    if (input.all !== false) await assertCommand(sandbox, "git", ["add", "-A"], physicalPath)
     const env = {
       ...(input.authorName ? { GIT_AUTHOR_NAME: input.authorName, GIT_COMMITTER_NAME: input.authorName } : {}),
       ...(input.authorEmail ? { GIT_AUTHOR_EMAIL: input.authorEmail, GIT_COMMITTER_EMAIL: input.authorEmail } : {}),
     }
-    await assertCommand(sandbox, "git", ["commit", "-m", input.message], path, env)
-    const sha = (await assertCommand(sandbox, "git", ["rev-parse", "HEAD"], path)).output.trim()
+    await assertCommand(sandbox, "git", ["commit", "-m", input.message], physicalPath, env)
+    const sha = (await assertCommand(
+      sandbox,
+      "git",
+      ["rev-parse", "HEAD"],
+      physicalPath,
+    )).output.trim()
     return Object.freeze({
       path,
       status: "committed",
@@ -617,7 +803,7 @@ async function runGit(
   if (input.setUpstream) args.push("--set-upstream")
   if (input.forceWithLease) args.push("--force-with-lease")
   args.push(remote, input.ref)
-  const pushed = await assertCommand(sandbox, "git", args, path)
+  const pushed = await assertCommand(sandbox, "git", args, physicalPath)
   return Object.freeze({
     path,
     remote,
@@ -642,30 +828,26 @@ async function assertCommand(
   return result
 }
 
-function resolveWorkspacePath(root: string, value: string | undefined) {
-  if (!value?.trim()) return root
-  const normalized = value.trim().replace(/\\/g, "/")
-  if (/^[a-zA-Z]:\//.test(normalized) || normalized.startsWith("/")) {
-    const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "")
-    if (normalized !== normalizedRoot && !normalized.startsWith(`${normalizedRoot}/`)) {
-      throw new Error(`reaction_workspace_path_outside_root:${value}`)
-    }
-    return value
-  }
-  return joinPath(root, normalizeRelativePath(normalized))
-}
-
-function normalizeRelativePath(value: string) {
-  const normalized = value.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")
-  if (!normalized || normalized.split("/").some(part => part === ".." || part === ".")) {
-    throw new Error(`reaction_workspace_path_invalid:${value}`)
-  }
-  return normalized
-}
-
 function safeFilename(value: string) {
   const filename = value.replace(/\\/g, "/").split("/").pop() ?? "file"
   return filename.replace(/[^a-zA-Z0-9._-]+/g, "-") || "file"
+}
+
+function mediaTypeForFilename(filename: string) {
+  const extension = filename.toLowerCase().split(".").pop()
+  const types: Readonly<Record<string, string>> = {
+    csv: "text/csv",
+    gif: "image/gif",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    json: "application/json",
+    md: "text/markdown",
+    pdf: "application/pdf",
+    png: "image/png",
+    txt: "text/plain",
+    webp: "image/webp",
+  }
+  return extension && types[extension] ? types[extension] : "application/octet-stream"
 }
 
 function joinPath(root: string, ...parts: string[]) {

@@ -1,0 +1,359 @@
+*** Begin ECU Patch
+Key: 018-sandbox-path-execution
+Title: Preserve path and environment across sandbox providers
+Purpose: Make Reactor logical paths execute correctly through durable sandbox handles and preserve command options and multiline environment values across Daytona, Vercel, and Sprites.
+
+*** Begin Context
+Sandbox handles reopen idempotently by provider id and translate Reactor paths only inside provider adapters. Command execution now preserves path, environment, and timeout end to end. Daytona uses POSIX-safe quoted environment assignments because its SDK environment encoder corrupts multiline values; the other providers receive the same typed command options. Focused tests cover provider roots, reopened sessions, command forwarding, and multiline values.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/packages/sandbox/src/commands.ts b/packages/sandbox/src/commands.ts
+index 8e1efbe..92451f5 100644
+--- a/packages/sandbox/src/commands.ts
++++ b/packages/sandbox/src/commands.ts
+@@ -18,10 +18,18 @@ export async function runCommandInSandbox(
+   sandbox: Sandbox,
+   command: string,
+   args: string[] = [],
++  options: {
++    cwd?: string
++    env?: Record<string, string>
++  } = {},
+ ): Promise<CommandResult> {
+   try {
+-    // @vercel/sandbox soporta { cmd, args } en runCommand
+-    const result = await sandbox.runCommand({ cmd: command, args })
++    const result = await sandbox.runCommand({
++      cmd: command,
++      args,
++      cwd: options.cwd,
++      env: options.env,
++    })
+ 
+     const stdout = (await result.stdout()) ?? ""
+     const stderr = (await result.stderr()) ?? ""
+diff --git a/packages/sandbox/src/sandbox.ts b/packages/sandbox/src/sandbox.ts
+index 7c24adb..e1f26c9 100644
+--- a/packages/sandbox/src/sandbox.ts
++++ b/packages/sandbox/src/sandbox.ts
+@@ -59,7 +59,9 @@ function asPorts(value: unknown): number[] | undefined {
+ }
+ 
+ function defaultWorkspaceRoot(provider: SandboxProvider | undefined) {
+-  return provider === "vercel" ? "/vercel/sandbox" : "/workspace"
++  if (provider === "vercel") return "/vercel/sandbox"
++  if (provider === "daytona") return "/home/daytona"
++  return "/workspace"
+ }
+ 
+ async function readSandboxState(
+diff --git a/packages/sandbox/src/service.ts b/packages/sandbox/src/service.ts
+index b8289de..40f550d 100644
+--- a/packages/sandbox/src/service.ts
++++ b/packages/sandbox/src/service.ts
+@@ -33,6 +33,7 @@ import {
+   resolveVercelSandboxConfig,
+   safeVercelConfigForRecord,
+ } from "./vercel-options.js"
++import { withPosixEnvironment } from "./shell-environment.js"
+ import { randomUUID } from "node:crypto"
+ import path from "node:path"
+ 
+@@ -63,6 +64,23 @@ export interface SandboxRecord {
+   shutdownAt?: number
+ }
+ 
++type SandboxCommandOptions = Readonly<{
++  cwd?: string
++  env?: Record<string, unknown>
++}>
++
++function normalizeCommandEnvironment(
++  value: Record<string, unknown> | undefined,
++): Record<string, string> | undefined {
++  if (!value || Object.keys(value).length === 0) return undefined
++  return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
++    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
++      throw new Error(`sandbox_env_key_invalid:${key}`)
++    }
++    return [key, String(entry)]
++  }))
++}
++
+ export type ServiceResult<T = any> = { ok: true; data: T } | { ok: false; error: string }
+ 
+ export type SandboxProcessStatus =
+@@ -1529,23 +1547,44 @@ export class SandboxService {
+     }
+   }
+ 
+-  async runCommand(sandboxId: string, command: string, args: string[] = []): Promise<ServiceResult<CommandResult>> {
++  async runCommand(
++    sandboxId: string,
++    command: string,
++    args: string[] = [],
++    opts?: SandboxCommandOptions,
++  ): Promise<ServiceResult<CommandResult>> {
+     try {
+       const sandboxResult = await this.reconnectToSandbox(sandboxId)
+       if (!sandboxResult.ok) return { ok: false, error: sandboxResult.error }
+ 
+       const sandbox = sandboxResult.data.sandbox
++      const env = normalizeCommandEnvironment(opts?.env)
+       if (isVercelSandbox(sandbox)) {
+-        const result = await runCommandInSandbox(sandbox as VercelSandbox, command, args)
++        const result = await runCommandInSandbox(sandbox as VercelSandbox, command, args, {
++          cwd: opts?.cwd,
++          env,
++        })
+         return { ok: true, data: result }
+       }
+ 
+       if ((sandbox as any).__provider === "sprites") {
+-        const fullCommand = args.length > 0 ? [command, ...args].join(" ") : command
++        const commandText = [
++          command,
++          ...args.map(arg => SandboxService.shellEscapeArg(String(arg))),
++        ].join(" ")
++        const environment = env
++          ? `env ${Object.entries(env)
++              .map(([key, value]) => `${key}=${SandboxService.shellEscapeArg(value)}`)
++              .join(" ")} `
++          : ""
++        const scopedCommand = opts?.cwd
++          ? `cd ${SandboxService.shellEscapeArg(opts.cwd)} && ${environment}${commandText}`
++          : `${environment}${commandText}`
++        const scoped = Boolean(opts?.cwd || env)
+         const res = await spritesExec({
+           spriteName: String((sandbox as any).name ?? ""),
+-          command,
+-          args,
++          command: scoped ? "sh" : command,
++          args: scoped ? ["-lc", scopedCommand] : args,
+         })
+         return {
+           ok: true,
+@@ -1554,7 +1593,7 @@ export class SandboxService {
+             exitCode: res.exitCode,
+             output: res.stdout,
+             error: res.stderr,
+-            command: fullCommand,
++            command: scopedCommand,
+           },
+         }
+       }
+@@ -1563,7 +1602,10 @@ export class SandboxService {
+         args.length > 0
+           ? [command, ...args.map((arg) => SandboxService.shellEscapeArg(String(arg)))].join(" ")
+           : command
+-      const res = await (sandbox as DaytonaSandbox).process.executeCommand(commandStr)
++      const res = await (sandbox as DaytonaSandbox).process.executeCommand(
++        withPosixEnvironment(commandStr, env),
++        opts?.cwd,
++      )
+       return {
+         ok: true,
+         data: {
+@@ -1642,7 +1684,10 @@ export class SandboxService {
+         },
+       })
+ 
+-      const result = await this.runCommand(sandboxId, command, args)
++      const result = await this.runCommand(sandboxId, command, args, {
++        cwd: opts?.cwd,
++        env: opts?.env,
++      })
+       const finishedAt = Date.now()
+       let finalResult: CommandResult
+       let status: SandboxProcessStatus
+diff --git a/packages/sandbox/src/session.ts b/packages/sandbox/src/session.ts
+index 65e11bd..df18532 100644
+--- a/packages/sandbox/src/session.ts
++++ b/packages/sandbox/src/session.ts
+@@ -30,6 +30,7 @@ import {
+ } from "./providers/sprites.js"
+ import type { SpritesSandbox } from "./providers/types.js"
+ import { provisionVercelSandbox } from "./providers/vercel.js"
++import { withPosixEnvironment } from "./shell-environment.js"
+ 
+ export type SandboxExecInput = {
+   command: string
+@@ -468,7 +469,15 @@ export function daytonaSandbox(config: SandboxConfig = {}): SandboxSessionProvid
+         async exec(input) {
+           const args = normalizeArgs(input.args).map(shellEscapeArg)
+           const command = args.length > 0 ? [input.command, ...args].join(" ") : input.command
+-          const result = await (sandbox as DaytonaSandbox).process.executeCommand(command)
++          const scopedCommand = withPosixEnvironment(command, input.env)
++          const result = await (sandbox as DaytonaSandbox).process.executeCommand(
++            scopedCommand,
++            input.cwd,
++            undefined,
++            input.timeoutMs === undefined
++              ? undefined
++              : Math.max(1, Math.ceil(input.timeoutMs / 1_000)),
++          )
+           const exitCode = Number(result.exitCode ?? 0)
+           return makeCommandResult({
+             exitCode,
+diff --git a/packages/sandbox/src/shell-environment.ts b/packages/sandbox/src/shell-environment.ts
+new file mode 100644
+index 0000000..09dd0e7
+--- /dev/null
++++ b/packages/sandbox/src/shell-environment.ts
+@@ -0,0 +1,18 @@
++function quotePosix(value: string) {
++  if (value.includes("\0")) throw new Error("sandbox_env_value_contains_null")
++  return `'${value.replace(/'/g, `'"'"'`)}'`
++}
++
++export function withPosixEnvironment(
++  command: string,
++  environment: Record<string, string> | undefined,
++) {
++  if (!environment || Object.keys(environment).length === 0) return command
++  const assignments = Object.entries(environment).map(([key, value]) => {
++    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
++      throw new Error(`sandbox_env_key_invalid:${key}`)
++    }
++    return `${key}=${quotePosix(value)}; export ${key}`
++  })
++  return `${assignments.join("; ")}; ${command}`
++}
+diff --git a/packages/sandbox/src/tests/sandbox.service-command-options.test.ts b/packages/sandbox/src/tests/sandbox.service-command-options.test.ts
+new file mode 100644
+index 0000000..58ac292
+--- /dev/null
++++ b/packages/sandbox/src/tests/sandbox.service-command-options.test.ts
+@@ -0,0 +1,52 @@
++import { describe, expect, it, vi } from "vitest"
++
++import { SandboxService } from "../service"
++
++describe("SandboxService command context", () => {
++  it("forwards path and environment to Daytona", async () => {
++    const executeCommand = vi.fn(async () => ({
++      exitCode: 0,
++      result: "/home/daytona/project\n",
++    }))
++    const service = new SandboxService({} as any)
++    vi.spyOn(service as any, "reconnectToSandbox").mockResolvedValue({
++      ok: true,
++      data: {
++        sandbox: { process: { executeCommand } },
++      },
++    })
++
++    const result = await service.runCommand(
++      "sandbox-1",
++      "node",
++      ["script.js", "hello world"],
++      {
++        cwd: "/home/daytona/project",
++        env: { REPORT_NAME: "Review 1\nSecond line" },
++      },
++    )
++
++    expect(result).toMatchObject({
++      ok: true,
++      data: { success: true, output: "/home/daytona/project\n" },
++    })
++    expect(executeCommand).toHaveBeenCalledWith(
++      "REPORT_NAME='Review 1\nSecond line'; export REPORT_NAME; node script.js 'hello world'",
++      "/home/daytona/project",
++    )
++  })
++
++  it("rejects invalid environment keys before provider execution", async () => {
++    const executeCommand = vi.fn()
++    const service = new SandboxService({} as any)
++    vi.spyOn(service as any, "reconnectToSandbox").mockResolvedValue({
++      ok: true,
++      data: { sandbox: { process: { executeCommand } } },
++    })
++
++    await expect(service.runCommand("sandbox-1", "true", [], {
++      env: { "BAD-KEY": "value" },
++    })).resolves.toEqual({ ok: false, error: "sandbox_env_key_invalid:BAD-KEY" })
++    expect(executeCommand).not.toHaveBeenCalled()
++  })
++})
+diff --git a/packages/sandbox/src/tests/sandbox.session.remote-providers.test.ts b/packages/sandbox/src/tests/sandbox.session.remote-providers.test.ts
+index 93c30f3..c479646 100644
+--- a/packages/sandbox/src/tests/sandbox.session.remote-providers.test.ts
++++ b/packages/sandbox/src/tests/sandbox.session.remote-providers.test.ts
+@@ -106,6 +106,37 @@ describe("remote sandbox session filesystem existence", () => {
+     )
+   })
+ 
++  it("forwards Daytona command path, environment, and timeout", async () => {
++    const executeCommand = vi.fn(async () => ({ exitCode: 0, result: "ok" }))
++    mocks.createDaytona.mockResolvedValue({
++      id: "daytona-test",
++      fs: {
++        getFileDetails: vi.fn(async () => ({})),
++        uploadFiles: vi.fn(async () => undefined),
++        downloadFile: vi.fn(async () => Buffer.alloc(0)),
++      },
++      process: { executeCommand },
++    })
++
++    const session = await createSandboxSession(daytonaSandbox())
++
++    await expect(
++      session.exec({
++        command: "node",
++        args: ["script.js", "hello world"],
++        cwd: "/home/daytona/contexts/context-1/repositories/platform/checkout",
++        env: { EKAIROS_CONTEXT: "/home/daytona/contexts/context-1" },
++        timeoutMs: 1_001,
++      }),
++    ).resolves.toMatchObject({ exitCode: 0, output: "ok" })
++    expect(executeCommand).toHaveBeenCalledWith(
++      "EKAIROS_CONTEXT='/home/daytona/contexts/context-1'; export EKAIROS_CONTEXT; node script.js 'hello world'",
++      "/home/daytona/contexts/context-1/repositories/platform/checkout",
++      undefined,
++      2,
++    )
++  })
++
+   it("uses Sprites' exec API to distinguish present, missing, and failed probes", async () => {
+     mocks.provisionSprites.mockResolvedValue({
+       __provider: "sprites",
+diff --git a/packages/sandbox/src/tests/sandbox.workflow-safe.test.ts b/packages/sandbox/src/tests/sandbox.workflow-safe.test.ts
+index f73af90..bc767ac 100644
+--- a/packages/sandbox/src/tests/sandbox.workflow-safe.test.ts
++++ b/packages/sandbox/src/tests/sandbox.workflow-safe.test.ts
+@@ -100,6 +100,30 @@ describe("sandbox workflow-safe boundary", () => {
+     expect(queries).toHaveLength(1)
+   })
+ 
++  it("restores Daytona at the provider workspace root when the row has no override", async () => {
++    const runtime = {
++      env,
++      meta: () => ({ domain: sandboxDomain }),
++      use: async () => ({
++        db: {
++          query: async () => ({
++            sandbox_sandboxes: [{
++              id: "sandbox_daytona",
++              provider: "daytona",
++              externalSandboxId: "remote_daytona",
++              runtime: "python3.12",
++            }],
++          }),
++        },
++        actions: {},
++      }),
++    }
++
++    const sandbox = await Sandbox.open(runtime as any, "sandbox_daytona")
++
++    expect(sandbox.workspaceRoot).toBe("/home/daytona")
++  })
++
+   it("fails explicitly when a durable sandbox id does not exist", async () => {
+     const runtime = {
+       env,
+*** End Git Diff
+*** End ECU Patch

@@ -6,6 +6,7 @@ import type {
 } from "@ekairos/events"
 
 import type { ReactorInitialContext } from "./reactor.js"
+import { toModelActionName } from "./action-name.js"
 
 export function buildAgentSystemPrompt(input: {
   reactionKey: string
@@ -47,7 +48,10 @@ export async function eventToModelMessages(
   runtime: ContextRuntimeServiceHandle,
   event: ContextEvent,
 ): Promise<ModelMessage[]> {
-  const role = event.type === "context.agent" ? "assistant" : "user"
+  if (event.type === "context.action") {
+    return actionPartsToModelMessages(event.eventParts)
+  }
+  const role = event.type === "context.model" ? "assistant" : "user"
   const content: any[] = [{ type: "text", text: renderEvent(event) }]
   appendMessageParts(content, event.eventParts)
   await appendLinkedFiles(runtime, content, event)
@@ -59,7 +63,7 @@ export async function eventToModelMessages(
 
 export function actionPartsToModelMessages(
   parts: readonly ContextEventPart[] | readonly { type: string; content: any }[],
-  mapName: (name: string) => string = name => name,
+  mapName: (name: string) => string = toModelActionName,
 ): ModelMessage[] {
   const started = new Map<string, { name: string; input: unknown; index: number }>()
   const settled = new Map<string, any>()
@@ -185,6 +189,22 @@ async function appendLinkedFiles(
         size: typeof file.size === "number" ? file.size : undefined,
       }),
     })
+    if (isTextMediaType(mediaType) && typeof file.url === "string") {
+      const text = await readLinkedTextFile(file.url, file.size)
+      if (text !== undefined) {
+        content.push({
+          type: "text",
+          text: [
+            "### File content",
+            "",
+            codeJson({ fileId, filename, mediaType }),
+            "",
+            text,
+          ].join("\n"),
+        })
+      }
+      continue
+    }
     appendFileBlock(content, {
       type: "file",
       fileId,
@@ -192,6 +212,25 @@ async function appendLinkedFiles(
       mediaType,
       url: typeof file.url === "string" ? file.url : undefined,
     })
+  }
+}
+
+const MAX_INLINE_TEXT_FILE_BYTES = 512 * 1_024
+
+function isTextMediaType(mediaType: string) {
+  return mediaType.startsWith("text/") || mediaType.includes("json")
+}
+
+async function readLinkedTextFile(url: string, size: unknown) {
+  if (typeof size === "number" && size > MAX_INLINE_TEXT_FILE_BYTES) return undefined
+  try {
+    const response = await fetch(url)
+    if (!response.ok) return undefined
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    if (bytes.byteLength > MAX_INLINE_TEXT_FILE_BYTES) return undefined
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return undefined
   }
 }
 
@@ -206,9 +245,7 @@ function appendFileBlock(content: any[], file: any) {
     return
   }
   if (
-    mediaType === "application/pdf" ||
-    mediaType.startsWith("text/") ||
-    mediaType.includes("json")
+    mediaType === "application/pdf"
   ) {
     content.push({
       type: "file",

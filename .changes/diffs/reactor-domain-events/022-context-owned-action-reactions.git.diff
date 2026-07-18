@@ -1,0 +1,1059 @@
+diff --git a/DOMAIN.md b/DOMAIN.md
+index 3f573ad..c6c6be7 100644
+--- a/DOMAIN.md
++++ b/DOMAIN.md
+@@ -39,6 +39,10 @@ schema.
+    explicit fan-in form.
+ 9. `agent`, `action`, `dataset`, `workspace`, `shell`, `git`, and `emit` all
+    return Events. Later operations consume those Events.
++10. Reactor passes only the invoking `reactionId` into a domain action. An
++    action resolves the owning Context explicitly when it must emit an effect
++    or start a child Reaction; executable Reactor capabilities never enter the
++    action contract.
+ 
+ ## Composition
+ 
+diff --git a/packages/context/DOMAIN.md b/packages/context/DOMAIN.md
+index 35a0ad2..3273fd6 100644
+--- a/packages/context/DOMAIN.md
++++ b/packages/context/DOMAIN.md
+@@ -13,6 +13,10 @@ Module: `@ekairos/context`
+ - Event emission is explicit through `Events(runtime)` or
+   `Context(runtime).events`.
+ - Reaction execution is explicit through `context.react(trigger, definition)`.
++- `Context(runtime).fromReaction(reactionId)` binds one existing Reaction to its
++  Context without transporting executable capabilities into a domain action.
++- A bound Context may emit deterministic effects and start child Reactions; the
++  parent Session and Reaction are resolved from that single durable id.
+ - Files, repositories, Datasets, engines, sandboxes, and tools are not Context
+   fields.
+ - Meaningful writes remain registered domain actions.
+diff --git a/packages/context/README.md b/packages/context/README.md
+index 7125ce6..00c76f2 100644
+--- a/packages/context/README.md
++++ b/packages/context/README.md
+@@ -44,6 +44,30 @@ console.log(response.payload)
+ The Event exists independently from the Reaction. The same Event can trigger
+ different definitions or react in different Contexts.
+ 
++## React from a domain action
++
++Reactor passes only the durable `reactionId` to an action. Resolve the owning
++Context explicitly; no Reaction methods or runtime callbacks travel into the
++action.
++
++```ts
++execute: async ({ input, runtime, reactionId }) => {
++  if (!reactionId) throw new Error("review_reaction_required")
++
++  const context = await Context(runtime).fromReaction(reactionId)
++  const requested = await context.emit(
++    reviews.events.verificationRequested({ reviewId: input.reviewId }),
++    { key: `verification-requested:${input.reviewId}` },
++  )
++
++  return await context.react(requested, verifyReview)
++}
++```
++
++The emission is an effect of the originating Reaction. The nested call opens a
++child Session in the same Context. `key` makes the emitted Event idempotent
++across Workflow retries.
++
+ ## Runtime conveniences
+ 
+ ```ts
+@@ -51,6 +75,7 @@ const contexts = Context(runtime)
+ 
+ await contexts.create({ key, content })
+ await contexts.get({ key })
++await contexts.fromReaction(reactionId)
+ await contexts.events.emit(draft, envelope)
+ await contexts.use(requisitionDomain)
+ ```
+diff --git a/packages/context/src/index.ts b/packages/context/src/index.ts
+index 61b539d..4edeac7 100644
+--- a/packages/context/src/index.ts
++++ b/packages/context/src/index.ts
+@@ -19,6 +19,8 @@ import {
+   Events,
+   Part,
+   contextDomain,
++  getContextRuntimeServices,
++  uuidV5,
+   type ContextEvent,
+   type ContextHandleCreateParams,
+   type ContextIdentifier,
+@@ -62,6 +64,20 @@ export type {
+   DomainEventsOf,
+ }
+ 
++const CONTEXT_REACTION_EVENT_NAMESPACE = "1b11fe82-87fb-46c8-a210-bc65c3788073"
++
++type ReactionOrigin = Readonly<{
++  sessionId: string
++  reactionId: string
++}>
++
++export type ContextReactionEmitOptions = Readonly<
++  Omit<DomainEventEnvelope, "id" | "contextId" | "metadata"> & {
++    key: string
++    metadata?: Readonly<Record<string, unknown>>
++  }
++>
++
+ export type ContextRuntimeWithDomainUse = ContextRuntimeServiceHandle & {
+   use<Domain extends MaterializedDomainLike>(
+     domain: Domain,
+@@ -76,20 +92,58 @@ export class ReactionContextHandle<
+   Runtime extends ContextRuntimeWithDomainUse = ContextRuntimeWithDomainUse,
+ > extends ContextHandle<ContextContent> {
+   declare readonly runtime: Runtime
++  readonly origin?: ReactionOrigin
+ 
+-  constructor(runtime: Runtime, context: StoredContext<ContextContent>) {
++  constructor(
++    runtime: Runtime,
++    context: StoredContext<ContextContent>,
++    origin?: ReactionOrigin,
++  ) {
+     super(runtime, context)
++    this.origin = origin
+   }
+ 
+   static [WORKFLOW_SERIALIZE](instance: ReactionContextHandle<unknown, any>) {
+-    return { runtime: instance.runtime, context: instance.context }
++    return {
++      runtime: instance.runtime,
++      context: instance.context,
++      ...(instance.origin ? { origin: instance.origin } : {}),
++    }
+   }
+ 
+   static [WORKFLOW_DESERIALIZE](data: {
+     runtime: ContextRuntimeWithDomainUse
+     context: StoredContext<unknown>
++    origin?: ReactionOrigin
+   }) {
+-    return new ReactionContextHandle(data.runtime, data.context)
++    return new ReactionContextHandle(data.runtime, data.context, data.origin)
++  }
++
++  async emit<Payload>(
++    draft: DomainEventDraft<Payload, any, any, any, any, any>,
++    options: ContextReactionEmitOptions,
++  ): Promise<DomainEventItem<Payload>> {
++    if (!this.origin) throw new Error("context_reaction_origin_required")
++    const key = options.key.trim()
++    if (!key) throw new Error("context_reaction_event_key_required")
++    const event = await Events(this.runtime).emit(draft, {
++      id: uuidV5(
++        `${this.origin.reactionId}:${key}`,
++        CONTEXT_REACTION_EVENT_NAMESPACE,
++      ),
++      contextId: this.id,
++      ...(options.channel ? { channel: options.channel } : {}),
++      ...(options.createdAt ? { createdAt: options.createdAt } : {}),
++      ...(options.parts ? { parts: options.parts } : {}),
++      metadata: {
++        ...options.metadata,
++        sessionId: this.origin.sessionId,
++        reactionId: this.origin.reactionId,
++      },
++    })
++    const { store } = await getContextRuntimeServices(this.runtime)
++    await store.appendReactionEffect(this.origin.reactionId, event.id)
++    return event
+   }
+ 
+   async react<
+@@ -100,19 +154,27 @@ export class ReactionContextHandle<
+     definition: ReactionDefinition<ContextContent, Scope, any, Effect>,
+     options?: ReactOptions,
+   ): Promise<Effect> {
+-    return await executeReaction(this.runtime as any, this, trigger, definition, options)
++    return await executeReaction(this.runtime as any, this, trigger, definition, {
++      ...options,
++      ...(this.origin
++        ? {
++            parentSessionId: this.origin.sessionId,
++            parentReactionId: this.origin.reactionId,
++          }
++        : {}),
++    })
+   }
+ 
+   override async refresh(): Promise<ReactionContextHandle<ContextContent, Runtime>> {
+     const handle = await super.refresh()
+-    return new ReactionContextHandle(this.runtime, handle.context)
++    return new ReactionContextHandle(this.runtime, handle.context, this.origin)
+   }
+ 
+   override async updateContent(
+     content: ContextContent,
+   ): Promise<ReactionContextHandle<ContextContent, Runtime>> {
+     const handle = await super.updateContent(content)
+-    return new ReactionContextHandle(this.runtime, handle.context)
++    return new ReactionContextHandle(this.runtime, handle.context, this.origin)
+   }
+ }
+ 
+@@ -123,6 +185,9 @@ export type ContextClient<Runtime extends ContextRuntimeWithDomainUse> = Readonl
+   get<ContextContent = unknown>(
+     identifier: ContextIdentifier,
+   ): Promise<ReactionContextHandle<ContextContent, Runtime> | null>
++  fromReaction<ContextContent = unknown>(
++    reactionId: string,
++  ): Promise<ReactionContextHandle<ContextContent, Runtime>>
+   events: ReturnType<typeof Events>
+   use<Domain extends MaterializedDomainLike>(
+     domain: Domain,
+@@ -144,6 +209,23 @@ export function Context<Runtime extends ContextRuntimeWithDomainUse>(
+       const handle = await ContextHandle.get<ContextContent>(runtime, identifier)
+       return handle ? new ReactionContextHandle(runtime, handle.context) : null
+     },
++    async fromReaction<ContextContent = unknown>(reactionId: string) {
++      const id = reactionId.trim()
++      if (!id) throw new Error("context_reaction_id_required")
++      const { store } = await getContextRuntimeServices(runtime)
++      const reaction = await store.getReaction(id)
++      if (!reaction) throw new Error(`context_reaction_not_found:${id}`)
++      const session = await store.getSession(reaction.sessionId)
++      if (!session) throw new Error(`context_session_not_found:${reaction.sessionId}`)
++      const handle = await ContextHandle.get<ContextContent>(runtime, {
++        id: session.contextId,
++      })
++      if (!handle) throw new Error(`context_not_found:${session.contextId}`)
++      return new ReactionContextHandle(runtime, handle.context, Object.freeze({
++        sessionId: session.id,
++        reactionId: reaction.id,
++      }))
++    },
+     events: Events(runtime),
+     use<Domain extends MaterializedDomainLike>(
+       domain: Domain,
+diff --git a/packages/context/src/tests/context-reaction.instant.test.ts b/packages/context/src/tests/context-reaction.instant.test.ts
+index 5a65e94..30b5aed 100644
+--- a/packages/context/src/tests/context-reaction.instant.test.ts
++++ b/packages/context/src/tests/context-reaction.instant.test.ts
+@@ -22,7 +22,7 @@ import {
+   provisionContextTestApp,
+ } from "../../../events/src/tests/_env.ts"
+ 
+-const emailDomain = domain("email")
++const emailCore = domain("email")
+   .includes(contextDomain)
+   .withSchema({
+     entities: {
+@@ -50,19 +50,56 @@ const emailDomain = domain("email")
+       links: { message: { on: "email_messages", has: "one" } },
+     }),
+   })
++
++const completeOrder = defineDomainAction({
++  description: "Complete one extracted order.",
++  input: z.object({ orderId: z.string().uuid(), code: z.string() }),
++  output: z.object({ orderId: z.string().uuid(), code: z.string(), status: z.literal("completed") }),
++  execute: async ({ input, domain: activeDomain }) => {
++    const db = (activeDomain as any).db
++    await db.transact([
++      db.tx.email_orders[input.orderId].update({ code: input.code, status: "completed" }),
++    ])
++    return { ...input, status: "completed" as const }
++  },
++})
++
++const extractFromAction = defineDomainAction({
++  description: "Start a causally linked extraction Reaction from this action.",
++  input: z.object({ messageId: z.string().uuid(), orderCode: z.string() }),
++  output: z.object({ eventId: z.string().uuid(), orderCode: z.string() }),
++  execute: async ({ input, runtime, reactionId }) => {
++    if (!reactionId) throw new Error("email_extraction_reaction_required")
++    const context = await Context(runtime as any).fromReaction(reactionId)
++    const requested = await context.emit(
++      emailCore.events.extractionRequested({ orderCode: input.orderCode })
++        .link({ message: input.messageId }),
++      { key: "extraction-requested" },
++    )
++    const completed = await context.react(
++      requested,
++      defineReaction(
++        emailCore.events.extractionRequested,
++        {
++          key: "email.extract-from-action",
++          scope: emailCore,
++          engine: false,
++          sandbox: false,
++        },
++        async child => await child.given(child.trigger).emit(
++          emailCore.events.orderExtracted({ orderCode: child.trigger.payload.orderCode })
++            .link({ message: input.messageId }),
++        ),
++      ),
++    )
++    return { eventId: completed.id, orderCode: completed.payload.orderCode }
++  },
++})
++
++const emailDomain = emailCore
+   .withActions({
+-    completeOrder: defineDomainAction({
+-      description: "Complete one extracted order.",
+-      input: z.object({ orderId: z.string().uuid(), code: z.string() }),
+-      output: z.object({ orderId: z.string().uuid(), code: z.string(), status: z.literal("completed") }),
+-      execute: async ({ input, domain: activeDomain }) => {
+-        const db = (activeDomain as any).db
+-        await db.transact([
+-          db.tx.email_orders[input.orderId].update({ code: input.code, status: "completed" }),
+-        ])
+-        return { ...input, status: "completed" as const }
+-      },
+-    }),
++    completeOrder,
++    extractFromAction,
+   })
+ 
+ const appDomain = domain("context-test-app")
+@@ -222,4 +259,65 @@ describeInstant("@ekairos/context", () => {
+     )))
+       .toBe(true)
+   }, 60_000)
++
++  itInstant("starts a child Reaction from an action using only reactionId", async () => {
++    const runtime = new ContextTestRuntime({ appId, adminToken })
++    const messageId = randomUUID()
++    await db.transact([
++      db.tx.email_messages[messageId].create({ subject: "OC 7700" }),
++    ])
++    const context = await Context(runtime).create({
++      key: `email:action-child:${messageId}`,
++      content: { mailbox: "purchasing" },
++    })
++    const trigger = await Events(runtime).emit(
++      emailDomain.events.received({ from: "supplier@example.com", subject: "OC 7700" })
++        .link({ message: messageId }),
++      { id: randomUUID(), contextId: context.id },
++    )
++    const parent = defineReaction(
++      emailDomain.events.received,
++      {
++        key: "email.process-with-action-child",
++        scope: emailDomain,
++        engine: false,
++        sandbox: false,
++      },
++      async reaction => {
++        const extracted = await reaction.given(reaction.trigger).action(
++          emailDomain.actions.extractFromAction,
++          { messageId, orderCode: "7700" },
++        )
++        return await reaction.given(extracted).emit(
++          emailDomain.events.processingCompleted({ orderCode: extracted.payload.orderCode })
++            .link({ message: messageId }),
++        )
++      },
++    )
++
++    const completed = await context.react(trigger, parent)
++    expect(completed.payload.orderCode).toBe("7700")
++
++    const graph = await db.query({
++      context_sessions: {
++        $: { where: { context: context.id } },
++        parent: {},
++        trigger: {},
++        reactions: { effects: {} },
++        children: { parent: {}, trigger: {}, rootReaction: { effects: {} } },
++      },
++    } as any)
++    const parentSession = graph.context_sessions.find((row: any) => !row.parent)
++    const actionReaction = parentSession.reactions.find((row: any) => row.type === "action")
++
++    expect(parentSession.children).toHaveLength(1)
++    expect(parentSession.children[0].parent.id).toBe(parentSession.id)
++    expect(parentSession.children[0].trigger.type).toBe("email.extractionRequested")
++    expect(parentSession.children[0].rootReaction.effects[0].type).toBe(
++      "email.orderExtracted",
++    )
++    expect(actionReaction.effects.map((event: any) => event.type)).toContain(
++      "email.extractionRequested",
++    )
++  }, 60_000)
+ })
+diff --git a/packages/context/src/tests/context.handle.workflow-safe.test.ts b/packages/context/src/tests/context.handle.workflow-safe.test.ts
+index 6fe4c30..aef2060 100644
+--- a/packages/context/src/tests/context.handle.workflow-safe.test.ts
++++ b/packages/context/src/tests/context.handle.workflow-safe.test.ts
+@@ -1,7 +1,7 @@
+ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
+ import { describe, expect, it } from "vitest"
+ 
+-import { ReactionContextHandle } from "../index.ts"
++import { Context, ReactionContextHandle } from "../index.ts"
+ 
+ describe("ReactionContextHandle workflow serialization", () => {
+   it("restores the concrete facade with react available", () => {
+@@ -22,4 +22,59 @@ describe("ReactionContextHandle workflow serialization", () => {
+     expect(restored.context).toBe(snapshot)
+     expect(restored.react).toBeTypeOf("function")
+   })
++
++  it("preserves the Reaction origin used by action-owned Context work", () => {
++    const runtime = { db: async () => null, use: async () => null } as any
++    const snapshot = Object.freeze({
++      id: "context-1",
++      key: "conversation-1",
++      content: null,
++    }) as any
++    const origin = Object.freeze({
++      sessionId: "session-1",
++      reactionId: "reaction-1",
++    })
++    const handle = new ReactionContextHandle(runtime, snapshot, origin)
++
++    const serialized = (ReactionContextHandle as any)[WORKFLOW_SERIALIZE](handle)
++    const restored = (ReactionContextHandle as any)[WORKFLOW_DESERIALIZE](serialized)
++
++    expect(restored.origin).toEqual(origin)
++    expect(restored.emit).toBeTypeOf("function")
++    expect(restored.react).toBeTypeOf("function")
++  })
++
++  it("does not emit a Reaction effect from an unbound Context", async () => {
++    const runtime = { db: async () => null, use: async () => null } as any
++    const handle = new ReactionContextHandle(runtime, {
++      id: "context-1",
++      key: null,
++      content: null,
++    } as any)
++
++    await expect(handle.emit({} as any, { key: "effect" }))
++      .rejects.toThrow("context_reaction_origin_required")
++  })
++
++  it("rejects an empty Reaction reference before querying persistence", async () => {
++    const runtime = { db: async () => null, use: async () => null } as any
++
++    await expect(Context(runtime).fromReaction("  "))
++      .rejects.toThrow("context_reaction_id_required")
++  })
++
++  it("requires an idempotency key for bound Context emissions", async () => {
++    const runtime = { db: async () => null, use: async () => null } as any
++    const handle = new ReactionContextHandle(runtime, {
++      id: "context-1",
++      key: null,
++      content: null,
++    } as any, {
++      sessionId: "session-1",
++      reactionId: "reaction-1",
++    })
++
++    await expect(handle.emit({} as any, { key: "  " }))
++      .rejects.toThrow("context_reaction_event_key_required")
++  })
+ })
+diff --git a/packages/domain/src/domain-action.internal.ts b/packages/domain/src/domain-action.internal.ts
+index 5a0e292..2d08bff 100644
+--- a/packages/domain/src/domain-action.internal.ts
++++ b/packages/domain/src/domain-action.internal.ts
+@@ -1,14 +1,12 @@
+ import { z } from "zod";
+ 
+-import type { DomainActionExecution } from "./index.js";
+-
+ type ActionSchema = z.ZodType;
+ 
+ type ActionImplementation = (params: {
+   input: unknown;
+   runtime: unknown;
+   domain: unknown;
+-  execution: DomainActionExecution;
++  reactionId?: string;
+ }) => unknown;
+ 
+ type ActionDescriptor = Readonly<{
+@@ -60,7 +58,7 @@ export type DomainActionExecutionPreparationView = Readonly<{
+ export type DomainActionExecutionOptions = Readonly<{
+   activeDomain?: unknown;
+   stack?: readonly string[];
+-  execution?: DomainActionExecution;
++  reactionId?: string;
+ }>;
+ 
+ export type DomainActionInputResolverContext = Readonly<{
+@@ -643,20 +641,11 @@ export async function executeDomainActionPrivate(
+     );
+   }
+ 
+-  const execution = options.execution ?? Object.freeze({
+-    source: "runtime" as const,
+-    actionId: prepared.action.id,
+-  });
+-  if (execution.actionId !== prepared.action.id) {
+-    throw new Error(
+-      `domain_action_execution_action_mismatch:${prepared.action.id}:${execution.actionId}`,
+-    );
+-  }
+   const rawOutput = await prepared.action.implementation({
+     input: prepared.effectiveInput,
+     runtime,
+     domain: prepared.executionDomain,
+-    execution,
++    ...(options.reactionId ? { reactionId: options.reactionId } : {}),
+   });
+   const output = prepared.action.outputSchema.parse(rawOutput);
+   return Object.freeze({ output, effectiveInput: prepared.effectiveInput });
+diff --git a/packages/domain/src/index.ts b/packages/domain/src/index.ts
+index c9d991e..b211d3b 100644
+--- a/packages/domain/src/index.ts
++++ b/packages/domain/src/index.ts
+@@ -93,26 +93,6 @@ export type DomainActionRuntimeLike<Env = any> = {
+   ): Promise<ActiveDomain<SubD, Env>>;
+ };
+ 
+-export type DomainActionRuntimeExecution = Readonly<{
+-  source: "runtime";
+-  actionId: string;
+-}>;
+-
+-export type DomainActionReactionExecution = Readonly<{
+-  source: "reaction";
+-  actionId: string;
+-  contextId: string;
+-  sessionId: string;
+-  reactionId: string;
+-  triggerEventId: string;
+-  actionCallId: string;
+-  reactionDefinitionKey: string;
+-}>;
+-
+-export type DomainActionExecution =
+-  | DomainActionRuntimeExecution
+-  | DomainActionReactionExecution;
+-
+ type RuntimeEnvOfActionRuntime<Runtime> =
+   Runtime extends { readonly env: infer Env } ? Env : unknown;
+ 
+@@ -130,7 +110,8 @@ export type DomainActionExecuteParams<
+     ActionOwnerDomain<Domain>,
+     RuntimeEnvOfActionRuntime<Runtime>
+   >;
+-  execution: DomainActionExecution;
++  /** The durable Reaction that invoked this action, when Reactor is the caller. */
++  reactionId?: string;
+ };
+ 
+ export type DomainActionDefinition<
+diff --git a/packages/domain/src/tests/runtime-actions.execution-context.unit.test.ts b/packages/domain/src/tests/runtime-actions.execution-context.unit.test.ts
+index cf153f1..1d4c4af 100644
+--- a/packages/domain/src/tests/runtime-actions.execution-context.unit.test.ts
++++ b/packages/domain/src/tests/runtime-actions.execution-context.unit.test.ts
+@@ -10,7 +10,7 @@ import {
+ } from "./runtime-actions.test-fixtures.ts";
+ 
+ describe("runtime action execution outside workflows", () => {
+-  it("executes actions outside workflow context as normal functions", async () => {
++  it("does not invent a Reaction origin for direct runtime calls", async () => {
+     // given: a domain action that inspects the workflow execution context
+     // before touching the scoped domain runtime.
+     const baseExecutionDomain = domain("action-execution").schema({
+@@ -30,10 +30,9 @@ describe("runtime action execution outside workflows", () => {
+           inStep: z.boolean(),
+           workflowRunId: z.string().nullable(),
+           stepId: z.string().nullable(),
+-          source: z.literal("runtime"),
+-          actionId: z.string(),
++          reactionId: z.string().nullable(),
+         }),
+-        async execute({ input, domain, execution }) {
++        async execute({ input, domain, reactionId }) {
+           const workflowExecution = await readActionExecutionContext();
+           return {
+             title: String(input.title).trim(),
+@@ -42,8 +41,7 @@ describe("runtime action execution outside workflows", () => {
+             inStep: workflowExecution.inStep,
+             workflowRunId: workflowExecution.workflowRunId,
+             stepId: workflowExecution.stepId,
+-            source: execution.source,
+-            actionId: execution.actionId,
++            reactionId: reactionId ?? null,
+           };
+         },
+       }),
+@@ -67,8 +65,7 @@ describe("runtime action execution outside workflows", () => {
+       inStep: false,
+       workflowRunId: null,
+       stepId: null,
+-      source: "runtime",
+-      actionId: "action-execution.inspectExecution",
++      reactionId: null,
+     });
+   });
+ });
+diff --git a/packages/reactor/README.md b/packages/reactor/README.md
+index e841c0f..7335c09 100644
+--- a/packages/reactor/README.md
++++ b/packages/reactor/README.md
+@@ -164,6 +164,11 @@ const recorded = await reaction.given(classification).action(
+ The operation Event contains separate `action` Parts for started and
+ completed/failed states.
+ 
++An action invoked by Reactor receives one optional `reactionId`. Actions that
++need to emit an Event and start a nested Reaction resolve the owning Context
++through `Context(runtime).fromReaction(reactionId)`; Reactor does not inject an
++execution facade or callbacks into domain code.
++
+ ### Dataset
+ 
+ ```ts
+diff --git a/packages/reactor/src/action-execution.ts b/packages/reactor/src/action-execution.ts
+deleted file mode 100644
+index c42f4a3..0000000
+--- a/packages/reactor/src/action-execution.ts
++++ /dev/null
+@@ -1,90 +0,0 @@
+-import type {
+-  DomainActionExecution,
+-  DomainEventDraft,
+-} from "@ekairos/domain"
+-import {
+-  ContextHandle,
+-  Events,
+-  getContextRuntimeServices,
+-  uuidV5,
+-  type ContextEvent,
+-  type ContextRuntimeServiceHandle,
+-  type DomainEventItem,
+-} from "@ekairos/events"
+-
+-import {
+-  executeReaction,
+-  type ReactionDefinition,
+-  type ReactionEffect,
+-} from "./reaction.js"
+-
+-const ACTION_EFFECT_NAMESPACE = "6793b21d-14b5-4a5f-bcc0-d71e41c4a0f9"
+-
+-type ReactionRuntime = ContextRuntimeServiceHandle & {
+-  use(domain: unknown, options?: unknown): Promise<unknown>
+-}
+-
+-function requireReactionExecution(execution: DomainActionExecution) {
+-  if (execution.source !== "reaction") {
+-    throw new Error(`reaction_action_execution_required:${execution.actionId}`)
+-  }
+-  return execution
+-}
+-
+-export async function emitActionEffect<Payload>(
+-  runtime: ReactionRuntime,
+-  execution: DomainActionExecution,
+-  input: Readonly<{
+-    key: string
+-    draft: DomainEventDraft<Payload, any, any, any, any, any>
+-    channel?: string
+-  }>,
+-): Promise<DomainEventItem<Payload>> {
+-  const parent = requireReactionExecution(execution)
+-  const key = input.key.trim()
+-  if (!key) throw new Error("reaction_action_effect_key_required")
+-  const event = await Events(runtime).emit(input.draft as any, {
+-    id: uuidV5(
+-      `${parent.reactionId}:${parent.actionCallId}:${key}`,
+-      ACTION_EFFECT_NAMESPACE,
+-    ),
+-    contextId: parent.contextId,
+-    ...(input.channel ? { channel: input.channel } : {}),
+-    metadata: {
+-      sessionId: parent.sessionId,
+-      reactionId: parent.reactionId,
+-      definition: parent.reactionDefinitionKey,
+-      actionId: parent.actionId,
+-      actionCallId: parent.actionCallId,
+-    },
+-  })
+-  const { store } = await getContextRuntimeServices(runtime)
+-  await store.appendReactionEffect(parent.reactionId, event.id)
+-  return event as DomainEventItem<Payload>
+-}
+-
+-export async function reactFromAction<TEffect extends ReactionEffect>(
+-  runtime: ReactionRuntime,
+-  execution: DomainActionExecution,
+-  trigger: ContextEvent,
+-  definition: ReactionDefinition<any, any, any, TEffect>,
+-  options: Readonly<{ contextId?: string }> = {},
+-): Promise<TEffect> {
+-  const parent = requireReactionExecution(execution)
+-  const contextId = options.contextId ?? parent.contextId
+-  const context = await ContextHandle.get(runtime, { id: contextId })
+-  if (!context) throw new Error(`reaction_context_not_found:${contextId}`)
+-  const result = await executeReaction(runtime, context, trigger, definition, {
+-    parentSessionId: parent.sessionId,
+-    parentReactionId: parent.reactionId,
+-  })
+-  const { store } = await getContextRuntimeServices(runtime)
+-  const returned = Array.isArray(result) ? result : [result]
+-  for (const event of returned) {
+-    if (!event || typeof event !== "object" || typeof (event as ContextEvent).id !== "string") {
+-      throw new Error("reaction_child_effect_required")
+-    }
+-    await store.appendReactionEffect(parent.reactionId, (event as ContextEvent).id)
+-  }
+-  return result
+-}
+diff --git a/packages/reactor/src/agent.ts b/packages/reactor/src/agent.ts
+index e7c35c7..ec1c71e 100644
+--- a/packages/reactor/src/agent.ts
++++ b/packages/reactor/src/agent.ts
+@@ -265,16 +265,7 @@ async function runAiSdkAgent<TContext, TOutput>(
+       }
+ 
+       try {
+-        const output = await action.execute(call.input, Object.freeze({
+-          source: "reaction" as const,
+-          actionId: canonical,
+-          contextId: request.context.ref.id,
+-          sessionId: request.sessionId,
+-          reactionId: request.reactionId,
+-          triggerEventId: request.trigger.id,
+-          actionCallId: call.actionCallId,
+-          reactionDefinitionKey: request.reactionKey,
+-        }))
++        const output = await action.execute(call.input, request.reactionId)
+         roundParts = applyActionResult(roundParts, call, { ok: true, output })
+         await actionStream?.emit({
+           kind: "action.completed",
+diff --git a/packages/reactor/src/index.ts b/packages/reactor/src/index.ts
+index 934e711..fb55da1 100644
+--- a/packages/reactor/src/index.ts
++++ b/packages/reactor/src/index.ts
+@@ -1,7 +1,3 @@
+-export {
+-  emitActionEffect,
+-  reactFromAction,
+-} from "./action-execution.js"
+ export {
+   defineReaction,
+   runReactionWorkflow,
+diff --git a/packages/reactor/src/reaction.operation.ts b/packages/reactor/src/reaction.operation.ts
+index 4e720da..9ab8338 100644
+--- a/packages/reactor/src/reaction.operation.ts
++++ b/packages/reactor/src/reaction.operation.ts
+@@ -329,18 +329,7 @@ async function runOperation(
+         request.runtime as any,
+         action,
+         prepared,
+-        {
+-          execution: {
+-            source: "reaction",
+-            actionId: operation.action.id,
+-            contextId: request.context.ref.id,
+-            sessionId: request.sessionId,
+-            reactionId: request.reactionId,
+-            triggerEventId: request.trigger.id,
+-            actionCallId: callId,
+-            reactionDefinitionKey: request.definition,
+-          },
+-        },
++        { reactionId: request.reactionId },
+       )
+       const parsed = action.output.parse(executed.output)
+       return await createOperationEvent(request, parsed, [
+@@ -511,7 +500,7 @@ function resolveEngineActions(
+       description: action.description,
+       input: action.input,
+       output: action.output,
+-      async execute(input: unknown, execution) {
++      async execute(input: unknown, reactionId) {
+         const prepared = await prepareDomainActionExecution(
+           request.runtime as any,
+           action,
+@@ -521,7 +510,7 @@ function resolveEngineActions(
+           request.runtime as any,
+           action,
+           prepared,
+-          { execution },
++          { reactionId },
+         )).output
+       },
+     })
+diff --git a/packages/reactor/src/reactor.ts b/packages/reactor/src/reactor.ts
+index 975dbc4..6f0eec0 100644
+--- a/packages/reactor/src/reactor.ts
++++ b/packages/reactor/src/reactor.ts
+@@ -1,6 +1,5 @@
+ import type { LanguageModel, ModelMessage } from "ai"
+ import type {
+-  DomainActionReactionExecution,
+   DomainEventConstructor,
+   DomainEventLinkDefinition,
+ } from "@ekairos/domain"
+@@ -23,7 +22,7 @@ export type ReactionToolAction = Readonly<{
+   description?: string
+   input: z.ZodType
+   output: z.ZodType
+-  execute(input: unknown, execution: DomainActionReactionExecution): Promise<unknown>
++  execute(input: unknown, reactionId: string): Promise<unknown>
+ }>
+ export type ReactionEngineActions = Readonly<Record<string, ReactionToolAction>>
+ 
+diff --git a/packages/reactor/src/tests/action-execution.test.ts b/packages/reactor/src/tests/action-execution.test.ts
+deleted file mode 100644
+index 2a5ca9e..0000000
+--- a/packages/reactor/src/tests/action-execution.test.ts
++++ /dev/null
+@@ -1,26 +0,0 @@
+-import { describe, expect, it } from "vitest"
+-
+-import {
+-  emitActionEffect,
+-  reactFromAction,
+-} from "../action-execution.js"
+-
+-describe("Reaction-aware domain action execution", () => {
+-  const runtimeExecution = {
+-    source: "runtime" as const,
+-    actionId: "catalog.record",
+-  }
+-
+-  it("rejects nested effects when the action was not called by a Reaction", async () => {
+-    await expect(emitActionEffect({} as any, runtimeExecution, {
+-      key: "requested",
+-      draft: {} as any,
+-    })).rejects.toThrow("reaction_action_execution_required:catalog.record")
+-    await expect(reactFromAction(
+-      {} as any,
+-      runtimeExecution,
+-      {} as any,
+-      {} as any,
+-    )).rejects.toThrow("reaction_action_execution_required:catalog.record")
+-  })
+-})
+diff --git a/packages/reactor/src/tests/agent.effects.test.ts b/packages/reactor/src/tests/agent.effects.test.ts
+index 5400410..7444ad4 100644
+--- a/packages/reactor/src/tests/agent.effects.test.ts
++++ b/packages/reactor/src/tests/agent.effects.test.ts
+@@ -71,8 +71,8 @@ describe("agent Reaction effects", () => {
+           "catalog.find": {
+             input: z.object({ sku: z.string() }),
+             output: z.object({ found: z.boolean() }),
+-            async execute(_input, execution) {
+-              executions.push(execution)
++            async execute(_input, reactionId) {
++              executions.push(reactionId)
+               return { found: true }
+             },
+           },
+@@ -113,14 +113,7 @@ describe("agent Reaction effects", () => {
+       "event:action:0:0",
+       "event:model:1",
+     ])
+-    expect(executions).toEqual([expect.objectContaining({
+-      contextId: "context-1",
+-      sessionId: "session-1",
+-      reactionId: "reaction-1",
+-      triggerEventId: "trigger-1",
+-      actionCallId: "call-1",
+-      reactionDefinitionKey: "catalog.answer",
+-    })])
++    expect(executions).toEqual(["reaction-1"])
+     expect(result.event.id).toBe("event:model:1")
+     expect(result.output).toBe("Found A-1.")
+   })
+diff --git a/packages/reactor/src/tests/public-surface.test.ts b/packages/reactor/src/tests/public-surface.test.ts
+index 71ac846..f70b636 100644
+--- a/packages/reactor/src/tests/public-surface.test.ts
++++ b/packages/reactor/src/tests/public-surface.test.ts
+@@ -9,9 +9,7 @@ describe("@ekairos/reactor public surface", () => {
+     expect(Object.keys(root).sort()).toEqual([
+       "ai",
+       "defineReaction",
+-      "emitActionEffect",
+       "isAiEngine",
+-      "reactFromAction",
+       "runReactionWorkflow",
+     ])
+   })
+diff --git a/packages/workbench-v3/DOMAIN.md b/packages/workbench-v3/DOMAIN.md
+index 412a55c..2d84d18 100644
+--- a/packages/workbench-v3/DOMAIN.md
++++ b/packages/workbench-v3/DOMAIN.md
+@@ -28,3 +28,8 @@ child Session linked to the parent materialization Reaction.
+ The Reaction resolves its sandbox lease at execution start. A Daytona sandbox
+ that no longer exists is replaced while preserving the same application and
+ Context; failures unrelated to absence are propagated unchanged.
++
++`workbench.recordReview` receives only its originating `reactionId`. It resolves
++the owning Context, emits `reviewVerificationRequested`, and starts the
++verification child Reaction through that Context. No Reactor execution helpers
++or capabilities enter the action implementation.
+diff --git a/packages/workbench-v3/README.md b/packages/workbench-v3/README.md
+index cea2572..b632cc2 100644
+--- a/packages/workbench-v3/README.md
++++ b/packages/workbench-v3/README.md
+@@ -18,10 +18,12 @@ The default `Causal review` scenario proves the full path:
+ 2. Dataset materialization and structured analysis execute in parallel.
+ 3. A repository-aware decision Reaction joins those effect Events.
+ 4. Shell writes the report, `storeFiles` publishes it, and Git commits it.
+-5. `workbench.recordReview` validates `dataset(workbenchItemSchema)` and writes
+-   the linked durable review.
++5. `workbench.recordReview` validates `dataset(workbenchItemSchema)`, writes the
++   linked durable review, resolves its Context from the sole `reactionId`, and
++   starts the verification child Reaction.
+ 6. `workbench.reviewCompleted` links the review and artifact as the final domain
+-   Event; Dataset materialization remains visible as a nested child Session.
++   Event; Dataset materialization and verification remain visible as child
++   Sessions.
+ 
+ At the beginning of a causal review, the Reaction sandbox resolver probes the
+ cached Daytona lease. A missing remote sandbox is replaced once under a shared
+diff --git a/packages/workbench-v3/package.json b/packages/workbench-v3/package.json
+index 37f2ef0..b614951 100644
+--- a/packages/workbench-v3/package.json
++++ b/packages/workbench-v3/package.json
+@@ -12,6 +12,7 @@
+   },
+   "dependencies": {
+     "@ai-sdk/openai": "^2.0.68",
++    "@ekairos/context": "workspace:*",
+     "@ekairos/dataset": "workspace:*",
+     "@ekairos/domain": "workspace:*",
+     "@ekairos/events": "workspace:*",
+diff --git a/packages/workbench-v3/src/domain.ts b/packages/workbench-v3/src/domain.ts
+index 64161e8..6c03867 100644
+--- a/packages/workbench-v3/src/domain.ts
++++ b/packages/workbench-v3/src/domain.ts
+@@ -1,4 +1,5 @@
+ import { dataset, datasetDomain } from "@ekairos/dataset"
++import { Context } from "@ekairos/context"
+ import {
+   defineDomainAction,
+   defineEvent,
+@@ -8,8 +9,6 @@ import { contextDomain } from "@ekairos/events"
+ import {
+   ai,
+   defineReaction,
+-  emitActionEffect,
+-  reactFromAction,
+ } from "@ekairos/reactor"
+ import { sandboxDomain } from "@ekairos/sandbox"
+ import { i } from "@instantdb/core"
+@@ -176,29 +175,27 @@ const verifyReview = defineReaction(
+ 
+ async function verifyRecordedReview(input: {
+   runtime: any
+-  execution: Parameters<typeof emitActionEffect>[1]
++  reactionId: string
+   reviewId: string
+   datasetId: string
+   itemCount: number
+   riskCount: number
+   recommendation: "proceed" | "clarify" | "reject"
+ }): Promise<z.infer<typeof workbenchVerificationSchema> & { eventId: string }> {
+-  const requested = await emitActionEffect(input.runtime, input.execution, {
+-    key: "review-verification-requested",
+-    draft: workbenchReactionDomain.events.reviewVerificationRequested({
++  const context = await Context(input.runtime).fromReaction(input.reactionId)
++  const requested = await context.emit(
++    workbenchReactionDomain.events.reviewVerificationRequested({
+       reviewId: input.reviewId,
+       datasetId: input.datasetId,
+       itemCount: input.itemCount,
+       riskCount: input.riskCount,
+       recommendation: input.recommendation,
+     }).link({ review: input.reviewId }),
+-  })
+-  const completed = await reactFromAction(
+-    input.runtime,
+-    input.execution,
+-    requested,
+-    verifyReview,
++    {
++      key: `review-verification-requested:${input.reviewId}`,
++    },
+   )
++  const completed = await context.react(requested, verifyReview)
+   return { ...completed.payload, eventId: completed.id }
+ }
+ 
+@@ -218,9 +215,11 @@ const recordReview = defineDomainAction({
+     status: z.literal("recorded"),
+     verification: workbenchVerificationSchema.extend({ eventId: z.string() }),
+   }),
+-  execute: async ({ input, domain: activeDomain, runtime, execution }) => {
++  execute: async ({ input, domain: activeDomain, runtime, reactionId }) => {
+     "use step"
+ 
++    if (!reactionId) throw new Error("workbench_review_reaction_required")
++
+     const db = (activeDomain as any).db
+     const datasetResult = await db.query({
+       dataset_datasets: {
+@@ -254,7 +253,7 @@ const recordReview = defineDomainAction({
+     ])
+     const verification = await verifyRecordedReview({
+       runtime: runtime as any,
+-      execution,
++      reactionId,
+       reviewId: input.reviewId,
+       datasetId: input.items.datasetId,
+       itemCount: input.itemCount,
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index a840a00..fabc43b 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -516,7 +516,7 @@ importers:
+         version: 5.0.0-beta.1
+       '@workflow/vitest':
+         specifier: 5.0.0-beta.5
+-        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
++        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
+       dotenv:
+         specifier: ^17.2.3
+         version: 17.2.3
+@@ -1363,7 +1363,7 @@ importers:
+         version: 24.5.0
+       '@workflow/vitest':
+         specifier: 5.0.0-beta.5
+-        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
++        version: 5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)
+       typescript:
+         specifier: ^5.9.2
+         version: 5.9.3
+@@ -1459,6 +1459,9 @@ importers:
+       '@ai-sdk/openai':
+         specifier: ^2.0.68
+         version: 2.0.68(zod@4.3.6)
++      '@ekairos/context':
++        specifier: workspace:*
++        version: link:../context
+       '@ekairos/dataset':
+         specifier: workspace:*
+         version: link:../dataset
+@@ -17623,23 +17626,6 @@ snapshots:
+       - supports-color
+       - zod
+ 
+-  '@workflow/vitest@5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)':
+-    dependencies:
+-      '@workflow/builders': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
+-      '@workflow/core': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
+-      '@workflow/rollup': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
+-      '@workflow/world': 5.0.0-beta.2(zod@4.3.6)
+-      '@workflow/world-local': 5.0.0-beta.4(@opentelemetry/api@1.9.0)
+-      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+-    optionalDependencies:
+-      vite: 7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.51.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2)
+-    transitivePeerDependencies:
+-      - '@opentelemetry/api'
+-      - '@swc/helpers'
+-      - aws-crt
+-      - supports-color
+-      - zod
+-
+   '@workflow/vitest@5.0.0-beta.5(@opentelemetry/api@1.9.0)(vite@7.1.12(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@24.5.0)(jiti@2.6.1)(lightningcss@1.30.2)(msw@2.11.6(@types/node@24.5.0)(typescript@5.9.3))(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.2))(zod@4.3.6)':
+     dependencies:
+       '@workflow/builders': 5.0.0-beta.5(@opentelemetry/api@1.9.0)
+

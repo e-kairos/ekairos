@@ -104,6 +104,9 @@ function toEvent<Payload>(row: any): ContextEvent<Payload> {
 }
 
 function toSession(row: any): ContextSession {
+  const rootReaction = Array.isArray(row.rootReaction)
+    ? row.rootReaction[0]
+    : row.rootReaction
   return Object.freeze({
     id: String(row.id),
     contextId: linkedId(row.context) ?? String(row.contextId ?? ""),
@@ -112,6 +115,9 @@ function toSession(row: any): ContextSession {
     rootReactionId: linkedId(row.rootReaction) ?? String(row.rootReactionId ?? ""),
     status: row.status as SessionStatus,
     ...(linkedId(row.parent) ? { parentSessionId: linkedId(row.parent)! } : {}),
+    ...(linkedId(rootReaction?.parent)
+      ? { parentReactionId: linkedId(rootReaction.parent)! }
+      : {}),
     ...(typeof row.sandboxId === "string" ? { sandboxId: row.sandboxId } : {}),
     ...(typeof row.workflowRunId === "string" ? { workflowRunId: row.workflowRunId } : {}),
     ...(row.error === undefined ? {} : { error: row.error }),
@@ -136,6 +142,11 @@ function toReaction(row: any): ContextReaction {
     ),
     ...(linkedId(row.parent) ? { parentReactionId: linkedId(row.parent)! } : {}),
     ...(typeof row.instruction === "string" ? { instruction: row.instruction } : {}),
+    ...(typeof row.streamId === "string" ? { streamId: row.streamId } : {}),
+    ...(typeof row.streamClientId === "string" ? { streamClientId: row.streamClientId } : {}),
+    ...(row.streamStartedAt == null ? {} : { streamStartedAt: date(row.streamStartedAt) }),
+    ...(row.streamFinishedAt == null ? {} : { streamFinishedAt: date(row.streamFinishedAt) }),
+    ...(typeof row.streamError === "string" ? { streamError: row.streamError } : {}),
     ...(row.error === undefined ? {} : { error: row.error }),
     createdAt: date(row.createdAt),
     ...(row.updatedAt == null ? {} : { updatedAt: date(row.updatedAt) }),
@@ -353,7 +364,7 @@ export class InstantStore implements ContextStore {
         $: { where: { id: sessionId }, limit: 1 },
         context: {},
         trigger: {},
-        rootReaction: {},
+        rootReaction: { parent: {} },
         parent: {},
       },
     } as any)
@@ -374,6 +385,7 @@ export class InstantStore implements ContextStore {
         triggerId: input.triggerId,
         rootReactionId: input.rootReactionId,
         parentSessionId: input.parentSessionId,
+        parentReactionId: input.parentReactionId,
         sandboxId: input.sandboxId,
       }
       const actual = {
@@ -382,6 +394,7 @@ export class InstantStore implements ContextStore {
         triggerId: existing.triggerId,
         rootReactionId: existing.rootReactionId,
         parentSessionId: existing.parentSessionId,
+        parentReactionId: existing.parentReactionId,
         sandboxId: existing.sandboxId,
       }
       if (!same(actual, expected)) throw new Error(`context_session_conflict:${input.id}`)
@@ -391,6 +404,13 @@ export class InstantStore implements ContextStore {
     if (!(await this.getEvent(input.triggerId))) throw new Error("context_session_trigger_not_found")
     if (input.parentSessionId && !(await this.getSession(input.parentSessionId))) {
       throw new Error("context_session_parent_not_found")
+    }
+    if (input.parentReactionId) {
+      const parentReaction = await this.getReaction(input.parentReactionId)
+      if (!parentReaction) throw new Error("context_session_parent_reaction_not_found")
+      if (!input.parentSessionId || parentReaction.sessionId !== input.parentSessionId) {
+        throw new Error("context_session_parent_reaction_mismatch")
+      }
     }
 
     const createdAt = input.createdAt ?? new Date()
@@ -421,11 +441,16 @@ export class InstantStore implements ContextStore {
       .link({
         session: input.id,
         causes: [input.triggerId],
+        ...(input.parentReactionId ? { parent: input.parentReactionId } : {}),
       })
-    const currentSessionTx = this.db.tx.context_contexts[input.contextId]
-      .link({ currentSession: input.id })
+    const transactions = [sessionTx, rootReactionTx]
+    if (!input.parentSessionId) {
+      transactions.push(
+        this.db.tx.context_contexts[input.contextId].link({ currentSession: input.id }),
+      )
+    }
     try {
-      await this.db.transact([sessionTx, rootReactionTx, currentSessionTx])
+      await this.db.transact(transactions)
     } catch (error) {
       const raced = await this.getSession(input.id)
       if (!raced) throw error
@@ -464,6 +489,7 @@ export class InstantStore implements ContextStore {
         parent: {},
         causes: {},
         effects: {},
+        stream: {},
       },
     } as any)
     return result?.context_reactions?.[0] ?? null
@@ -535,6 +561,82 @@ export class InstantStore implements ContextStore {
       return raced
     }
     return (await this.getReaction(input.id))!
+  }
+
+  async attachReactionStream(
+    reactionId: string,
+    stream: Parameters<ContextStore["attachReactionStream"]>[1],
+  ) {
+    const current = await this.getReaction(reactionId)
+    if (!current) throw new Error(`context_reaction_not_found:${reactionId}`)
+    if (current.streamId || current.streamClientId) {
+      if (
+        current.streamId !== stream.streamId ||
+        current.streamClientId !== stream.clientId
+      ) {
+        throw new Error(`context_reaction_stream_conflict:${reactionId}`)
+      }
+      return current
+    }
+    const startedAt = stream.startedAt ?? new Date()
+    await this.db.transact([
+      this.db.tx.context_reactions[reactionId]
+        .update({
+          streamId: stream.streamId,
+          streamClientId: stream.clientId,
+          streamStartedAt: startedAt,
+          updatedAt: startedAt,
+        })
+        .link({ stream: stream.streamId }),
+    ])
+    return (await this.getReaction(reactionId))!
+  }
+
+  async appendReactionEffect(reactionId: string, effectId: string) {
+    const current = await this.getReaction(reactionId)
+    if (!current) throw new Error(`context_reaction_not_found:${reactionId}`)
+    if (!(await this.getEvent(effectId))) {
+      throw new Error(`context_reaction_effect_not_found:${effectId}`)
+    }
+    if (current.effectIds.includes(effectId)) return current
+    if (current.status !== "running") {
+      throw new Error(`context_reaction_effect_after_terminal:${reactionId}`)
+    }
+    const effectIds = [...current.effectIds, effectId]
+    await this.db.transact([
+      this.db.tx.context_reactions[reactionId]
+        .update({ effectIds, updatedAt: new Date() })
+        .link({ effects: effectId }),
+    ])
+    return (await this.getReaction(reactionId))!
+  }
+
+  async finishReactionStream(
+    reactionId: string,
+    result: Parameters<ContextStore["finishReactionStream"]>[1] = {},
+  ) {
+    const current = await this.getReaction(reactionId)
+    if (!current) throw new Error(`context_reaction_not_found:${reactionId}`)
+    if (!current.streamId || !current.streamClientId) {
+      throw new Error(`context_reaction_stream_not_attached:${reactionId}`)
+    }
+    const finishedAt = result.finishedAt ?? new Date()
+    if (current.streamFinishedAt) {
+      const sameFinish = current.streamFinishedAt.valueOf() === finishedAt.valueOf()
+      const sameError = current.streamError === result.error
+      if (!sameFinish || !sameError) {
+        throw new Error(`context_reaction_stream_terminal_conflict:${reactionId}`)
+      }
+      return current
+    }
+    await this.db.transact([
+      this.db.tx.context_reactions[reactionId].update({
+        streamFinishedAt: finishedAt,
+        ...(result.error ? { streamError: result.error } : {}),
+        updatedAt: finishedAt,
+      }),
+    ])
+    return (await this.getReaction(reactionId))!
   }
 
   async completeReaction(

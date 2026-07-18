@@ -1,4 +1,5 @@
 export { contextDomain } from "./schema.js"
+export { contextEventFilesPhysicalLink } from "./schema.js"
 
 export {
   Events,
@@ -82,3 +83,19 @@ export type {
 } from "./context.parts.js"
 
 export { uuidV5 } from "./context.part-identity.js"
+
+export {
+  REACTION_STREAM_VERSION,
+  consumeReactionStream,
+  createReactionStreamChunk,
+  encodeReactionStreamChunk,
+  parseReactionStreamChunk,
+  reduceReactionStream,
+  validateReactionStreamChunk,
+} from "./context.reaction-stream.js"
+export type {
+  ReactionStreamChunk,
+  ReactionStreamChunkInput,
+  ReactionStreamChunkKind,
+  ReactionStreamProjection,
+} from "./context.reaction-stream.js"

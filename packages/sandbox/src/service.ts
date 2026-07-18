@@ -33,6 +33,7 @@ import {
   resolveVercelSandboxConfig,
   safeVercelConfigForRecord,
 } from "./vercel-options.js"
+import { withPosixEnvironment } from "./shell-environment.js"
 import { randomUUID } from "node:crypto"
 import path from "node:path"
 
@@ -61,6 +62,23 @@ export interface SandboxRecord {
   createdAt: number
   updatedAt?: number
   shutdownAt?: number
+}
+
+type SandboxCommandOptions = Readonly<{
+  cwd?: string
+  env?: Record<string, unknown>
+}>
+
+function normalizeCommandEnvironment(
+  value: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+  if (!value || Object.keys(value).length === 0) return undefined
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+      throw new Error(`sandbox_env_key_invalid:${key}`)
+    }
+    return [key, String(entry)]
+  }))
 }
 
 export type ServiceResult<T = any> = { ok: true; data: T } | { ok: false; error: string }
@@ -1529,23 +1547,44 @@ export class SandboxService {
     }
   }
 
-  async runCommand(sandboxId: string, command: string, args: string[] = []): Promise<ServiceResult<CommandResult>> {
+  async runCommand(
+    sandboxId: string,
+    command: string,
+    args: string[] = [],
+    opts?: SandboxCommandOptions,
+  ): Promise<ServiceResult<CommandResult>> {
     try {
       const sandboxResult = await this.reconnectToSandbox(sandboxId)
       if (!sandboxResult.ok) return { ok: false, error: sandboxResult.error }
 
       const sandbox = sandboxResult.data.sandbox
+      const env = normalizeCommandEnvironment(opts?.env)
       if (isVercelSandbox(sandbox)) {
-        const result = await runCommandInSandbox(sandbox as VercelSandbox, command, args)
+        const result = await runCommandInSandbox(sandbox as VercelSandbox, command, args, {
+          cwd: opts?.cwd,
+          env,
+        })
         return { ok: true, data: result }
       }
 
       if ((sandbox as any).__provider === "sprites") {
-        const fullCommand = args.length > 0 ? [command, ...args].join(" ") : command
+        const commandText = [
+          command,
+          ...args.map(arg => SandboxService.shellEscapeArg(String(arg))),
+        ].join(" ")
+        const environment = env
+          ? `env ${Object.entries(env)
+              .map(([key, value]) => `${key}=${SandboxService.shellEscapeArg(value)}`)
+              .join(" ")} `
+          : ""
+        const scopedCommand = opts?.cwd
+          ? `cd ${SandboxService.shellEscapeArg(opts.cwd)} && ${environment}${commandText}`
+          : `${environment}${commandText}`
+        const scoped = Boolean(opts?.cwd || env)
         const res = await spritesExec({
           spriteName: String((sandbox as any).name ?? ""),
-          command,
-          args,
+          command: scoped ? "sh" : command,
+          args: scoped ? ["-lc", scopedCommand] : args,
         })
         return {
           ok: true,
@@ -1554,7 +1593,7 @@ export class SandboxService {
             exitCode: res.exitCode,
             output: res.stdout,
             error: res.stderr,
-            command: fullCommand,
+            command: scopedCommand,
           },
         }
       }
@@ -1563,7 +1602,10 @@ export class SandboxService {
         args.length > 0
           ? [command, ...args.map((arg) => SandboxService.shellEscapeArg(String(arg)))].join(" ")
           : command
-      const res = await (sandbox as DaytonaSandbox).process.executeCommand(commandStr)
+      const res = await (sandbox as DaytonaSandbox).process.executeCommand(
+        withPosixEnvironment(commandStr, env),
+        opts?.cwd,
+      )
       return {
         ok: true,
         data: {
@@ -1642,7 +1684,10 @@ export class SandboxService {
         },
       })
 
-      const result = await this.runCommand(sandboxId, command, args)
+      const result = await this.runCommand(sandboxId, command, args, {
+        cwd: opts?.cwd,
+        env: opts?.env,
+      })
       const finishedAt = Date.now()
       let finalResult: CommandResult
       let status: SandboxProcessStatus
