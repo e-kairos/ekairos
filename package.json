@@ -66,13 +66,5 @@
   "dependencies": {
     "instant-cli": "latest",
     "svix": "^1.81.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "@ekairos/sandbox": "workspace:*",
-      "next@15.5.x": "15.5.7",
-      "react@19.2.0": "19.2.1",
-      "react-dom@19.2.0": "19.2.1"
-    }
   }
 }
