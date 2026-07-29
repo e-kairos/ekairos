@@ -132,6 +132,36 @@ class GraphEngine implements ReactionEngine<Record<string, unknown>> {
   }
 }
 
+class DatasetAwareEngine implements ReactionEngine<Record<string, unknown>> {
+  readonly actionNames: string[] = []
+
+  constructor(private readonly expectDataset: boolean) {}
+
+  async agent(input: ReactionEngineInput<any, any>) {
+    this.actionNames.push(...Object.keys(input.actions))
+    const materialize = input.actions["dataset.materialize"]
+    const read = input.actions["dataset.read"]
+    if (!this.expectDataset) {
+      if (materialize || read) throw new Error("dataset_capability_should_be_disabled")
+      return { output: "Dataset disabled.", parts: [Part.message("Dataset disabled.")] }
+    }
+    if (!materialize) throw new Error("dataset_capability_missing")
+    if (!read) throw new Error("dataset_read_capability_missing")
+
+    const result = await materialize.execute({
+      title: "Relevant records",
+      instructions: "Snapshot the records needed for the answer.",
+    }, input.reactionId, {
+      actionCallId: "dataset-call-1",
+      round: 0,
+      callIndex: 0,
+    }) as any
+
+    const output = `Dataset ${result.datasetId} contains ${result.count} rows.`
+    return { output, parts: [Part.message(output)] }
+  }
+}
+
 describe("Reaction Event graph", () => {
   let appId = ""
   let adminToken = ""
@@ -303,5 +333,62 @@ describe("Reaction Event graph", () => {
     const actionParts = actionReaction.effects[0].eventParts
       .map((part: any) => part.content)
     expect(actionParts.map((part: any) => part.status)).toEqual(["started", "completed"])
+  }, 60_000)
+
+  itInstant("gives agent a scoped Dataset capability by default and supports explicit opt-out", async () => {
+    const runtime = new GraphRuntime({ appId, adminToken })
+    const context = await ContextHandle.create(runtime, {
+      key: `reaction-dataset-agent:${randomUUID()}`,
+      content: { purpose: "dataset-agent" },
+    })
+    const trigger = await Events(runtime).emit(
+      graphDomain.events.requested({ message: "Summarize every record." }),
+      { contextId: context.id, channel: "web" },
+    )
+    const enabledEngine = new DatasetAwareEngine(true)
+    const enabled = defineReaction(
+      graphDomain.events.requested,
+      {
+        key: "reactionGraph.dataset-agent",
+        scope: graphDomain,
+        engine: enabledEngine,
+        sandbox: false,
+      },
+      async reaction => await reaction.given(reaction.trigger).agent({
+        instruction: "Use a Dataset when the answer requires a collection.",
+      }),
+    )
+
+    const answer = await executeReaction(runtime, context, trigger, enabled)
+    expect(answer.payload).toContain("contains 2 rows")
+    expect(enabledEngine.actionNames).toContain("dataset.materialize")
+    expect(enabledEngine.actionNames).toContain("dataset.read")
+    expect(runtime.datasetCalls).toHaveLength(1)
+    expect(runtime.datasetCalls[0].spec.ensure).toMatchObject({
+      title: "Relevant records",
+      source: {
+        rows: [{ message: "Summarize every record." }],
+      },
+      instructions: "Snapshot the records needed for the answer.",
+    })
+
+    const disabledEngine = new DatasetAwareEngine(false)
+    const disabled = defineReaction(
+      graphDomain.events.requested,
+      {
+        key: "reactionGraph.dataset-agent-disabled",
+        scope: graphDomain,
+        engine: disabledEngine,
+        sandbox: false,
+      },
+      async reaction => await reaction.given(reaction.trigger).agent({
+        instruction: "Answer without Dataset materialization.",
+        datasets: false,
+      }),
+    )
+    const disabledAnswer = await executeReaction(runtime, context, trigger, disabled)
+    expect(disabledAnswer.payload).toBe("Dataset disabled.")
+    expect(disabledEngine.actionNames).not.toContain("dataset.materialize")
+    expect(disabledEngine.actionNames).not.toContain("dataset.read")
   }, 60_000)
 })

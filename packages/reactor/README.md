@@ -137,6 +137,19 @@ const response = await context.react(trigger, answerMessage)
 a Zod output schema, its payload is typed structured data. It may execute only
 the scoped domain actions explicitly supplied to it.
 
+Agent output schemas are provider-agnostic, including unions and primitive,
+array, or object roots. Reactor adds and removes any object-root tool envelope
+required by a model provider; returned values and persisted Events always keep
+the declared Zod shape.
+
+When the runtime implements `materializeDataset`, Agent also receives the
+native `dataset.materialize` capability by default. This is the collection
+primitive for grouping, counting, comparing, extracting, and aggregating large
+sets. A query can only name entities, fields, and links in the Reaction scope;
+invalid queries fail before reaching InstantDB. One Agent may materialize as
+many Datasets as its reasoning requires. Use `datasets: false` for explicit
+opt-out.
+
 Each `agent` operation is one Reaction and owns at most one InstantDB `$stream`.
 Every real model round becomes an ordered `context.model` effect Event and every
 executed action becomes an ordered `context.action` effect Event. Provider

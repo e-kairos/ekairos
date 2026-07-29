@@ -103,12 +103,58 @@ function actionInputSchema(action: ReactionEngineActions[string]): unknown {
   return z.toJSONSchema(action.input, { target: "draft-7" })
 }
 
+// La Responses API exige nombres de tool ^[a-zA-Z0-9_-]+$ (sin puntos).
+// Espejo del toModelActionName de @ekairos/reactor (hoy no exportado);
+// consolidar en un unico modulo cuando el reactor lo exponga.
+const CODEX_TOOL_NAME = /^[a-zA-Z0-9_-]+$/
+const CODEX_TOOL_NAME_MAX_LENGTH = 64
+
+export function toCodexToolName(canonicalName: string): string {
+  if (
+    canonicalName.length <= CODEX_TOOL_NAME_MAX_LENGTH &&
+    CODEX_TOOL_NAME.test(canonicalName)
+  ) {
+    return canonicalName
+  }
+  const suffix = `_${stableToolNameHash(canonicalName)}`
+  const base = canonicalName
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "action"
+  return `${base.slice(0, CODEX_TOOL_NAME_MAX_LENGTH - suffix.length)}${suffix}`
+}
+
+function stableToolNameHash(value: string): string {
+  let hash = 0xcbf29ce484222325n
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= BigInt(value.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+  return hash.toString(36)
+}
+
+export function resolveCodexCanonicalActionName(
+  actions: ReactionEngineActions,
+  wireName: string,
+): string {
+  if (actions[wireName]) return wireName
+  for (const canonical of Object.keys(actions)) {
+    if (toCodexToolName(canonical) === wireName) return canonical
+  }
+  return wireName
+}
+
 export function buildCodexDynamicTools(actions: ReactionEngineActions): CodexDynamicTool[] {
-  return Object.entries(actions).map(([name, action]) => ({
-    name,
-    description: action.description ?? `Run ${name}.`,
-    inputSchema: actionInputSchema(action),
-  }))
+  return Object.entries(actions).map(([name, action]) => {
+    const wireName = toCodexToolName(name)
+    return {
+      name: wireName,
+      description: [
+        action.description ?? `Run ${name}.`,
+        wireName === name ? "" : `Canonical action: ${name}.`,
+      ].filter(Boolean).join(" "),
+      inputSchema: actionInputSchema(action),
+    }
+  })
 }
 
 export async function executeCodexAction(

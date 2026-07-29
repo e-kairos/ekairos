@@ -12,8 +12,12 @@ import type {
 import {
   actionSpecToAiSdkTool,
   actionsToActionSpecs,
+  decodeActionSpecInput,
+  normalizeRespondToolInput,
 } from "../tools-to-model-tools.js"
 import { mapAiSdkStreamChunk } from "./ai-sdk.stream.js"
+
+const RESPOND = "respond"
 
 export type ReactionToolChoice =
   | "auto"
@@ -37,6 +41,10 @@ export async function executeAiSdkAgentRound(input: {
     input: unknown
   }>[]
   text: string
+  response: Readonly<{
+    text: string
+    toolCalls: readonly unknown[]
+  }>
   metadata: Readonly<Record<string, unknown>>
 }> {
   const { gateway, jsonSchema, stepCountIs, streamText } = await import("ai")
@@ -76,11 +84,30 @@ export async function executeAiSdkAgentRound(input: {
       .catch(() => undefined),
     streamed,
   ])
-  const calls = (Array.isArray(toolCalls) ? toolCalls : []).map((call: any) => ({
-    actionCallId: String(call.toolCallId ?? call.id ?? globalThis.crypto.randomUUID()),
-    actionName: String(call.toolName ?? call.name ?? ""),
-    input: call.input ?? call.args,
-  })).filter((call: { actionName: string }) => call.actionName.length > 0)
+  const rawToolCalls = Array.isArray(toolCalls) ? toolCalls : []
+  const calls = rawToolCalls.map((call: any) => {
+    const actionName = String(call.toolName ?? call.name ?? "")
+    const decodedInput = decodeActionSpecInput(
+      specs[actionName],
+      call.input ?? call.args,
+    )
+    let normalizedInput = decodedInput
+    if (actionName === RESPOND && input.actions[actionName]) {
+      try {
+        normalizedInput = normalizeRespondToolInput(
+          input.actions[actionName].input,
+          decodedInput,
+        )
+      } catch {
+        // The shared Agent wire validates this value and drives bounded repair.
+      }
+    }
+    return {
+      actionCallId: String(call.toolCallId ?? call.id ?? globalThis.crypto.randomUUID()),
+      actionName,
+      input: normalizedInput,
+    }
+  }).filter((call: { actionName: string }) => call.actionName.length > 0)
   const parts = normalizePartsForPersistence([
     ...(typeof text === "string" && text.trim()
       ? [{ type: "message", content: { text } }]
@@ -100,10 +127,18 @@ export async function executeAiSdkAgentRound(input: {
     parts: Object.freeze(parts),
     calls: Object.freeze(calls),
     text: typeof text === "string" ? text : "",
+    response: Object.freeze({
+      text: typeof text === "string" ? text : "",
+      toolCalls: Object.freeze(jsonSafe(rawToolCalls) ?? []),
+    }),
     metadata: Object.freeze({
       latencyMs: Date.now() - startedAt,
       usage: jsonSafe(usage),
       providerMetadata: jsonSafe(providerMetadata),
+      modelResponse: Object.freeze({
+        text: typeof text === "string" ? text : "",
+        toolCalls: Object.freeze(jsonSafe(rawToolCalls) ?? []),
+      }),
     }),
   })
 }

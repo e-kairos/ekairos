@@ -18,11 +18,21 @@ import type { ReactorPath } from "./workspace-path.js"
 
 export type ReactionModel = string | (() => Promise<LanguageModel>)
 
+export type ReactionToolInvocation = Readonly<{
+  actionCallId: string
+  round: number
+  callIndex: number
+}>
+
 export type ReactionToolAction = Readonly<{
   description?: string
   input: z.ZodType
   output: z.ZodType
-  execute(input: unknown, reactionId: string): Promise<unknown>
+  execute(
+    input: unknown,
+    reactionId: string,
+    invocation?: ReactionToolInvocation,
+  ): Promise<unknown>
 }>
 export type ReactionEngineActions = Readonly<Record<string, ReactionToolAction>>
 
@@ -61,6 +71,7 @@ export type ReactionEngineInput<
   output?: z.ZodType<TOutput>
   model?: ReactionModel
   maxRounds?: number
+  repairRetries?: number
   actions: TActions
   stream?: ReactionEngineStream
   sandbox?: ContextSandboxHandle
@@ -85,6 +96,7 @@ export type AiReactionEngine = Readonly<{
   kind: "ekairos.ai"
   model: ReactionModel
   maxRounds?: number
+  repairRetries?: number
 }>
 
 export type AnyReactionEngine<TContext = unknown> =
@@ -94,6 +106,7 @@ export type AnyReactionEngine<TContext = unknown> =
 export function ai(config: {
   model: ReactionModel
   maxRounds?: number
+  repairRetries?: number
 }): AiReactionEngine {
   const model = config?.model
   if (
@@ -106,6 +119,9 @@ export function ai(config: {
     kind: "ekairos.ai" as const,
     model: typeof model === "string" ? model.trim() : model,
     ...(config.maxRounds === undefined ? {} : { maxRounds: config.maxRounds }),
+    ...(config.repairRetries === undefined
+      ? {}
+      : { repairRetries: config.repairRetries }),
   })
 }
 

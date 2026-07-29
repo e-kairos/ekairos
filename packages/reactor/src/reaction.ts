@@ -21,6 +21,10 @@ import {
 import { z } from "zod"
 
 import {
+  describeAgentDatasetDomain,
+  describeAvailableAgentDatasets,
+} from "./agent-dataset-runtime.js"
+import {
   deriveDatasetSource,
   toReactionOperationActionRef,
   type ReactionGitInput,
@@ -89,6 +93,8 @@ export type ReactionAgentInput<
   actions?: { readonly [Index in keyof TActions]: ActionAllowedInScope<TActions[Index], TScope> }
   model?: ReactionModel
   maxRounds?: number
+  repairRetries?: number
+  datasets?: boolean
 }>
 
 export type ReactionTextAgentInput<
@@ -101,6 +107,8 @@ export type ReactionTextAgentInput<
   actions?: { readonly [Index in keyof TActions]: ActionAllowedInScope<TActions[Index], TScope> }
   model?: ReactionModel
   maxRounds?: number
+  repairRetries?: number
+  datasets?: boolean
 }>
 
 export type ReactionDatasetInput<TRecord> = Readonly<{
@@ -293,6 +301,17 @@ class ActiveReaction<
         this.assertEngine()
         const actions = config.actions ?? []
         actions.forEach((action: AnyDomainAction) => this.assertAction(action))
+        const datasetProvider = this.input.runtime.materializeDataset
+        if (config.datasets === true && typeof datasetProvider !== "function") {
+          throw new Error("reaction_dataset_provider_not_configured")
+        }
+        const dataset = config.datasets === false || typeof datasetProvider !== "function"
+          ? undefined
+          : Object.freeze({
+              domain: describeAgentDatasetDomain(this.input.definition.scope),
+              given: deriveDatasetSource(events),
+              available: describeAvailableAgentDatasets(events),
+            })
         return await this.operation(events, {
           kind: "agent",
           instruction: requiredInstruction(config.instruction),
@@ -301,8 +320,12 @@ class ActiveReaction<
             ? { outputSchema: z.toJSONSchema(config.output, { target: "draft-7" }) }
             : {}),
           actions: actions.map(toReactionOperationActionRef),
+          ...(dataset ? { dataset } : {}),
           ...(config.model ? { model: config.model } : {}),
           ...(config.maxRounds === undefined ? {} : { maxRounds: config.maxRounds }),
+          ...(config.repairRetries === undefined
+            ? {}
+            : { repairRetries: config.repairRetries }),
         })
       },
       action: async (action: AnyDomainAction, value: unknown) => {

@@ -18,6 +18,7 @@ import {
   codexSandboxBridgeScript,
   codexSandboxTurnRunnerScript,
   executeCodexAction,
+  resolveCodexCanonicalActionName,
   type CodexTurnResult,
 } from "./codex.runtime.js"
 
@@ -290,6 +291,15 @@ export class CodexEngine<TContext = unknown>
       if (actionCall === maxActionCalls) {
         throw new Error(`codex_engine_max_action_calls:${maxActionCalls}`)
       }
+
+      turn = {
+        ...turn,
+        action: {
+          ...turn.action,
+          name: resolveCodexCanonicalActionName(input.actions, turn.action.name),
+        },
+      }
+      if (!turn.action) throw new Error("codex_engine_action_request_missing")
 
       parts.push({
         type: "action",

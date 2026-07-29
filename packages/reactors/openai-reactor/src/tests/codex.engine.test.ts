@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import { z } from "zod"
 
 import { CodexEngine, codexEngine } from "../codex.engine"
+import { toCodexToolName } from "../codex.runtime"
 import * as publicApi from "../index"
 
 function fileText(file: SandboxFileInput): string {
@@ -159,7 +160,8 @@ describe("codexEngine", () => {
         action: {
           requestId: "rpc-action-1",
           callId: "call-1",
-          name: "supplier.lookup",
+          // el modelo llama por el nombre wire (la Responses API no admite puntos)
+          name: toCodexToolName("supplier.lookup"),
           input: { supplierId: "supplier-7" },
         },
       },
@@ -195,10 +197,13 @@ describe("codexEngine", () => {
       }),
     ])
     const toolsFile = files.find(file => file.path.includes("tools-"))
-    expect(JSON.parse(fileText(toolsFile!))[0]).toMatchObject({
-      name: "supplier.lookup",
+    const publishedTool = JSON.parse(fileText(toolsFile!))[0]
+    expect(publishedTool).toMatchObject({
+      name: toCodexToolName("supplier.lookup"),
       inputSchema: { type: "object" },
     })
+    expect(publishedTool.name).toMatch(/^[a-zA-Z0-9_-]+$/)
+    expect(publishedTool.description).toContain("Canonical action: supplier.lookup.")
     const responseFile = files.find(file => /[/\\]action-/.test(file.path))
     expect(JSON.parse(fileText(responseFile!)).result.success).toBe(true)
     expect(commands.filter(command => command.args?.join(" ").includes("codex-turn-runner")))

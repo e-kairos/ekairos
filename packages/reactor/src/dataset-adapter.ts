@@ -34,10 +34,15 @@ export type DatasetAdapterEnsure = Readonly<{
   output?: "rows" | "object"
 }>
 
-export type DatasetAdapterSpec = Readonly<{
-  datasetId: string
-  ensure: DatasetAdapterEnsure
-}>
+export type DatasetAdapterSpec =
+  | Readonly<{
+      datasetId: string
+      ensure: DatasetAdapterEnsure
+    }>
+  | Readonly<{
+      datasetId: string
+      open: true
+    }>
 
 export type DatasetAdapterProviderResult<TRecord = unknown> = Readonly<{
   datasetId: string

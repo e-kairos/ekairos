@@ -12,15 +12,19 @@ export function buildAgentSystemPrompt(input: {
   reactionKey: string
   instruction: string
   hasOutput: boolean
+  hasDatasets: boolean
 }) {
   return [
     `You are executing the reaction "${input.reactionKey}".`,
     input.instruction,
     "The messages are an explicit causal view: stable Context first, then selected Events in order, then the current instruction.",
+    input.hasDatasets
+      ? "Native Dataset capabilities are available. Use dataset.materialize for collection-level transformation and dataset.read for row evidence. Dataset previews are discovery metadata, never sufficient evidence for factual claims."
+      : undefined,
     input.hasOutput
       ? "When finished, call respond exactly once with the requested structured output."
       : "Answer directly when the requested work is complete.",
-  ].join("\n\n")
+  ].filter(Boolean).join("\n\n")
 }
 
 export async function buildAgentModelMessages<TContext>(input: {

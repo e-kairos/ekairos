@@ -21,7 +21,20 @@ import {
 import { Sandbox } from "@ekairos/sandbox/sandbox"
 import { z } from "zod"
 
-import { runReactionEngineAgent } from "./agent.js"
+import { runReactionEngineAgent } from "./agent-repair.js"
+import {
+  AGENT_DATASET_ACTION,
+  AGENT_DATASET_READ_ACTION,
+  agentDatasetMaterializeDescription,
+  agentDatasetMaterializeInputSchema,
+  agentDatasetMaterializeOutputSchema,
+  agentDatasetPromptIndex,
+  agentDatasetReadInputSchema,
+  agentDatasetReadOutputSchema,
+  readAgentDatasetRows,
+  resolveAgentDatasetMaterializeSource,
+  type AgentDatasetCapability,
+} from "./agent-dataset-runtime.js"
 import { resolveCausalEvents } from "./reaction-causality.js"
 import { collectEventFileReferences } from "./reaction-files.js"
 import { buildAgentModelMessages } from "./reaction-view.js"
@@ -65,6 +78,7 @@ import type {
 
 type AnyDomainAction = DomainActionRegistration<any, any, any, any>
 const AGENT_EFFECT_EVENT_NAMESPACE = "d86ced13-b64c-449c-a4c0-c41bd1241068"
+const AGENT_DATASET_NAMESPACE = "6d057383-8379-46ab-9d32-6080ffbff6f4"
 
 export async function runReactionOperation(
   request: ReactionOperationRequest,
@@ -143,15 +157,18 @@ async function runOperation(
     const output = operation.outputSchema
       ? schemaFromJson(operation.outputSchema, "reaction_agent_output")
       : undefined
-    const actions = resolveEngineActions(request, operation.actions)
+    const given = await hydrateEvents(request.runtime, request.causeIds)
+    const actions = resolveEngineActions(request, operation.actions, operation.dataset)
     const sandbox = await openSandbox(request)
     const workspace = sandbox ? await prepareReactionWorkspace(request, sandbox) : undefined
     if (operation.path && !workspace) throw new Error("reaction_agent_path_requires_sandbox")
-    const given = await hydrateEvents(request.runtime, request.causeIds)
+    const modelInstruction = operation.dataset
+      ? `${operation.instruction}\n\n${agentDatasetPromptIndex(operation.dataset)}`
+      : operation.instruction
     const messages = await buildAgentModelMessages({
       runtime: request.runtime,
       reactionKey: request.definition,
-      instruction: operation.instruction,
+      instruction: modelInstruction,
       context: request.context,
       events: given,
     })
@@ -166,10 +183,11 @@ async function runOperation(
         reactionId: request.reactionId,
         given,
         messages,
-        instruction: operation.instruction,
+        instruction: modelInstruction,
         ...(output ? { output } : {}),
         ...(operation.model ? { model: operation.model } : {}),
         ...(operation.maxRounds === undefined ? {} : { maxRounds: operation.maxRounds }),
+        ...reactionRepairRetries(operation),
         actions,
         ...(stream ? { stream } : {}),
         ...(sandbox && workspace
@@ -370,6 +388,20 @@ function operationInstruction(operation: ReactionOperation) {
   return "instruction" in operation ? operation.instruction : undefined
 }
 
+function reactionRepairRetries(operation: ReactionOperation) {
+  if (!("repairRetries" in operation) || operation.repairRetries === undefined) {
+    return {}
+  }
+  if (
+    typeof operation.repairRetries !== "number" ||
+    !Number.isInteger(operation.repairRetries) ||
+    operation.repairRetries < 0
+  ) {
+    throw new Error("reaction_agent_repair_retries_invalid")
+  }
+  return { repairRetries: operation.repairRetries }
+}
+
 function schemaFromJson(value: unknown, label: string): z.ZodType {
   try {
     return z.fromJSONSchema(value as never) as z.ZodType
@@ -399,8 +431,9 @@ function resolveAction(
 function resolveEngineActions(
   request: ReactionOperationRequest,
   refs: readonly ReactionOperationActionRef[],
+  dataset?: AgentDatasetCapability,
 ) {
-  return Object.freeze(Object.fromEntries(refs.map(ref => {
+  const entries = refs.map(ref => {
     const action = resolveAction(request.runtime, ref)
     const binding = getDomainActionBinding(action)!
     const tool: ReactionToolAction = Object.freeze({
@@ -422,7 +455,131 @@ function resolveEngineActions(
       },
     })
     return [binding.id, tool]
-  })))
+  }) as Array<[string, ReactionToolAction]>
+
+  if (dataset) {
+    if (entries.some(([name]) => name === AGENT_DATASET_ACTION)) {
+      throw new Error(`reaction_action_name_reserved:${AGENT_DATASET_ACTION}`)
+    }
+    if (entries.some(([name]) => name === AGENT_DATASET_READ_ACTION)) {
+      throw new Error(`reaction_action_name_reserved:${AGENT_DATASET_READ_ACTION}`)
+    }
+    const availableDatasetIds = new Set(
+      ("available" in dataset && Array.isArray(dataset.available)
+        ? dataset.available
+        : [])
+        .map((entry: any) => String(entry?.datasetId ?? ""))
+        .filter(Boolean),
+    )
+    entries.push([
+      AGENT_DATASET_ACTION,
+      createAgentDatasetTool(request, dataset, datasetId => {
+        availableDatasetIds.add(datasetId)
+      }),
+    ])
+    entries.push([
+      AGENT_DATASET_READ_ACTION,
+      createAgentDatasetReadTool(request, availableDatasetIds),
+    ])
+  }
+
+  return Object.freeze(Object.fromEntries(entries))
+}
+
+function createAgentDatasetTool(
+  request: ReactionOperationRequest,
+  capability: AgentDatasetCapability,
+  registerDataset: (datasetId: string) => void,
+): ReactionToolAction {
+  const provider = request.runtime.materializeDataset
+  if (typeof provider !== "function") {
+    throw new Error("reaction_dataset_provider_not_configured")
+  }
+  return Object.freeze({
+    description: agentDatasetMaterializeDescription(capability.domain),
+    input: agentDatasetMaterializeInputSchema,
+    output: agentDatasetMaterializeOutputSchema,
+    async execute(value, _reactionId, invocation) {
+      const input = agentDatasetMaterializeInputSchema.parse(value)
+      const callId = invocation?.actionCallId ?? uuidV5(
+        JSON.stringify(input),
+        AGENT_DATASET_NAMESPACE,
+      )
+      const datasetId = uuidV5(
+        `${request.eventId}:${callId}`,
+        AGENT_DATASET_NAMESPACE,
+      )
+      const source = resolveAgentDatasetMaterializeSource(input, capability)
+      const result = await provider({
+        runtime: request.runtime,
+        ...(request.sandboxId === false ? {} : { sandboxId: request.sandboxId }),
+        sessionId: request.sessionId,
+        reactionId: request.reactionId,
+        contextId: request.context.ref.id,
+        context: request.context,
+        trigger: request.trigger,
+        ...(request.engine === false ? {} : { engine: request.engine }),
+        spec: {
+          datasetId,
+          ensure: {
+            source,
+            title: input.title,
+            ...(input.instructions ? { instructions: input.instructions } : {}),
+            ...(input.schema ? { schema: { schema: input.schema } } : {}),
+            ...(input.output ? { output: input.output } : {}),
+          },
+        },
+      })
+      const resolvedDatasetId = String(result.datasetId ?? datasetId)
+      registerDataset(resolvedDatasetId)
+      return Object.freeze({
+        datasetId: resolvedDatasetId,
+        mode: result.mode === "opened" ? "opened" as const : "built" as const,
+        preview: Object.freeze([...(result.previewRows ?? result.preview ?? [])]),
+        ...(typeof result.count === "number" ? { count: result.count } : {}),
+      })
+    },
+  })
+}
+
+function createAgentDatasetReadTool(
+  request: ReactionOperationRequest,
+  availableDatasetIds: ReadonlySet<string>,
+): ReactionToolAction {
+  const provider = request.runtime.materializeDataset
+  if (typeof provider !== "function") {
+    throw new Error("reaction_dataset_provider_not_configured")
+  }
+  return Object.freeze({
+    description: [
+      "Read evidence rows from an available Dataset in one paginated call.",
+      "Use the datasetId from the prompt index or dataset.materialize result.",
+      "Pass nextCursor into cursor for the next page. Optional filter supports equality on one top-level field.",
+    ].join(" "),
+    input: agentDatasetReadInputSchema,
+    output: agentDatasetReadOutputSchema,
+    async execute(value) {
+      const input = agentDatasetReadInputSchema.parse(value)
+      if (!availableDatasetIds.has(input.datasetId)) {
+        throw new Error(`reaction_dataset_read_not_available:${input.datasetId}`)
+      }
+      const opened = await provider({
+        runtime: request.runtime,
+        ...(request.sandboxId === false ? {} : { sandboxId: request.sandboxId }),
+        sessionId: request.sessionId,
+        reactionId: request.reactionId,
+        contextId: request.context.ref.id,
+        context: request.context,
+        trigger: request.trigger,
+        ...(request.engine === false ? {} : { engine: request.engine }),
+        spec: {
+          datasetId: input.datasetId,
+          open: true,
+        },
+      })
+      return await readAgentDatasetRows(opened, input)
+    },
+  })
 }
 
 async function hydrateEvents(

@@ -8,6 +8,7 @@ import {
 
 import { applyActionResult } from "./context.action-calls.js"
 import { toModelActionName } from "./action-name.js"
+import { AGENT_DATASET_ACTION } from "./agent-dataset.js"
 import {
   actionPartsToModelMessages,
   buildAgentSystemPrompt,
@@ -130,6 +131,7 @@ async function runAiSdkAgent<TContext, TOutput>(
     reactionKey: request.reactionKey,
     instruction: request.instruction,
     hasOutput: Boolean(request.output),
+    hasDatasets: Boolean(request.actions[AGENT_DATASET_ACTION]),
   })
   let messages: ModelMessage[] = [...request.messages]
   const roundMetadata: unknown[] = []
@@ -265,7 +267,11 @@ async function runAiSdkAgent<TContext, TOutput>(
       }
 
       try {
-        const output = await action.execute(call.input, request.reactionId)
+        const output = await action.execute(call.input, request.reactionId, {
+          actionCallId: call.actionCallId,
+          round,
+          callIndex,
+        })
         roundParts = applyActionResult(roundParts, call, { ok: true, output })
         await actionStream?.emit({
           kind: "action.completed",

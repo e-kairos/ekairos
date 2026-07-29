@@ -10,6 +10,7 @@ import type {
   DatasetAdapterProvider,
   DatasetAdapterSource,
 } from "./dataset-adapter.js"
+import type { AgentDatasetCapability } from "./agent-dataset.js"
 import type {
   AnyReactionEngine,
   ReactionModel,
@@ -58,6 +59,7 @@ export type ReactionOperation =
       path?: ReactorPath
       outputSchema?: unknown
       actions: readonly ReactionOperationActionRef[]
+      dataset?: AgentDatasetCapability
       model?: ReactionModel
       maxRounds?: number
     }>
