@@ -69,22 +69,47 @@ export async function executeAiSdkAgentRound(input: {
     providerOptions: { openai: { promptCacheKey: input.contextId } },
   })
 
+  // Un fallo del provider NUNCA puede degradarse a "ronda vacia": los catch
+  // de abajo existen para tolerar promesas parciales del SDK, asi que el error
+  // real se captura aca y se relanza si la ronda no produjo nada.
+  let providerError: unknown
+  const captureProviderError = (caught: unknown) => {
+    providerError ??= caught
+  }
   const streamed = (async () => {
-    if (!input.stream || !result.fullStream) return
+    if (!result.fullStream) return
     for await (const chunk of result.fullStream) {
-      await input.stream.emit(mapAiSdkStreamChunk(chunk, input.round))
+      if (chunk?.type === "error") captureProviderError(chunk.error)
+      if (input.stream) {
+        await input.stream.emit(mapAiSdkStreamChunk(chunk, input.round))
+      }
     }
-  })()
+  })().catch(captureProviderError)
 
   const [text, toolCalls, usage, providerMetadata] = await Promise.all([
-    Promise.resolve(result.text).catch(() => ""),
-    Promise.resolve(result.toolCalls).catch(() => []),
+    Promise.resolve(result.text).catch((caught: unknown) => {
+      captureProviderError(caught)
+      return ""
+    }),
+    Promise.resolve(result.toolCalls).catch((caught: unknown) => {
+      captureProviderError(caught)
+      return []
+    }),
     Promise.resolve(result.usage).catch(() => undefined),
     Promise.resolve(result.providerMetadata ?? result.experimental_providerMetadata)
       .catch(() => undefined),
     streamed,
   ])
   const rawToolCalls = Array.isArray(toolCalls) ? toolCalls : []
+  if (
+    providerError !== undefined &&
+    rawToolCalls.length === 0 &&
+    !(typeof text === "string" && text.trim())
+  ) {
+    throw new Error(
+      `reaction_agent_provider_error:${providerErrorMessage(providerError)}`,
+    )
+  }
   const calls = rawToolCalls.map((call: any) => {
     const actionName = String(call.toolName ?? call.name ?? "")
     const decodedInput = decodeActionSpecInput(
@@ -149,5 +174,20 @@ function jsonSafe(value: unknown) {
     return JSON.parse(JSON.stringify(value))
   } catch {
     return String(value)
+  }
+}
+
+function providerErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const detail = (error as { responseBody?: unknown }).responseBody
+    const suffix = typeof detail === "string" && detail
+      ? `:${detail.slice(0, 500)}`
+      : ""
+    return `${error.message.slice(0, 500)}${suffix}`
+  }
+  try {
+    return JSON.stringify(error).slice(0, 600)
+  } catch {
+    return String(error).slice(0, 600)
   }
 }
