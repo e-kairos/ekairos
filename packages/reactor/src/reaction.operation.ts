@@ -36,6 +36,11 @@ import {
   resolveAgentDatasetMaterializeSource,
   type AgentDatasetCapability,
 } from "./agent-dataset-runtime.js"
+import {
+  DATASET_PREVIEW_ROW_CHARS,
+  DATASET_PREVIEW_TOTAL_CHARS,
+  boundRows,
+} from "./material-budget.js"
 import { resolveCausalEvents } from "./reaction-causality.js"
 import { collectEventFileReferences } from "./reaction-files.js"
 import { buildAgentModelMessages } from "./reaction-view.js"
@@ -327,10 +332,15 @@ async function runOperation(
     const preview = schema === undefined
       ? rows
       : rows.map((row: unknown) => schema.parse(row))
+    const boundedPreview = boundRows(preview, {
+      rowChars: DATASET_PREVIEW_ROW_CHARS,
+      totalChars: DATASET_PREVIEW_TOTAL_CHARS,
+    })
     const handle: DatasetAdapterHandle = Object.freeze({
       datasetId: String(result.datasetId ?? request.eventId),
       mode: result.mode === "opened" ? "opened" : "built",
-      preview: Object.freeze(preview),
+      preview: boundedPreview.rows,
+      ...(boundedPreview.truncated ? { previewTruncated: true } : {}),
       ...(typeof result.count === "number" ? { count: result.count } : {}),
     })
     return await createOperationEvent(

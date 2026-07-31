@@ -12,6 +12,11 @@ import type {
   DatasetAdapterProviderResult,
   DatasetAdapterSource,
 } from "./dataset-adapter.js"
+import {
+  DATASET_READ_ROW_CHARS,
+  DATASET_READ_TOTAL_CHARS,
+  compactJsonValue,
+} from "./material-budget.js"
 
 export { AGENT_DATASET_ACTION }
 export const AGENT_DATASET_READ_ACTION = "dataset.read"
@@ -190,9 +195,10 @@ export async function readAgentDatasetRows(
   const wanted = input.limit ?? 50
   let cursor = input.cursor ?? 0
   let done = false
+  let spentChars = 0
   const rows: unknown[] = []
 
-  while (!done && rows.length < wanted) {
+  while (!done && rows.length < wanted && spentChars < DATASET_READ_TOTAL_CHARS) {
     const pageStart = cursor
     const page = await opened.reader.read({
       cursor,
@@ -202,14 +208,16 @@ export async function readAgentDatasetRows(
     for (const row of page.rows) {
       processed += 1
       if (!matchesFilter(row, input.filter)) continue
-      rows.push(row)
-      if (rows.length >= wanted) {
+      const compact = compactJsonValue(row, DATASET_READ_ROW_CHARS)
+      rows.push(compact)
+      spentChars += jsonLength(compact)
+      if (rows.length >= wanted || spentChars >= DATASET_READ_TOTAL_CHARS) {
         cursor = pageStart + processed
         done = page.done && cursor >= page.cursor
         break
       }
     }
-    if (rows.length < wanted) {
+    if (rows.length < wanted && spentChars < DATASET_READ_TOTAL_CHARS) {
       cursor = page.cursor
       done = page.done
     }
@@ -251,6 +259,14 @@ function matchesFilter(
   if (!filter) return true
   if (!row || typeof row !== "object" || Array.isArray(row)) return false
   return Object.is((row as Record<string, unknown>)[filter.field], filter.equals)
+}
+
+function jsonLength(value: unknown): number {
+  try {
+    return (JSON.stringify(value) ?? String(value)).length
+  } catch {
+    return String(value).length
+  }
 }
 
 function compactPreviewRow(row: unknown) {

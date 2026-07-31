@@ -63,6 +63,7 @@ export type DatasetAdapterHandle<TRecord = unknown> = Readonly<{
   datasetId: string
   mode: "opened" | "built"
   preview: readonly TRecord[]
+  previewTruncated?: boolean
   count?: number
 }>
 
