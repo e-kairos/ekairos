@@ -109,6 +109,87 @@ logic runs.
 - formal notation helpers
 - `buildReactionDataset`, the runtime integration assigned to
   `runtime.materializeDataset`
+- `remoteDatasetStore`, the endpoint-backed materialize/read/aggregate client
 
 The source builder remains an internal materialization implementation. New
 application code materializes through Reaction Events.
+
+## Remote Dataset store
+
+`remoteDatasetStore` uses the Dataset collection endpoint as-is. For example,
+if Dataset creation is `https://platform.example/api/platform/dataset`, pass
+that full URL as `endpoint`.
+
+```ts
+import {
+  buildReactionDataset,
+  remoteDatasetOptionsFromEnv,
+} from "@ekairos/dataset"
+
+const datasetOptions = remoteDatasetOptionsFromEnv()
+
+class AppRuntime extends EkairosRuntime<any, typeof appDomain, any> {
+  async materializeDataset(
+    input: Parameters<typeof buildReactionDataset>[0],
+  ) {
+    return await buildReactionDataset(input, datasetOptions)
+  }
+}
+```
+
+An empty remote configuration returns `undefined`, so the runtime above keeps
+the Instant default. A partial configuration fails immediately. The required
+variables are:
+
+```text
+EKAIROS_DATASET_ENDPOINT=https://platform.example/api/platform/dataset
+EKAIROS_DATASET_TOKEN=...
+EKAIROS_DATASET_APP=registered-app-id
+EKAIROS_DATASET_ENV=development
+EKAIROS_DATASET_ORGANIZATION_ID=... # optional
+```
+
+The endpoint client sends `Authorization: Bearer <token>` and, when configured,
+`x-ekairos-organization-id`. Its exact operations are:
+
+```ts
+const store = remoteDatasetStore({ endpoint, token, organizationId })
+
+await store.materialize({
+  app,
+  env,
+  name,
+  source: { kind: "rows", rows },
+})
+
+await store.rows({
+  datasetId,
+  select,
+  where,
+  sort,
+  limit,
+  offset,
+})
+
+await store.aggregate({
+  datasetId,
+  groupBy,
+  metric, // count() | sum(column) | avg(column) | min(column) | max(column)
+  where,
+})
+```
+
+Inline materialization is limited to 10,000 rows. Larger results fail clearly
+and are never truncated. InstaQL is executed by the active runtime and uploaded
+as inline rows; it is not remote query pushdown. When a Reaction Dataset needs
+local transforms, Instant remains the staging store and the final transformed
+rows are uploaded.
+
+The gated live contract test runs automatically when the four required
+variables above are present. `EKAIROS_DATASET_ORGANIZATION_ID` remains
+optional:
+
+```bash
+pnpm --filter @ekairos/dataset test -- --run \
+  src/tests/remoteDatasetStore.live.test.ts
+```

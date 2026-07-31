@@ -48,3 +48,35 @@ The application-facing materialization API is
 When `runtime.materializeDataset` is configured, `reaction.agent(...)` also
 receives the scoped `dataset.materialize` capability by default. Its query
 source is validated against the Reaction domain before execution.
+
+## Stores
+
+The default Reaction Dataset store is Instant. Calling
+`buildReactionDataset(input)` without a second argument preserves that path.
+
+A runtime may opt into the remote endpoint store with
+`buildReactionDataset(input, { store, scope: { app, env } })`. The store
+materializes addressable row datasets and exposes row reads and aggregations.
+Its scope is always explicit:
+
+- `app` identifies the registered application.
+- `env` identifies the application environment.
+- `organizationId`, when configured on the store, is sent as request scope.
+
+InstaQL is never represented as remote pushdown. The active runtime executes
+the query and the resulting rows are sent as
+`source: { kind: "rows", rows }`. Local file, prior-Dataset, instructed, and
+model-driven transforms continue to use Instant as staging; only their final
+rows are materialized in the remote store.
+
+The endpoint accepts at most 10,000 rows in one inline materialization. The
+adapter fails with `remote_dataset_inline_rows_limit_exceeded:<actual>>10000`
+when a direct or locally transformed result exceeds that boundary. It never
+silently truncates the result.
+
+The remote materialization contract currently generates the final `datasetId`
+and does not accept a client idempotency key. Therefore a retry after an
+ambiguous successful create can produce another remote Dataset. This is an
+explicit platform-contract gap, not something this package works around. A
+candidate platform fix is to accept a client-provided key and upsert
+idempotently.
