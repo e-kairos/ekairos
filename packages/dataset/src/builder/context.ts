@@ -3,7 +3,7 @@ import {
   type ContextRuntimeServiceHandle,
 } from "@ekairos/events"
 
-import { datasetDomain } from "../schema.js"
+import { datasetSchemaDomain } from "../schema.js"
 import { DatasetService } from "../service.js"
 import { getDomainDescriptor } from "./rows.js"
 import type {
@@ -24,7 +24,7 @@ type DatasetSourceContextResolution = {
 }
 
 async function getDatasetDb(runtime: AnyDatasetRuntime) {
-  const scoped = await (runtime as any).use(datasetDomain)
+  const scoped = await (runtime as any).use(datasetSchemaDomain)
   return scoped.db as any
 }
 

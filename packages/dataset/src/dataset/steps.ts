@@ -1,5 +1,5 @@
 import { DatasetService } from "../service.js"
-import { datasetDomain } from "../schema.js"
+import { datasetSchemaDomain } from "../schema.js"
 import { inferDatasetSchema } from "../builder/schemaInference.js"
 import { rowsToJsonl } from "../builder/rows.js"
 
@@ -9,7 +9,7 @@ export async function getDatasetRuntimeDb(runtime: any) {
   }
 
   if (typeof runtime.use === "function") {
-    const scoped = await runtime.use(datasetDomain)
+    const scoped = await runtime.use(datasetSchemaDomain)
     const scopedDb = (scoped as any).db
     return typeof scopedDb === "function" ? await scopedDb.call(scoped) : scopedDb
   }

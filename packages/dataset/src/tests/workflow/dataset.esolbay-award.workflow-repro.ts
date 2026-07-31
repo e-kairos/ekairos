@@ -7,7 +7,7 @@ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { sandboxDomain } from "../../../../sandbox/src/schema.ts"
 
 import { materializeDataset } from "../../dataset.js"
-import { datasetDomain } from "../../schema.js"
+import { datasetDomain } from "../../domain.js"
 
 type InstantAdminInit = typeof import("@instantdb/admin")["init"]
 

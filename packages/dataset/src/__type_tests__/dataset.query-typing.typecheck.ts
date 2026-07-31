@@ -3,7 +3,7 @@ import { domain } from "@ekairos/domain"
 import { EkairosRuntime } from "@ekairos/domain/runtime"
 
 import { materializeDataset } from "../dataset"
-import { datasetDomain } from "../schema"
+import { datasetDomain } from "../domain"
 
 type Env = Record<string, unknown> & {
   orgId: string

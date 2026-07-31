@@ -18,8 +18,21 @@ export async function buildReactionDataset(input: DatasetAdapterProviderInput) {
   const datasetId = spec.datasetId
   const runtime = input.runtime as AnyDatasetRuntime & any
 
+  if ("open" in spec) {
+    const opened = await finalizeBuildResult(runtime, datasetId, false)
+    assertCompletedDataset(opened.dataset, datasetId)
+    return {
+      datasetId: opened.datasetId,
+      mode: "opened" as const,
+      previewRows: opened.previewRows,
+      count: datasetRowCount(opened.dataset),
+      reader: opened.reader,
+    }
+  }
+
   try {
     const opened = await finalizeBuildResult(runtime, datasetId, false)
+    assertCompletedDataset(opened.dataset, datasetId)
     return {
       datasetId: opened.datasetId,
       mode: "opened" as const,
@@ -104,4 +117,10 @@ function datasetSourceToDatasetSource(
 function datasetRowCount(value: any): number | undefined {
   const count = value?.actualGeneratedRowCount ?? value?.calculatedTotalRows
   return typeof count === "number" ? count : undefined
+}
+
+function assertCompletedDataset(value: any, datasetId: string) {
+  if (value?.status !== "completed") {
+    throw new Error(`dataset_not_completed:${datasetId}:${String(value?.status ?? "unknown")}`)
+  }
 }

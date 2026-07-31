@@ -6,7 +6,7 @@ const mock = vi.hoisted(() => {
   }
   const openedResult = {
     datasetId: "opened_dataset",
-    dataset: { actualGeneratedRowCount: 2 },
+    dataset: { status: "completed", actualGeneratedRowCount: 2 },
     notation: null,
     previewRows: [{ id: "opened_row" }],
     reader,
@@ -98,6 +98,46 @@ describe("Reaction Dataset adapter", () => {
       reader: mock.reader,
     })
     expect(mock.materializeDataset).not.toHaveBeenCalled()
+  })
+
+  it("opens an existing Dataset explicitly for row reads", async () => {
+    mock.finalizeBuildResult.mockResolvedValueOnce(mock.openedResult)
+
+    const result = await buildReactionDataset(createInput({
+      datasetId: "items_dataset",
+      open: true,
+    }) as any)
+
+    expect(result.mode).toBe("opened")
+    expect(result.reader).toBe(mock.reader)
+    expect(mock.materializeDataset).not.toHaveBeenCalled()
+  })
+
+  it("deduplicates the same deterministic source and schema on retry", async () => {
+    const spec = {
+      datasetId: "stable_items_dataset",
+      ensure: {
+        source: { rows: [{ sku: "A-1" }] },
+        schema: {
+          schema: {
+            type: "object",
+            properties: { sku: { type: "string" } },
+            required: ["sku"],
+          },
+        },
+      },
+    }
+    mock.finalizeBuildResult
+      .mockRejectedValueOnce(new Error("not found"))
+      .mockResolvedValueOnce(mock.openedResult)
+
+    const first = await buildReactionDataset(createInput(spec) as any)
+    const second = await buildReactionDataset(createInput(spec) as any)
+
+    expect(first.mode).toBe("built")
+    expect(second.mode).toBe("opened")
+    expect(mock.materializeDataset).toHaveBeenCalledTimes(1)
+    expect(mock.builder.build).toHaveBeenCalledTimes(1)
   })
 
   it("maps file sources and keeps the parent Session boundary", async () => {

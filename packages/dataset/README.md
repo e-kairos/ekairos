@@ -6,13 +6,19 @@ Reaction-native materialization path.
 ## Compose the domain
 
 ```ts
+import { datasetSchemaDomain } from "@ekairos/dataset/schema"
+
 const appDomain = domain("app")
   .includes(contextDomain)
-  .includes(datasetDomain)
+  .includes(datasetSchemaDomain)
   .includes(requisitionDomain)
   .withSchema({ entities: {}, links: {}, rooms: {} })
-  .withActions(datasetDomain.actions)
 ```
+
+`@ekairos/dataset/schema` contains only schema and Event definitions, so it is
+safe to compose into schema modules imported by browser code. The main
+`@ekairos/dataset` entrypoint exports `datasetDomain`, its server actions, and
+the materialization runtime.
 
 ## Materialize from the current causal Event
 
@@ -48,6 +54,21 @@ The preview is diagnostic. Production consumers read durable records or the
 Dataset data file by `datasetId`; they do not load millions of rows through the
 Reaction Event.
 
+## Let an Agent create Datasets
+
+```ts
+const answer = await reaction.given(history).agent({
+  instruction: "Group the complete cohort by recorded condition.",
+})
+```
+
+If the runtime implements `materializeDataset`, every Agent receives the
+`dataset.materialize` capability by default. It can materialize multiple
+Datasets from a scoped InstaQL query, selected causal Events, prior Datasets, or
+linked files. Query entities, fields, and links are validated against the
+Reaction domain before InstantDB is read. Set `datasets: false` only for an
+Agent that must not materialize collections.
+
 ## Dataset as a domain-action input
 
 ```ts
@@ -82,7 +103,8 @@ logic runs.
 ## Public surface
 
 - `dataset(schema)` and Dataset reference types
-- `datasetDomain` and `datasetActions`
+- `datasetSchemaDomain` from `@ekairos/dataset/schema`
+- `datasetDomain` and `datasetActions` from the server entrypoint
 - `DatasetService`
 - formal notation helpers
 - `buildReactionDataset`, the runtime integration assigned to

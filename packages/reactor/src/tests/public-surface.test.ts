@@ -10,6 +10,7 @@ describe("@ekairos/reactor public surface", () => {
       "ai",
       "defineReaction",
       "isAiEngine",
+      "toModelActionName",
     ])
   })
 

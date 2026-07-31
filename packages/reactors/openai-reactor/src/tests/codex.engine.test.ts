@@ -1,11 +1,13 @@
-import type { ReactionEngineInput } from "@ekairos/reactor"
+import {
+  toModelActionName,
+  type ReactionEngineInput,
+} from "@ekairos/reactor"
 import type { SandboxExecInput, SandboxFileInput, SandboxSession } from "@ekairos/sandbox"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
 
 import { CodexEngine, codexEngine } from "../codex.engine"
-import { toCodexToolName } from "../codex.runtime"
 import * as publicApi from "../index"
 
 function fileText(file: SandboxFileInput): string {
@@ -161,7 +163,7 @@ describe("codexEngine", () => {
           requestId: "rpc-action-1",
           callId: "call-1",
           // el modelo llama por el nombre wire (la Responses API no admite puntos)
-          name: toCodexToolName("supplier.lookup"),
+          name: toModelActionName("supplier.lookup"),
           input: { supplierId: "supplier-7" },
         },
       },
@@ -199,7 +201,7 @@ describe("codexEngine", () => {
     const toolsFile = files.find(file => file.path.includes("tools-"))
     const publishedTool = JSON.parse(fileText(toolsFile!))[0]
     expect(publishedTool).toMatchObject({
-      name: toCodexToolName("supplier.lookup"),
+      name: toModelActionName("supplier.lookup"),
       inputSchema: { type: "object" },
     })
     expect(publishedTool.name).toMatch(/^[a-zA-Z0-9_-]+$/)
@@ -210,7 +212,7 @@ describe("codexEngine", () => {
       .toHaveLength(2)
   })
 
-  it("parses structured output and requires a sandbox", async () => {
+  it("parses structured output in sandbox mode", async () => {
     const { session } = fakeSandbox()
     const input = agentInput(session)
     input.output = z.object({ answer: z.string() })
@@ -220,9 +222,23 @@ describe("codexEngine", () => {
     }).agent(input)
     expect(result.output).toEqual({ answer: "ok" })
     expect(result.metadata).toMatchObject({ provider: "codex", turnId: "turn-1" })
+  })
 
-    await expect(codexEngine().agent(agentInput())).rejects.toThrow(
-      "codex_engine_sandbox_required",
-    )
+  it("prepares one sandbox bridge once per engine and session", async () => {
+    const { session, commands } = fakeSandbox()
+    const engine = codexEngine({
+      auth: { source: "preinstalled" },
+      installCodexCli: false,
+    })
+
+    await engine.agent(agentInput(session))
+    await engine.agent(agentInput(session))
+
+    expect(commands.filter(command =>
+      command.args?.join(" ").includes("codex_engine_prepare_ok"),
+    )).toHaveLength(1)
+    expect(commands.filter(command =>
+      command.args?.join(" ").includes("codex_engine_bridge_ok"),
+    )).toHaveLength(1)
   })
 })

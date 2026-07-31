@@ -1,16 +1,10 @@
 import { i } from "@instantdb/core"
 import {
-  DOMAIN_ACTION_FULL_INPUT_TYPE,
-  DOMAIN_ACTION_OWNER_TYPE,
-  DOMAIN_ACTION_RUNTIME_TYPE,
   defineEvent,
   domain,
 } from "@ekairos/domain"
 import { contextDomain } from "@ekairos/events"
 import { z } from "zod"
-import { datasetActions } from "./actions.js"
-
-export * from "./actions.js"
 
 const entities = {
   dataset_datasets: i.entity({
@@ -75,9 +69,8 @@ const materialized = defineEvent({
   },
 })
 
-export const datasetDomain = domain("dataset")
+export const datasetSchemaDomain = domain("dataset")
   .includes(contextDomain)
   .withSchema({ entities, links, rooms })
   .withEvents({ materializationRequested, materialized })
-  .withActions(datasetActions)
 

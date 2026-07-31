@@ -1,0 +1,2351 @@
+*** Begin ECU Patch
+Key: 028-codex-local-dataset-surfaces
+Title: Local Codex engine and Reaction Dataset surfaces
+Purpose: Make local Codex app-server execution and the approved Reaction Dataset provider contract first-class while preserving the existing sandbox path and causal Dataset behavior.
+
+*** Begin Context
+The current working tree is the canonical iteration state. This patch records the scoped Reactor, OpenAI Reactor, Dataset, and Events changes without including concurrent work in other packages.
+
+Approved product decisions:
+- codexEngine() runs the local logged-in Codex directly when no sandbox is supplied.
+- Sandbox execution remains selected by input.sandbox.
+- buildReactionDataset is the explicit public provider adopted by consumer runtimes as a readonly property.
+- Agent Dataset materialization uses the current top-level query contract and paginated dataset.read evidence.
+*** End Context
+
+*** Begin Git Diff
+diff --git a/packages/dataset/DOMAIN.md b/packages/dataset/DOMAIN.md
+index 787317a..0af1582 100644
+--- a/packages/dataset/DOMAIN.md
++++ b/packages/dataset/DOMAIN.md
+@@ -2,7 +2,9 @@
+ 
+ Module: `@ekairos/dataset`
+ 
+-Canonical domain: `datasetDomain`
++Schema domain: `datasetSchemaDomain`
++
++Full server domain: `datasetDomain`
+ 
+ ## Ownership
+ 
+@@ -24,7 +26,25 @@ Canonical domain: `datasetDomain`
+ 6. `dataset(schema)` is a formal domain-action input type. Before an action
+    executes, the referenced Dataset must exist, be completed, and have a
+    structurally compatible item schema.
+-7. Applications explicitly expose `datasetDomain.actions` from the root domain.
++7. Applications compose `datasetSchemaDomain` into their root schema. This
++   client-safe entrypoint never imports Dataset actions, sandbox providers, or
++   filesystem code.
++8. `datasetDomain` adds the server actions used by Dataset materialization.
++   Applications expose those actions from the root only when they are part of
++   the application's public write contract.
++9. A deterministic Dataset id is an idempotency boundary. Reopening a completed
++   Dataset returns `mode: "opened"` and its existing reader; it never rebuilds
++   the same source/schema materialization.
++10. Dataset readers page ordered rows by cursor. Agent adapters may apply a
++    compact top-level equality filter while advancing that source cursor, so
++    filtered reads remain deterministic and resumable.
++11. Preview rows are affordances, not evidence completeness. Consumers that
++    make factual claims over a Dataset must read the necessary rows through its
++    reader.
+ 
+ The application-facing materialization API is
+ `reaction.given(event).dataset({ instruction, schema })`.
++
++When `runtime.materializeDataset` is configured, `reaction.agent(...)` also
++receives the scoped `dataset.materialize` capability by default. Its query
++source is validated against the Reaction domain before execution.
+diff --git a/packages/dataset/README.md b/packages/dataset/README.md
+index 60a1914..da1b9dc 100644
+--- a/packages/dataset/README.md
++++ b/packages/dataset/README.md
+@@ -6,14 +6,20 @@ Reaction-native materialization path.
+ ## Compose the domain
+ 
+ ```ts
++import { datasetSchemaDomain } from "@ekairos/dataset/schema"
++
+ const appDomain = domain("app")
+   .includes(contextDomain)
+-  .includes(datasetDomain)
++  .includes(datasetSchemaDomain)
+   .includes(requisitionDomain)
+   .withSchema({ entities: {}, links: {}, rooms: {} })
+-  .withActions(datasetDomain.actions)
+ ```
+ 
++`@ekairos/dataset/schema` contains only schema and Event definitions, so it is
++safe to compose into schema modules imported by browser code. The main
++`@ekairos/dataset` entrypoint exports `datasetDomain`, its server actions, and
++the materialization runtime.
++
+ ## Materialize from the current causal Event
+ 
+ ```ts
+@@ -48,6 +54,21 @@ The preview is diagnostic. Production consumers read durable records or the
+ Dataset data file by `datasetId`; they do not load millions of rows through the
+ Reaction Event.
+ 
++## Let an Agent create Datasets
++
++```ts
++const answer = await reaction.given(history).agent({
++  instruction: "Group the complete cohort by recorded condition.",
++})
++```
++
++If the runtime implements `materializeDataset`, every Agent receives the
++`dataset.materialize` capability by default. It can materialize multiple
++Datasets from a scoped InstaQL query, selected causal Events, prior Datasets, or
++linked files. Query entities, fields, and links are validated against the
++Reaction domain before InstantDB is read. Set `datasets: false` only for an
++Agent that must not materialize collections.
++
+ ## Dataset as a domain-action input
+ 
+ ```ts
+@@ -82,7 +103,8 @@ logic runs.
+ ## Public surface
+ 
+ - `dataset(schema)` and Dataset reference types
+-- `datasetDomain` and `datasetActions`
++- `datasetSchemaDomain` from `@ekairos/dataset/schema`
++- `datasetDomain` and `datasetActions` from the server entrypoint
+ - `DatasetService`
+ - formal notation helpers
+ - `buildReactionDataset`, the runtime integration assigned to
+diff --git a/packages/dataset/package.json b/packages/dataset/package.json
+index 218e20b..9176f52 100644
+--- a/packages/dataset/package.json
++++ b/packages/dataset/package.json
+@@ -30,6 +30,11 @@
+       "import": "./dist/domain.js",
+       "default": "./dist/domain.js"
+     },
++    "./schema": {
++      "types": "./dist/schema-entry.d.ts",
++      "import": "./dist/schema-entry.js",
++      "default": "./dist/schema-entry.js"
++    },
+     "./query": {
+       "types": "./dist/query/index.d.ts",
+       "import": "./dist/query/index.js",
+diff --git a/packages/dataset/src/__type_tests__/dataset.query-source-runtime.typecheck.ts b/packages/dataset/src/__type_tests__/dataset.query-source-runtime.typecheck.ts
+index 6662938..878676f 100644
+--- a/packages/dataset/src/__type_tests__/dataset.query-source-runtime.typecheck.ts
++++ b/packages/dataset/src/__type_tests__/dataset.query-source-runtime.typecheck.ts
+@@ -3,7 +3,7 @@ import { domain } from "@ekairos/domain"
+ import { EkairosRuntime } from "@ekairos/domain/runtime"
+ 
+ import { materializeDataset } from "../dataset"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ 
+ type Env = Record<string, unknown> & {
+   orgId: string
+diff --git a/packages/dataset/src/__type_tests__/dataset.query-typing.typecheck.ts b/packages/dataset/src/__type_tests__/dataset.query-typing.typecheck.ts
+index 57a137f..67173b1 100644
+--- a/packages/dataset/src/__type_tests__/dataset.query-typing.typecheck.ts
++++ b/packages/dataset/src/__type_tests__/dataset.query-typing.typecheck.ts
+@@ -3,7 +3,7 @@ import { domain } from "@ekairos/domain"
+ import { EkairosRuntime } from "@ekairos/domain/runtime"
+ 
+ import { materializeDataset } from "../dataset"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ 
+ type Env = Record<string, unknown> & {
+   orgId: string
+diff --git a/packages/dataset/src/__type_tests__/dataset.runtime.typecheck.ts b/packages/dataset/src/__type_tests__/dataset.runtime.typecheck.ts
+index aeb5b94..722de6b 100644
+--- a/packages/dataset/src/__type_tests__/dataset.runtime.typecheck.ts
++++ b/packages/dataset/src/__type_tests__/dataset.runtime.typecheck.ts
+@@ -6,7 +6,7 @@ import {
+ import { EkairosRuntime } from "@ekairos/domain/runtime"
+ 
+ import { materializeDataset } from "../dataset"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ 
+ type Env = Record<string, unknown> & {
+   orgId: string
+diff --git a/packages/dataset/src/__type_tests__/dataset.structure-output-api.typecheck.ts b/packages/dataset/src/__type_tests__/dataset.structure-output-api.typecheck.ts
+index 850e6a5..8770d4b 100644
+--- a/packages/dataset/src/__type_tests__/dataset.structure-output-api.typecheck.ts
++++ b/packages/dataset/src/__type_tests__/dataset.structure-output-api.typecheck.ts
+@@ -2,7 +2,7 @@ import { domain } from "@ekairos/domain"
+ import { EkairosRuntime } from "@ekairos/domain/runtime"
+ 
+ import { materializeDataset } from "../dataset"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ 
+ type Env = Record<string, unknown> & {
+   orgId: string
+diff --git a/packages/dataset/src/__type_tests__/dataset.structure-source-api.typecheck.ts b/packages/dataset/src/__type_tests__/dataset.structure-source-api.typecheck.ts
+index 79ea0d1..aa2e38a 100644
+--- a/packages/dataset/src/__type_tests__/dataset.structure-source-api.typecheck.ts
++++ b/packages/dataset/src/__type_tests__/dataset.structure-source-api.typecheck.ts
+@@ -2,7 +2,7 @@ import { domain } from "@ekairos/domain"
+ import { EkairosRuntime } from "@ekairos/domain/runtime"
+ 
+ import { materializeDataset } from "../dataset"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ 
+ type Env = Record<string, unknown> & {
+   orgId: string
+diff --git a/packages/dataset/src/actionInput.ts b/packages/dataset/src/actionInput.ts
+index d2df639..a4a5e1f 100644
+--- a/packages/dataset/src/actionInput.ts
++++ b/packages/dataset/src/actionInput.ts
+@@ -1,6 +1,6 @@
+ import type { DomainActionInputResolver } from "@ekairos/domain/internal"
+ 
+-import { datasetDomain } from "./schema.js"
++import { datasetSchemaDomain } from "./schema.js"
+ 
+ const JSON_SCHEMA_ANNOTATIONS = new Set([
+   "$comment",
+@@ -34,7 +34,7 @@ export function createDatasetActionInputResolver(
+ ): DomainActionInputResolver {
+   return async ({ actionId, path, runtime, value }) => {
+     const datasetId = String((value as any)?.datasetId ?? "").trim()
+-    const activeDataset = await (runtime as any).use(datasetDomain)
++    const activeDataset = await (runtime as any).use(datasetSchemaDomain)
+     const result = await activeDataset.db.query({
+       dataset_datasets: {
+         $: {
+diff --git a/packages/dataset/src/builder/context.ts b/packages/dataset/src/builder/context.ts
+index 7b10141..db30c5f 100644
+--- a/packages/dataset/src/builder/context.ts
++++ b/packages/dataset/src/builder/context.ts
+@@ -3,7 +3,7 @@ import {
+   type ContextRuntimeServiceHandle,
+ } from "@ekairos/events"
+ 
+-import { datasetDomain } from "../schema.js"
++import { datasetSchemaDomain } from "../schema.js"
+ import { DatasetService } from "../service.js"
+ import { getDomainDescriptor } from "./rows.js"
+ import type {
+@@ -24,7 +24,7 @@ type DatasetSourceContextResolution = {
+ }
+ 
+ async function getDatasetDb(runtime: AnyDatasetRuntime) {
+-  const scoped = await (runtime as any).use(datasetDomain)
++  const scoped = await (runtime as any).use(datasetSchemaDomain)
+   return scoped.db as any
+ }
+ 
+diff --git a/packages/dataset/src/builder/materialize.ts b/packages/dataset/src/builder/materialize.ts
+index ba5439e..bd12be9 100644
+--- a/packages/dataset/src/builder/materialize.ts
++++ b/packages/dataset/src/builder/materialize.ts
+@@ -9,7 +9,7 @@ import { executeReaction } from "@ekairos/reactor/internal"
+ import { z } from "zod"
+ 
+ import { createDatasetId } from "../id.js"
+-import { datasetDomain } from "../schema.js"
++import { datasetDomain } from "../domain.js"
+ import {
+   datasetGetByIdStep,
+   datasetInferAndUpdateSchemaStep,
+diff --git a/packages/dataset/src/builder/persistence.ts b/packages/dataset/src/builder/persistence.ts
+index 9b4dd62..4eeea89 100644
+--- a/packages/dataset/src/builder/persistence.ts
++++ b/packages/dataset/src/builder/persistence.ts
+@@ -1,5 +1,5 @@
+ import { DatasetService } from "../service.js"
+-import { datasetDomain } from "../schema.js"
++import { datasetSchemaDomain } from "../schema.js"
+ import {
+   annotateNotationEvidence,
+   inferQueryNotation,
+@@ -33,7 +33,7 @@ export function defaultTextSourceName(source: DatasetTextSourceInput): string {
+ export async function getDatasetDb<Runtime extends AnyDatasetRuntime>(
+   runtime: Runtime,
+ ) {
+-  const scoped = await (runtime as any).use(datasetDomain)
++  const scoped = await (runtime as any).use(datasetSchemaDomain)
+   return scoped.db as any
+ }
+ 
+diff --git a/packages/dataset/src/builder/types.ts b/packages/dataset/src/builder/types.ts
+index 29dbad9..04aedf7 100644
+--- a/packages/dataset/src/builder/types.ts
++++ b/packages/dataset/src/builder/types.ts
+@@ -3,7 +3,7 @@ import type { DomainInstantSchema, MaterializedDomainLike } from "@ekairos/domai
+ import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
+ import type { AiReactionEngine, ReactionEngine } from "@ekairos/reactor"
+ 
+-import { datasetDomain } from "../schema.js"
++import { datasetSchemaDomain } from "../schema.js"
+ import type { DatasetNotation } from "../notation.js"
+ 
+ export type DatasetQuerySourceInput<
+@@ -106,7 +106,7 @@ export type DatasetReactionEngine = ReactionEngine<any> | AiReactionEngine
+ export type AnyDatasetRuntime = EkairosRuntime<any, any, any>
+ export type DatasetRuntimeHandle<Runtime extends AnyDatasetRuntime> = RuntimeForDomain<
+   Runtime,
+-  typeof datasetDomain
++  typeof datasetSchemaDomain
+ >
+ export type CompatibleQueryDomain<
+   Runtime extends AnyDatasetRuntime,
+diff --git a/packages/dataset/src/dataset.ts b/packages/dataset/src/dataset.ts
+index 4e64d4e..92ceeb5 100644
+--- a/packages/dataset/src/dataset.ts
++++ b/packages/dataset/src/dataset.ts
+@@ -10,7 +10,7 @@ import type { z } from "zod"
+ import { buildObjectOutputInstructions } from "./builder/instructions.js"
+ import { resolveDatasetSourceContext } from "./builder/context.js"
+ import { createDatasetId } from "./id.js"
+-import { datasetDomain } from "./schema.js"
++import { datasetSchemaDomain } from "./schema.js"
+ import {
+   completeDatasetStep,
+   materializeDerivedDataset,
+@@ -81,7 +81,7 @@ type RuntimeRootDomain<Runtime extends AnyDatasetRuntime> = NonNullable<
+ 
+ type DatasetRuntimeBoundary<Runtime extends AnyDatasetRuntime> =
+   Exclude<
+-    IncludedDomainNamesOf<typeof datasetDomain>,
++    IncludedDomainNamesOf<typeof datasetSchemaDomain>,
+     IncludedDomainNamesOf<RuntimeRootDomain<Runtime>>
+   > extends never
+     ? unknown
+diff --git a/packages/dataset/src/dataset/steps.ts b/packages/dataset/src/dataset/steps.ts
+index a27a253..8de1c73 100644
+--- a/packages/dataset/src/dataset/steps.ts
++++ b/packages/dataset/src/dataset/steps.ts
+@@ -1,5 +1,5 @@
+ import { DatasetService } from "../service.js"
+-import { datasetDomain } from "../schema.js"
++import { datasetSchemaDomain } from "../schema.js"
+ import { inferDatasetSchema } from "../builder/schemaInference.js"
+ import { rowsToJsonl } from "../builder/rows.js"
+ 
+@@ -9,7 +9,7 @@ export async function getDatasetRuntimeDb(runtime: any) {
+   }
+ 
+   if (typeof runtime.use === "function") {
+-    const scoped = await runtime.use(datasetDomain)
++    const scoped = await runtime.use(datasetSchemaDomain)
+     const scopedDb = (scoped as any).db
+     return typeof scopedDb === "function" ? await scopedDb.call(scoped) : scopedDb
+   }
+diff --git a/packages/dataset/src/domain.ts b/packages/dataset/src/domain.ts
+index 3d1439e..9125f49 100644
+--- a/packages/dataset/src/domain.ts
++++ b/packages/dataset/src/domain.ts
+@@ -1,4 +1,13 @@
+-export { datasetDomain } from "./schema.js"
++import {
++  DOMAIN_ACTION_FULL_INPUT_TYPE,
++  DOMAIN_ACTION_OWNER_TYPE,
++  DOMAIN_ACTION_RUNTIME_TYPE,
++} from "@ekairos/domain"
++
++import { datasetActions } from "./actions.js"
++import { datasetSchemaDomain } from "./schema.js"
++
++export const datasetDomain = datasetSchemaDomain.withActions(datasetActions)
+ 
+ 
+ 
+diff --git a/packages/dataset/src/index.ts b/packages/dataset/src/index.ts
+index 07bdd25..713a98e 100644
+--- a/packages/dataset/src/index.ts
++++ b/packages/dataset/src/index.ts
+@@ -2,6 +2,6 @@ export { dataset, DATASET_JSON_SCHEMA_KEY } from "./dataset.js"
+ export type { Dataset, DatasetReference, DatasetType } from "./dataset.js"
+ export { buildReactionDataset } from "./reactionDataset.js"
+ export { datasetActions } from "./actions.js"
+-export { datasetDomain } from "./schema.js"
++export { datasetDomain } from "./domain.js"
+ export { DatasetService } from "./service.js"
+ export * from "./notation.js"
+diff --git a/packages/dataset/src/reactionDataset.ts b/packages/dataset/src/reactionDataset.ts
+index 5ba82e3..08cddc7 100644
+--- a/packages/dataset/src/reactionDataset.ts
++++ b/packages/dataset/src/reactionDataset.ts
+@@ -18,8 +18,21 @@ export async function buildReactionDataset(input: DatasetAdapterProviderInput) {
+   const datasetId = spec.datasetId
+   const runtime = input.runtime as AnyDatasetRuntime & any
+ 
++  if ("open" in spec) {
++    const opened = await finalizeBuildResult(runtime, datasetId, false)
++    assertCompletedDataset(opened.dataset, datasetId)
++    return {
++      datasetId: opened.datasetId,
++      mode: "opened" as const,
++      previewRows: opened.previewRows,
++      count: datasetRowCount(opened.dataset),
++      reader: opened.reader,
++    }
++  }
++
+   try {
+     const opened = await finalizeBuildResult(runtime, datasetId, false)
++    assertCompletedDataset(opened.dataset, datasetId)
+     return {
+       datasetId: opened.datasetId,
+       mode: "opened" as const,
+@@ -105,3 +118,9 @@ function datasetRowCount(value: any): number | undefined {
+   const count = value?.actualGeneratedRowCount ?? value?.calculatedTotalRows
+   return typeof count === "number" ? count : undefined
+ }
++
++function assertCompletedDataset(value: any, datasetId: string) {
++  if (value?.status !== "completed") {
++    throw new Error(`dataset_not_completed:${datasetId}:${String(value?.status ?? "unknown")}`)
++  }
++}
+diff --git a/packages/dataset/src/schema.ts b/packages/dataset/src/schema.ts
+index 7207e63..c786153 100644
+--- a/packages/dataset/src/schema.ts
++++ b/packages/dataset/src/schema.ts
+@@ -1,16 +1,10 @@
+ import { i } from "@instantdb/core"
+ import {
+-  DOMAIN_ACTION_FULL_INPUT_TYPE,
+-  DOMAIN_ACTION_OWNER_TYPE,
+-  DOMAIN_ACTION_RUNTIME_TYPE,
+   defineEvent,
+   domain,
+ } from "@ekairos/domain"
+ import { contextDomain } from "@ekairos/events"
+ import { z } from "zod"
+-import { datasetActions } from "./actions.js"
+-
+-export * from "./actions.js"
+ 
+ const entities = {
+   dataset_datasets: i.entity({
+@@ -75,9 +69,8 @@ const materialized = defineEvent({
+   },
+ })
+ 
+-export const datasetDomain = domain("dataset")
++export const datasetSchemaDomain = domain("dataset")
+   .includes(contextDomain)
+   .withSchema({ entities, links, rooms })
+   .withEvents({ materializationRequested, materialized })
+-  .withActions(datasetActions)
+ 
+diff --git a/packages/dataset/src/service.ts b/packages/dataset/src/service.ts
+index 0b6eb86..522071a 100644
+--- a/packages/dataset/src/service.ts
++++ b/packages/dataset/src/service.ts
+@@ -1,12 +1,12 @@
+ import type { InstantAdminDatabase } from "@instantdb/admin"
+ import { SchemaOf } from "@ekairos/domain";
+-import { datasetDomain } from "./schema.js";
++import { datasetSchemaDomain } from "./schema.js";
+ import { createDatasetId } from "./id.js";
+ 
+ 
+ export type ServiceResult<T = any> = { ok: true; data: T } | { ok: false; error: string }
+ 
+-type DatasetSchemaType = SchemaOf<typeof datasetDomain>;
++type DatasetSchemaType = SchemaOf<typeof datasetSchemaDomain>;
+ 
+ export class DatasetService {
+     private readonly db: InstantAdminDatabase<DatasetSchemaType>;
+@@ -110,22 +110,38 @@ export class DatasetService {
+         try {
+             const resolved = await this.resolveDatasetEntityId(params.datasetId)
+             if (!resolved.ok) return resolved as ServiceResult<{ savedCount: number }>
+-            const mutations: any[] = []
+ 
+-            for (const record of params.records) {
+-                const recordId = createDatasetId()
+-                mutations.push(
+-                    this.db.tx.dataset_records[recordId].update({
+-                        rowContent: record.rowContent,
+-                        order: record.order,
+-                        createdAt: Date.now(),
+-                    }),
+-                    this.db.tx.dataset_datasets[resolved.data].link({ records: [recordId] })
+-                )
++            // Un unico transact con todas las filas supera el limite de
++            // parametros de InstantDB y serializa la escritura. El chunking
++            // con concurrencia acotada es mecanismo del service: los callers
++            // entregan todas las filas en una sola llamada.
++            const CHUNK_SIZE = 150
++            const CONCURRENCY = 8
++            const chunks: Array<Array<{ rowContent: any; order: number }>> = []
++            for (let offset = 0; offset < params.records.length; offset += CHUNK_SIZE) {
++                chunks.push(params.records.slice(offset, offset + CHUNK_SIZE))
++            }
++
++            const transactChunk = async (chunk: Array<{ rowContent: any; order: number }>) => {
++                const mutations: any[] = []
++                for (const record of chunk) {
++                    const recordId = createDatasetId()
++                    mutations.push(
++                        this.db.tx.dataset_records[recordId].update({
++                            rowContent: record.rowContent,
++                            order: record.order,
++                            createdAt: Date.now(),
++                        }),
++                        this.db.tx.dataset_datasets[resolved.data].link({ records: [recordId] })
++                    )
++                }
++                if (mutations.length > 0) {
++                    await this.db.transact(mutations)
++                }
+             }
+ 
+-            if (mutations.length > 0) {
+-                await this.db.transact(mutations)
++            for (let group = 0; group < chunks.length; group += CONCURRENCY) {
++                await Promise.all(chunks.slice(group, group + CONCURRENCY).map(transactChunk))
+             }
+ 
+             return { ok: true, data: { savedCount: params.records.length } }
+diff --git a/packages/dataset/src/tests/_reactionEngine.ts b/packages/dataset/src/tests/_reactionEngine.ts
+index 2d105d7..fb87f0a 100644
+--- a/packages/dataset/src/tests/_reactionEngine.ts
++++ b/packages/dataset/src/tests/_reactionEngine.ts
+@@ -71,10 +71,11 @@ class DeterministicReactionEngine implements ReactionEngine<any> {
+         throw new Error(String(record.error ?? record.message ?? `${actionName} failed`))
+       }
+ 
++      const summary = record?.summary ?? (step.input as any)?.summary
+       completion = {
+         completed: true,
+         action: actionName,
+-        summary: record?.summary ?? (step.input as any)?.summary,
++        ...(summary === undefined ? {} : { summary }),
+         output,
+       }
+     }
+diff --git a/packages/dataset/src/tests/_runtime.ts b/packages/dataset/src/tests/_runtime.ts
+index 81b4f8e..1e04fa6 100644
+--- a/packages/dataset/src/tests/_runtime.ts
++++ b/packages/dataset/src/tests/_runtime.ts
+@@ -2,7 +2,7 @@ import { init } from "@instantdb/admin"
+ import { configureRuntime } from "@ekairos/domain/runtime"
+ import { domain } from "@ekairos/domain"
+ import { contextDomain } from "@ekairos/events"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ import { sandboxDomain } from "@ekairos/sandbox/schema"
+ 
+ export async function configureDatasetTestRuntime() {
+diff --git a/packages/dataset/src/tests/dataset.esolbay-platform.repro.test.ts b/packages/dataset/src/tests/dataset.esolbay-platform.repro.test.ts
+index aa4d797..e7f2ded 100644
+--- a/packages/dataset/src/tests/dataset.esolbay-platform.repro.test.ts
++++ b/packages/dataset/src/tests/dataset.esolbay-platform.repro.test.ts
+@@ -14,7 +14,7 @@ import {
+   readDatasetSandboxTextFileStep,
+   runDatasetSandboxCommandStep,
+ } from "../sandbox/steps"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ import { actionStep, deterministicReactionEngine } from "./_reactionEngine"
+ 
+ const shouldRun = process.env.RUN_ESOLBAY_DATASET_REPRO === "1"
+diff --git a/packages/dataset/src/tests/dataset.materialization-event.test.ts b/packages/dataset/src/tests/dataset.materialization-event.test.ts
+index 9a237ec..f451a88 100644
+--- a/packages/dataset/src/tests/dataset.materialization-event.test.ts
++++ b/packages/dataset/src/tests/dataset.materialization-event.test.ts
+@@ -4,9 +4,16 @@ import { lookup } from "@instantdb/admin"
+ import { describe, expect, it } from "vitest"
+ 
+ import { createDatasetTriggerEvent } from "../builder/materialize.js"
+-import { datasetDomain } from "../schema.js"
++import { datasetDomain } from "../domain.js"
++import { datasetSchemaDomain } from "../schema-entry.js"
+ 
+ describe("dataset materialization event", () => {
++  it("keeps the schema entrypoint free of server actions", () => {
++    expect(Object.keys((datasetSchemaDomain as any).actions ?? {})).toEqual([])
++    expect(Object.keys(datasetDomain.actions)).toContain("completeDataset")
++    expect(datasetSchemaDomain.instantSchema().entities).toHaveProperty("dataset_datasets")
++  })
++
+   it("declares reflective dataset and file links", () => {
+     const event = datasetDomain.events.materializationRequested
+ 
+diff --git a/packages/dataset/src/tests/dataset.semantic-pipeline.codex.instant.test.ts b/packages/dataset/src/tests/dataset.semantic-pipeline.codex.instant.test.ts
+index 64805c8..748709a 100644
+--- a/packages/dataset/src/tests/dataset.semantic-pipeline.codex.instant.test.ts
++++ b/packages/dataset/src/tests/dataset.semantic-pipeline.codex.instant.test.ts
+@@ -9,7 +9,6 @@ import { configureRuntime } from "@ekairos/domain/runtime"
+ import { Events, contextDomain } from "@ekairos/events"
+ import { defineReaction } from "@ekairos/reactor"
+ import { SandboxService } from "@ekairos/sandbox/service"
+-import { sandboxDomain } from "@ekairos/sandbox/schema"
+ import { codexEngine } from "@ekairos/openai-reactor"
+ import { createTestApp } from "../../../ekairos-test/src/provision.ts"
+ import { z } from "zod"
+@@ -18,8 +17,9 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs"
+ import { homedir } from "node:os"
+ import { join, resolve } from "node:path"
+ import { DatasetService } from "../service"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ import { Context } from "../../../context/src/index.ts"
++import { sandboxDomain } from "../../../sandbox/src/actions.ts"
+ 
+ dotenvConfig({ path: "C:/ek/.env.local", quiet: true })
+ 
+@@ -72,8 +72,10 @@ const appDomain = domain("dataset-semantic-pipeline")
+   .includes(salesDomain)
+   .schema({ entities: {}, links: {}, rooms: {} })
+   .withEvents({ pipelineRequested, pipelineCompleted })
+-  .withActions(sandboxDomain.actions)
+-  .withActions(datasetDomain.actions)
++  .withActions({
++    ...sandboxDomain.actions,
++    ...datasetDomain.actions,
++  })
+ 
+ type TestEnv = {
+   orgId: string
+diff --git a/packages/dataset/src/tests/dataset.skill.codex.instant.test.ts b/packages/dataset/src/tests/dataset.skill.codex.instant.test.ts
+index 05d5897..37ec961 100644
+--- a/packages/dataset/src/tests/dataset.skill.codex.instant.test.ts
++++ b/packages/dataset/src/tests/dataset.skill.codex.instant.test.ts
+@@ -15,7 +15,7 @@ import { Events, contextDomain } from "@ekairos/events"
+ import { defineReaction } from "@ekairos/reactor"
+ import { defineEvent, domain } from "@ekairos/domain"
+ import { z } from "zod"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ import { DatasetService } from "../service"
+ import { buildDatasetSkillPackage } from "../skill"
+ import { createRealCodexCommandEngine, setupRealCodexRunner, type RealCodexRunner } from "./codex.real"
+diff --git a/packages/dataset/src/tests/instant.schema.ts b/packages/dataset/src/tests/instant.schema.ts
+index f89ba49..2595b9b 100644
+--- a/packages/dataset/src/tests/instant.schema.ts
++++ b/packages/dataset/src/tests/instant.schema.ts
+@@ -19,7 +19,7 @@
+ import { domain } from "@ekairos/domain"
+ import { sandboxDomain } from "@ekairos/sandbox/schema"
+ import { contextDomain } from "@ekairos/events"
+-import { datasetDomain } from "../schema"
++import { datasetDomain } from "../domain"
+ 
+ // Compose what tests need:
+ // - dataset + sandbox (for FileParseContext + sandbox steps)
+diff --git a/packages/dataset/src/tests/reaction.dataset.instant.test.ts b/packages/dataset/src/tests/reaction.dataset.instant.test.ts
+index 9909078..1863821 100644
+--- a/packages/dataset/src/tests/reaction.dataset.instant.test.ts
++++ b/packages/dataset/src/tests/reaction.dataset.instant.test.ts
+@@ -7,11 +7,11 @@ import { i } from "@instantdb/core"
+ import { defineEvent, domain, EkairosRuntime } from "@ekairos/domain"
+ import { Events, contextDomain } from "@ekairos/events"
+ import { defineReaction } from "@ekairos/reactor"
+-import { sandboxDomain } from "@ekairos/sandbox/schema"
+-import { afterAll, beforeAll, expect } from "vitest"
++import { afterAll, beforeAll, expect, it } from "vitest"
+ import { z } from "zod"
+ 
+ import { Context } from "../../../context/src/index.ts"
++import { sandboxDomain } from "../../../sandbox/src/actions.ts"
+ import {
+   describeInstant,
+   destroyContextTestApp,
+@@ -19,9 +19,18 @@ import {
+   provisionContextTestApp,
+ } from "../../../events/src/tests/_env.ts"
+ import { buildReactionDataset } from "../reactionDataset.js"
+-import { datasetDomain } from "../schema.js"
++import { datasetDomain } from "../domain.js"
++import { DatasetService } from "../service.js"
+ import { actionStep, deterministicReactionEngine } from "./_reactionEngine.js"
+ 
++const liveSandboxExternalId = String(
++  process.env.DATASET_TEST_LIVE_SANDBOX_ID ?? "",
++).trim()
++const liveSandboxProvider = String(
++  process.env.DATASET_TEST_LIVE_SANDBOX_PROVIDER ?? "sprites",
++).trim()
++const itLiveSandbox = liveSandboxExternalId ? itInstant : it.skip
++
+ const inboxDomain = domain("datasetInbox")
+   .includes(contextDomain)
+   .withSchema({
+@@ -50,8 +59,10 @@ const appDomain = domain("dataset-reaction-test")
+   .includes(sandboxDomain)
+   .includes(datasetDomain)
+   .withSchema({ entities: {}, links: {}, rooms: {} })
+-  .withActions(sandboxDomain.actions)
+-  .withActions(datasetDomain.actions)
++  .withActions({
++    ...sandboxDomain.actions,
++    ...datasetDomain.actions,
++  })
+ 
+ type TestEnv = { appId: string; adminToken: string }
+ 
+@@ -71,9 +82,7 @@ class DatasetReactionRuntime extends EkairosRuntime<
+     } as any)
+   }
+ 
+-  async materializeDataset(input: Parameters<typeof buildReactionDataset>[0]) {
+-    return await buildReactionDataset(input)
+-  }
++  readonly materializeDataset = buildReactionDataset
+ }
+ 
+ describeInstant("Reaction Dataset operation", () => {
+@@ -99,15 +108,15 @@ describeInstant("Reaction Dataset operation", () => {
+     await destroyContextTestApp(appId)
+   }, 60_000)
+ 
+-  itInstant("materializes a causal Event in a linked child Session", async () => {
++  itLiveSandbox("materializes a causal Event in a linked child Session", async () => {
+     const runtime = new DatasetReactionRuntime({ appId, adminToken })
+     const sandboxId = randomUUID()
+     const messageId = randomUUID()
+     await db.transact([
+       db.tx.dataset_inbox_messages[messageId].update({ subject: "Quote CSV" }),
+       db.tx.sandbox_sandboxes[sandboxId].update({
+-        provider: "sprites",
+-        externalSandboxId: sandboxId,
++        provider: liveSandboxProvider,
++        externalSandboxId: liveSandboxExternalId,
+         status: "active",
+         createdAt: Date.now(),
+       }),
+@@ -264,4 +273,108 @@ describeInstant("Reaction Dataset operation", () => {
+       "dataset.completeDataset",
+     ]))
+   }, 120_000)
++
++  itInstant("lets Agent materialize a scoped InstaQL Dataset", async () => {
++    const runtime = new DatasetReactionRuntime({ appId, adminToken })
++    const messages = [
++      { id: randomUUID(), subject: "Cohort alpha" },
++      { id: randomUUID(), subject: "Cohort beta" },
++      { id: randomUUID(), subject: "Cohort gamma" },
++    ]
++    await db.transact(messages.map(message =>
++      db.tx.dataset_inbox_messages[message.id].update({ subject: message.subject })))
++
++    const context = await Context(runtime).create({
++      key: `dataset-agent-query:${randomUUID()}`,
++      content: { purpose: "cohort-query" },
++    })
++    const trigger = await Events(runtime).emit(
++      inboxDomain.events.received({ subject: "Group all inbox messages" }).link({
++        message: messages[0]!.id,
++      }),
++      { id: randomUUID(), channel: "web", contextId: context.id },
++    )
++    const engine = deterministicReactionEngine({
++      steps: [
++        actionStep("dataset.materialize", {
++          title: "Inbox cohort",
++          explanation: "Read the complete scoped inbox collection once.",
++          query: {
++            dataset_inbox_messages: {
++              $: { fields: ["subject"] },
++            },
++          },
++        }),
++      ],
++    })
++    const definition = defineReaction(
++      inboxDomain.events.received,
++      {
++        key: "dataset-inbox.agent-query",
++        scope: inboxDomain,
++        engine,
++        sandbox: false,
++      },
++      async reaction => {
++        const analysis = await reaction.given(reaction.trigger).agent({
++          instruction: "Materialize the full collection before answering.",
++          output: z.object({
++            completed: z.literal(true),
++            action: z.literal("dataset.materialize"),
++            output: z.object({
++              datasetId: z.string(),
++              mode: z.enum(["opened", "built"]),
++              preview: z.array(z.unknown()),
++              count: z.number().optional(),
++            }),
++          }),
++        })
++        return await reaction.given(analysis).emit(
++          inboxDomain.events.answered({
++            datasetId: analysis.payload.output.datasetId,
++            itemCount: analysis.payload.output.count ?? analysis.payload.output.preview.length,
++          }).link({ message: messages[0]!.id }),
++        )
++      },
++    )
++
++    const answer = await context.react(trigger, definition)
++    expect(answer.payload.itemCount).toBeGreaterThanOrEqual(messages.length)
++
++    const stored = await db.query({
++      dataset_datasets: {
++        $: { where: { datasetId: answer.payload.datasetId } },
++        dataFile: {},
++      },
++      context_sessions: {
++        $: { where: { context: context.id } },
++        reactions: {
++          effects: {
++            eventParts: { $: { order: { index: "asc" } } },
++          },
++        },
++      },
++    } as any)
++    const dataset = (stored as any).dataset_datasets[0]
++    expect(dataset.status).toBe("completed")
++    expect(dataset.actualGeneratedRowCount).toBe(answer.payload.itemCount)
++    expect(dataset.dataFile).toMatchObject({ id: expect.any(String) })
++
++    const read = await new DatasetService(db as any).readRows({
++      datasetId: answer.payload.datasetId,
++      limit: 100,
++    })
++    if (!read.ok) throw new Error(read.error)
++    expect(read.data.rows.map((row: any) => row.subject)).toEqual(
++      expect.arrayContaining(messages.map(message => message.subject)),
++    )
++
++    const session = (stored as any).context_sessions[0]
++    const agent = session.reactions.find((reaction: any) => reaction.type === "agent")
++    const actionParts = agent.effects[0].eventParts
++      .map((part: any) => part.content)
++      .filter((part: any) => part.actionName === "dataset.materialize")
++    expect(actionParts.map((part: any) => part.status)).toEqual(["started", "completed"])
++    expect(actionParts[1].output.datasetId).toBe(answer.payload.datasetId)
++  }, 120_000)
+ })
+diff --git a/packages/dataset/src/tests/reactionDataset.adapter.test.ts b/packages/dataset/src/tests/reactionDataset.adapter.test.ts
+index 67ff863..f29c6c7 100644
+--- a/packages/dataset/src/tests/reactionDataset.adapter.test.ts
++++ b/packages/dataset/src/tests/reactionDataset.adapter.test.ts
+@@ -6,7 +6,7 @@ const mock = vi.hoisted(() => {
+   }
+   const openedResult = {
+     datasetId: "opened_dataset",
+-    dataset: { actualGeneratedRowCount: 2 },
++    dataset: { status: "completed", actualGeneratedRowCount: 2 },
+     notation: null,
+     previewRows: [{ id: "opened_row" }],
+     reader,
+@@ -100,6 +100,46 @@ describe("Reaction Dataset adapter", () => {
+     expect(mock.materializeDataset).not.toHaveBeenCalled()
+   })
+ 
++  it("opens an existing Dataset explicitly for row reads", async () => {
++    mock.finalizeBuildResult.mockResolvedValueOnce(mock.openedResult)
++
++    const result = await buildReactionDataset(createInput({
++      datasetId: "items_dataset",
++      open: true,
++    }) as any)
++
++    expect(result.mode).toBe("opened")
++    expect(result.reader).toBe(mock.reader)
++    expect(mock.materializeDataset).not.toHaveBeenCalled()
++  })
++
++  it("deduplicates the same deterministic source and schema on retry", async () => {
++    const spec = {
++      datasetId: "stable_items_dataset",
++      ensure: {
++        source: { rows: [{ sku: "A-1" }] },
++        schema: {
++          schema: {
++            type: "object",
++            properties: { sku: { type: "string" } },
++            required: ["sku"],
++          },
++        },
++      },
++    }
++    mock.finalizeBuildResult
++      .mockRejectedValueOnce(new Error("not found"))
++      .mockResolvedValueOnce(mock.openedResult)
++
++    const first = await buildReactionDataset(createInput(spec) as any)
++    const second = await buildReactionDataset(createInput(spec) as any)
++
++    expect(first.mode).toBe("built")
++    expect(second.mode).toBe("opened")
++    expect(mock.materializeDataset).toHaveBeenCalledTimes(1)
++    expect(mock.builder.build).toHaveBeenCalledTimes(1)
++  })
++
+   it("maps file sources and keeps the parent Session boundary", async () => {
+     mock.finalizeBuildResult.mockRejectedValueOnce(new Error("not found"))
+ 
+diff --git a/packages/dataset/src/tests/workflow/dataset.azure-workflow-repro.ts b/packages/dataset/src/tests/workflow/dataset.azure-workflow-repro.ts
+index eee4c68..4c4dbdd 100644
+--- a/packages/dataset/src/tests/workflow/dataset.azure-workflow-repro.ts
++++ b/packages/dataset/src/tests/workflow/dataset.azure-workflow-repro.ts
+@@ -7,7 +7,7 @@ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
+ import { sandboxDomain } from "../../../../sandbox/src/schema.ts"
+ 
+ import { materializeDataset } from "../../dataset.js"
+-import { datasetDomain } from "../../schema.js"
++import { datasetDomain } from "../../domain.js"
+ 
+ type InstantAdminInit = typeof import("@instantdb/admin")["init"]
+ 
+diff --git a/packages/dataset/src/tests/workflow/dataset.esolbay-award.workflow-repro.ts b/packages/dataset/src/tests/workflow/dataset.esolbay-award.workflow-repro.ts
+index 42f3dbc..7f5ec9d 100644
+--- a/packages/dataset/src/tests/workflow/dataset.esolbay-award.workflow-repro.ts
++++ b/packages/dataset/src/tests/workflow/dataset.esolbay-award.workflow-repro.ts
+@@ -7,7 +7,7 @@ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
+ import { sandboxDomain } from "../../../../sandbox/src/schema.ts"
+ 
+ import { materializeDataset } from "../../dataset.js"
+-import { datasetDomain } from "../../schema.js"
++import { datasetDomain } from "../../domain.js"
+ 
+ type InstantAdminInit = typeof import("@instantdb/admin")["init"]
+ 
+diff --git a/packages/dataset/src/tests/workflow/dataset.workflow-fixtures.ts b/packages/dataset/src/tests/workflow/dataset.workflow-fixtures.ts
+index 8c21a42..1d833e4 100644
+--- a/packages/dataset/src/tests/workflow/dataset.workflow-fixtures.ts
++++ b/packages/dataset/src/tests/workflow/dataset.workflow-fixtures.ts
+@@ -6,7 +6,7 @@ import { getStepMetadata, getWorkflowMetadata } from "workflow"
+ 
+ import { materializeDataset } from "../../dataset.ts"
+ import { getDatasetOutputPath, getDatasetSourcesDir } from "../../datasetFiles.ts"
+-import { datasetDomain } from "../../schema.ts"
++import { datasetDomain } from "../../domain.ts"
+ import { actionStep, deterministicReactionEngine } from "../_reactionEngine.ts"
+ 
+ const queryDomain = domain("dataset-workflow-query").schema({
+diff --git a/packages/dataset/src/tests/workflow/reaction.dataset.workflow-fixtures.ts b/packages/dataset/src/tests/workflow/reaction.dataset.workflow-fixtures.ts
+index a309ac6..ad65229 100644
+--- a/packages/dataset/src/tests/workflow/reaction.dataset.workflow-fixtures.ts
++++ b/packages/dataset/src/tests/workflow/reaction.dataset.workflow-fixtures.ts
+@@ -10,12 +10,12 @@ import {
+   defineReaction,
+ } from "@ekairos/reactor"
+ import { executeReaction } from "@ekairos/reactor/internal"
+-import { sandboxDomain } from "@ekairos/sandbox/schema"
+ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
+ import { z } from "zod"
+ 
+ import { buildReactionDataset } from "../../reactionDataset.ts"
+-import { datasetDomain } from "../../schema.ts"
++import { datasetDomain } from "../../domain.ts"
++import { sandboxDomain } from "../../../../sandbox/src/actions.ts"
+ import { actionStep, deterministicReactionEngine } from "../_reactionEngine.ts"
+ 
+ const sourceItemSchema = z.object({
+@@ -38,8 +38,10 @@ export const reactionDatasetWorkflowDomain = domain("reactionDatasetWorkflow")
+     received: defineEvent({ payload: z.array(sourceItemSchema) }),
+     materialized: defineEvent({ payload: materializedSchema }),
+   })
+-  .withActions(datasetDomain.actions)
+-  .withActions(sandboxDomain.actions)
++  .withActions({
++    ...datasetDomain.actions,
++    ...sandboxDomain.actions,
++  })
+ 
+ export type ReactionDatasetWorkflowEnv = {
+   appId: string
+diff --git a/packages/reactor/src/agent-dataset-runtime.ts b/packages/reactor/src/agent-dataset-runtime.ts
+index dd3961c..2c3b5e9 100644
+--- a/packages/reactor/src/agent-dataset-runtime.ts
++++ b/packages/reactor/src/agent-dataset-runtime.ts
+@@ -2,6 +2,7 @@ import type { ContextEvent } from "@ekairos/events"
+ import { z } from "zod"
+ 
+ import {
++  AGENT_DATASET_ACTION,
+   describeAgentDatasetDomain,
+   validateAgentDatasetQuery,
+   type AgentDatasetCapability,
+@@ -12,7 +13,7 @@ import type {
+   DatasetAdapterSource,
+ } from "./dataset-adapter.js"
+ 
+-export const AGENT_DATASET_ACTION = "dataset.materialize"
++export { AGENT_DATASET_ACTION }
+ export const AGENT_DATASET_READ_ACTION = "dataset.read"
+ 
+ export type AgentDatasetAvailable = Readonly<{
+diff --git a/packages/reactor/src/index.ts b/packages/reactor/src/index.ts
+index 36674fc..fb14b5d 100644
+--- a/packages/reactor/src/index.ts
++++ b/packages/reactor/src/index.ts
+@@ -6,6 +6,7 @@ export {
+   ai,
+   isAiEngine,
+ } from "./reactor.js"
++export { toModelActionName } from "./action-name.js"
+ export type {
+   GivenOperations,
+   ReactionAgentInput,
+diff --git a/packages/reactor/src/tests/public-surface.test.ts b/packages/reactor/src/tests/public-surface.test.ts
+index e8d315b..6228059 100644
+--- a/packages/reactor/src/tests/public-surface.test.ts
++++ b/packages/reactor/src/tests/public-surface.test.ts
+@@ -10,6 +10,7 @@ describe("@ekairos/reactor public surface", () => {
+       "ai",
+       "defineReaction",
+       "isAiEngine",
++      "toModelActionName",
+     ])
+   })
+ 
+diff --git a/packages/reactors/openai-reactor/README.md b/packages/reactors/openai-reactor/README.md
+index 0441a8d..9e66395 100644
+--- a/packages/reactors/openai-reactor/README.md
++++ b/packages/reactors/openai-reactor/README.md
+@@ -15,13 +15,23 @@ Codex engine for the `@ekairos/reactor` Reaction API.
+ import { codexEngine } from "@ekairos/openai-reactor"
+ 
+ const engine = codexEngine({
+-  model: "gpt-5.5",
+-  auth: { source: "preinstalled" },
++  model: "gpt-5.6",
+ })
+ ```
+ 
+-`CodexEngine` requires a Reaction sandbox. Agent actions are exposed to Codex
+-as dynamic tools under their canonical names and execute through the wrappers
++Without a Reaction sandbox, the engine starts `codex app-server` directly on
++the local machine and reuses that process across turns. It uses the current
++user's `CODEX_HOME` (or `~/.codex`) and the configured `repoPath` (or the
++current working directory).
++
++On Windows, local discovery prefers the current versioned Codex Desktop binary
++under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe`; if it is absent,
++the engine resolves `codex.exe` from `PATH`. `codexPath` can select an explicit
++binary.
++
++When the Reaction supplies a sandbox, the existing sandbox bridge is used and
++prepared once per engine/session. Agent actions are exposed in both modes as
++dynamic tools under their canonical names and execute through the wrappers
+ provided by the Reaction runtime.
+ 
+ ## Tests
+@@ -29,4 +39,5 @@ provided by the Reaction runtime.
+ ```bash
+ pnpm --filter @ekairos/openai-reactor typecheck
+ pnpm --filter @ekairos/openai-reactor test
++CODEX_LOCAL_LIVE=1 pnpm --filter @ekairos/openai-reactor test
+ ```
+diff --git a/packages/reactors/openai-reactor/src/codex.engine.ts b/packages/reactors/openai-reactor/src/codex.engine.ts
+index 6713fe2..29d7f9f 100644
+--- a/packages/reactors/openai-reactor/src/codex.engine.ts
++++ b/packages/reactors/openai-reactor/src/codex.engine.ts
+@@ -21,6 +21,10 @@ import {
+   resolveCodexCanonicalActionName,
+   type CodexTurnResult,
+ } from "./codex.runtime.js"
++import {
++  prepareLocalCodex,
++  type LocalCodexPrepared,
++} from "./codex.local.js"
+ 
+ export type CodexEngineAuthConfig =
+   | ({
+@@ -35,6 +39,7 @@ export type CodexEngineConfig = {
+   model?: string
+   repoPath?: string
+   codexHome?: string
++  codexPath?: string
+   bridgePort?: number
+   installCodexCli?: boolean
+   auth?: CodexEngineAuthConfig
+@@ -222,6 +227,10 @@ function parseStructuredOutput(text: string) {
+ export class CodexEngine<TContext = unknown>
+   implements ReactionEngine<TContext> {
+   readonly config: Readonly<CodexEngineConfig>
++  private readonly sandboxPreparations = new WeakMap<
++    SandboxSession,
++    Promise<CodexEnginePrepared>
++  >()
+ 
+   constructor(config: CodexEngineConfig = {}) {
+     this.config = Object.freeze({ ...config })
+@@ -238,8 +247,45 @@ export class CodexEngine<TContext = unknown>
+   async agent<TOutput, TActions extends ReactionEngineActions>(
+     input: ReactionEngineInput<TContext, TOutput, TActions>,
+   ) {
+-    const sandbox = requireSandbox(input.sandbox)
+-    const prepared = await prepareCodexInSandbox(sandbox, this.config)
++    if (!input.sandbox) return await this.runLocalAgent(input)
++    return await this.runSandboxAgent(input, requireSandbox(input.sandbox))
++  }
++
++  private async runLocalAgent<
++    TOutput,
++    TActions extends ReactionEngineActions,
++  >(
++    input: ReactionEngineInput<TContext, TOutput, TActions>,
++  ) {
++    const prepared: LocalCodexPrepared = await prepareLocalCodex({
++      codexPath: this.config.codexPath,
++      codexHome:
++        this.config.auth?.source === "preinstalled"
++          ? this.config.auth.codexHome ?? this.config.codexHome
++          : this.config.codexHome,
++      repoPath: this.config.repoPath ?? input.workspaceRoot,
++    })
++    const instruction = buildCodexInstruction(input)
++    const dynamicTools = buildCodexDynamicTools(input.actions)
++    return await runCodexAgent(input, async (state, actionResponse) =>
++      await prepared.server.runTurn({
++        instruction,
++        dynamicTools,
++        repoPath: prepared.repoPath,
++        model: this.config.model,
++        state,
++        actionResponse,
++      }))
++  }
++
++  private async runSandboxAgent<
++    TOutput,
++    TActions extends ReactionEngineActions,
++  >(
++    input: ReactionEngineInput<TContext, TOutput, TActions>,
++    sandbox: SandboxSession,
++  ) {
++    const prepared = await this.prepareSandbox(sandbox)
+     const instructionPath = joinSandboxPath(
+       prepared.workRoot,
+       `instruction-${input.sessionId}-${input.reactionId}.txt`,
+@@ -260,12 +306,25 @@ export class CodexEngine<TContext = unknown>
+       },
+     ])
+ 
+-    const maxActionCalls = Math.max(1, input.maxRounds ?? 32)
+-    const parts: ContextPartEnvelope[] = []
+-    let statePath = ""
+-    let responsePath = ""
+-    let turn: CodexTurnResult | undefined
+-    for (let actionCall = 0; actionCall <= maxActionCalls; actionCall += 1) {
++    return await runCodexAgent(input, async (state, actionResponse, actionCall) => {
++      const statePath = state
++        ? joinSandboxPath(
++            prepared.workRoot,
++            `state-${input.sessionId}-${input.reactionId}-${actionCall}.json`,
++          )
++        : ""
++      const responsePath = actionResponse
++        ? joinSandboxPath(
++            prepared.workRoot,
++            `action-${input.sessionId}-${input.reactionId}-${actionCall}.json`,
++          )
++        : ""
++      if (state && actionResponse) {
++        await sandbox.writeFiles([
++          { path: statePath, content: JSON.stringify(state) },
++          { path: responsePath, content: JSON.stringify(actionResponse) },
++        ])
++      }
+       const environment = [
+         `HOME=${shQuote(sandbox.workspaceRoot)}`,
+         `CODEX_HOME=${shQuote(prepared.codexHome)}`,
+@@ -285,88 +344,114 @@ export class CodexEngine<TContext = unknown>
+         ].join("\n"),
+         "codex_engine_turn",
+       )
+-      turn = parseCodexResult(result.output ?? "")
+-      if (turn.status === "completed") break
+-      if (!turn.action) throw new Error("codex_engine_action_request_missing")
+-      if (actionCall === maxActionCalls) {
+-        throw new Error(`codex_engine_max_action_calls:${maxActionCalls}`)
+-      }
++      return parseCodexResult(result.output ?? "")
++    })
++  }
++
++  private async prepareSandbox(sandbox: SandboxSession) {
++    const existing = this.sandboxPreparations.get(sandbox)
++    if (existing) return await existing
+ 
+-      turn = {
+-        ...turn,
+-        action: {
+-          ...turn.action,
+-          name: resolveCodexCanonicalActionName(input.actions, turn.action.name),
+-        },
++    const preparation = prepareCodexInSandbox(sandbox, this.config).catch(error => {
++      if (this.sandboxPreparations.get(sandbox) === preparation) {
++        this.sandboxPreparations.delete(sandbox)
+       }
+-      if (!turn.action) throw new Error("codex_engine_action_request_missing")
+-
+-      parts.push({
+-        type: "action",
+-        content: {
+-          status: "started",
+-          actionName: turn.action.name,
+-          actionCallId: turn.action.callId,
+-          input: turn.action.input,
+-        },
+-      })
+-      const actionResult = await executeCodexAction(input.actions, turn.action, {
+-        runtime: input.runtime,
+-        context: input.context,
+-        trigger: input.trigger,
+-        sessionId: input.sessionId,
+-        reactionId: input.reactionId,
+-        reactionKey: input.reactionKey,
+-        actionCallId: turn.action.callId,
+-      })
+-      parts.push({
+-        type: "action",
+-        content: actionResult.success
+-          ? {
+-              status: "completed",
+-              actionName: turn.action.name,
+-              actionCallId: turn.action.callId,
+-              output: actionResult.output,
+-            }
+-          : {
+-              status: "failed",
+-              actionName: turn.action.name,
+-              actionCallId: turn.action.callId,
+-              error: { message: actionResult.errorText ?? "unknown_error" },
+-            },
+-      })
+-      statePath = joinSandboxPath(
+-        prepared.workRoot,
+-        `state-${input.sessionId}-${input.reactionId}-${actionCall}.json`,
+-      )
+-      responsePath = joinSandboxPath(
+-        prepared.workRoot,
+-        `action-${input.sessionId}-${input.reactionId}-${actionCall}.json`,
+-      )
+-      await sandbox.writeFiles([
+-        { path: statePath, content: JSON.stringify(turn) },
+-        {
+-          path: responsePath,
+-          content: JSON.stringify(codexActionResponse(turn.action, actionResult)),
+-        },
+-      ])
++      throw error
++    })
++    this.sandboxPreparations.set(sandbox, preparation)
++    return await preparation
++  }
++}
++
++type NextCodexTurn = (
++  state: CodexTurnResult | undefined,
++  actionResponse: Record<string, unknown> | undefined,
++  actionCall: number,
++) => Promise<CodexTurnResult>
++
++async function runCodexAgent<
++  TContext,
++  TOutput,
++  TActions extends ReactionEngineActions,
++>(
++  input: ReactionEngineInput<TContext, TOutput, TActions>,
++  nextTurn: NextCodexTurn,
++) {
++  const maxActionCalls = Math.max(1, input.maxRounds ?? 32)
++  const parts: ContextPartEnvelope[] = []
++  let state: CodexTurnResult | undefined
++  let actionResponse: Record<string, unknown> | undefined
++  let turn: CodexTurnResult | undefined
++
++  for (let actionCall = 0; actionCall <= maxActionCalls; actionCall += 1) {
++    turn = await nextTurn(state, actionResponse, actionCall)
++    if (turn.status === "completed") break
++    if (!turn.action) throw new Error("codex_engine_action_request_missing")
++    if (actionCall === maxActionCalls) {
++      throw new Error(`codex_engine_max_action_calls:${maxActionCalls}`)
+     }
+-    if (!turn || turn.status !== "completed") {
+-      throw new Error("codex_engine_turn_incomplete")
++
++    turn = {
++      ...turn,
++      action: {
++        ...turn.action,
++        name: resolveCodexCanonicalActionName(input.actions, turn.action.name),
++      },
+     }
+-    return {
+-      output: input.output
+-        ? parseStructuredOutput(turn.assistantText)
+-        : turn.assistantText as TOutput,
+-      parts,
+-      metadata: {
+-        provider: "codex",
+-        providerContextId: turn.providerContextId,
+-        turnId: turn.turnId,
+-        usage: turn.usage,
+-        reasoning: turn.reasoningText,
+-        diff: turn.diff,
++    const action = turn.action!
++    parts.push({
++      type: "action",
++      content: {
++        status: "started",
++        actionName: action.name,
++        actionCallId: action.callId,
++        input: action.input,
+       },
++    })
++    const actionResult = await executeCodexAction(input.actions, action, {
++      runtime: input.runtime,
++      context: input.context,
++      trigger: input.trigger,
++      sessionId: input.sessionId,
++      reactionId: input.reactionId,
++      reactionKey: input.reactionKey,
++      actionCallId: action.callId,
++    })
++    parts.push({
++      type: "action",
++      content: actionResult.success
++        ? {
++            status: "completed",
++            actionName: action.name,
++            actionCallId: action.callId,
++            output: actionResult.output,
++          }
++        : {
++            status: "failed",
++            actionName: action.name,
++            actionCallId: action.callId,
++            error: { message: actionResult.errorText ?? "unknown_error" },
++          },
++    })
++    state = turn
++    actionResponse = codexActionResponse(action, actionResult)
++  }
++
++  if (!turn || turn.status !== "completed") {
++    throw new Error("codex_engine_turn_incomplete")
++  }
++  return {
++    output: input.output
++      ? parseStructuredOutput(turn.assistantText)
++      : turn.assistantText as TOutput,
++    parts,
++    metadata: {
++      provider: "codex",
++      providerContextId: turn.providerContextId,
++      turnId: turn.turnId,
++      usage: turn.usage,
++      reasoning: turn.reasoningText,
++      diff: turn.diff,
+     }
+   }
+ }
+diff --git a/packages/reactors/openai-reactor/src/codex.runtime.ts b/packages/reactors/openai-reactor/src/codex.runtime.ts
+index 59c1ff1..d37e5f0 100644
+--- a/packages/reactors/openai-reactor/src/codex.runtime.ts
++++ b/packages/reactors/openai-reactor/src/codex.runtime.ts
+@@ -1,4 +1,8 @@
+-import type { ReactionEngineActions, ReactionEngineInput } from "@ekairos/reactor"
++import {
++  toModelActionName,
++  type ReactionEngineActions,
++  type ReactionEngineInput,
++} from "@ekairos/reactor"
+ import { z } from "zod"
+ 
+ type JsonRecord = Record<string, unknown>
+@@ -103,49 +107,20 @@ function actionInputSchema(action: ReactionEngineActions[string]): unknown {
+   return z.toJSONSchema(action.input, { target: "draft-7" })
+ }
+ 
+-// La Responses API exige nombres de tool ^[a-zA-Z0-9_-]+$ (sin puntos).
+-// Espejo del toModelActionName de @ekairos/reactor (hoy no exportado);
+-// consolidar en un unico modulo cuando el reactor lo exponga.
+-const CODEX_TOOL_NAME = /^[a-zA-Z0-9_-]+$/
+-const CODEX_TOOL_NAME_MAX_LENGTH = 64
+-
+-export function toCodexToolName(canonicalName: string): string {
+-  if (
+-    canonicalName.length <= CODEX_TOOL_NAME_MAX_LENGTH &&
+-    CODEX_TOOL_NAME.test(canonicalName)
+-  ) {
+-    return canonicalName
+-  }
+-  const suffix = `_${stableToolNameHash(canonicalName)}`
+-  const base = canonicalName
+-    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+-    .replace(/^_+|_+$/g, "") || "action"
+-  return `${base.slice(0, CODEX_TOOL_NAME_MAX_LENGTH - suffix.length)}${suffix}`
+-}
+-
+-function stableToolNameHash(value: string): string {
+-  let hash = 0xcbf29ce484222325n
+-  for (let index = 0; index < value.length; index += 1) {
+-    hash ^= BigInt(value.charCodeAt(index))
+-    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+-  }
+-  return hash.toString(36)
+-}
+-
+ export function resolveCodexCanonicalActionName(
+   actions: ReactionEngineActions,
+   wireName: string,
+ ): string {
+   if (actions[wireName]) return wireName
+   for (const canonical of Object.keys(actions)) {
+-    if (toCodexToolName(canonical) === wireName) return canonical
++    if (toModelActionName(canonical) === wireName) return canonical
+   }
+   return wireName
+ }
+ 
+ export function buildCodexDynamicTools(actions: ReactionEngineActions): CodexDynamicTool[] {
+   return Object.entries(actions).map(([name, action]) => {
+-    const wireName = toCodexToolName(name)
++    const wireName = toModelActionName(name)
+     return {
+       name: wireName,
+       description: [
+diff --git a/packages/reactors/openai-reactor/src/tests/codex.engine.test.ts b/packages/reactors/openai-reactor/src/tests/codex.engine.test.ts
+index 77e1224..bdc1598 100644
+--- a/packages/reactors/openai-reactor/src/tests/codex.engine.test.ts
++++ b/packages/reactors/openai-reactor/src/tests/codex.engine.test.ts
+@@ -1,11 +1,13 @@
+-import type { ReactionEngineInput } from "@ekairos/reactor"
++import {
++  toModelActionName,
++  type ReactionEngineInput,
++} from "@ekairos/reactor"
+ import type { SandboxExecInput, SandboxFileInput, SandboxSession } from "@ekairos/sandbox"
+ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
+ import { describe, expect, it } from "vitest"
+ import { z } from "zod"
+ 
+ import { CodexEngine, codexEngine } from "../codex.engine"
+-import { toCodexToolName } from "../codex.runtime"
+ import * as publicApi from "../index"
+ 
+ function fileText(file: SandboxFileInput): string {
+@@ -161,7 +163,7 @@ describe("codexEngine", () => {
+           requestId: "rpc-action-1",
+           callId: "call-1",
+           // el modelo llama por el nombre wire (la Responses API no admite puntos)
+-          name: toCodexToolName("supplier.lookup"),
++          name: toModelActionName("supplier.lookup"),
+           input: { supplierId: "supplier-7" },
+         },
+       },
+@@ -199,7 +201,7 @@ describe("codexEngine", () => {
+     const toolsFile = files.find(file => file.path.includes("tools-"))
+     const publishedTool = JSON.parse(fileText(toolsFile!))[0]
+     expect(publishedTool).toMatchObject({
+-      name: toCodexToolName("supplier.lookup"),
++      name: toModelActionName("supplier.lookup"),
+       inputSchema: { type: "object" },
+     })
+     expect(publishedTool.name).toMatch(/^[a-zA-Z0-9_-]+$/)
+@@ -210,7 +212,7 @@ describe("codexEngine", () => {
+       .toHaveLength(2)
+   })
+ 
+-  it("parses structured output and requires a sandbox", async () => {
++  it("parses structured output in sandbox mode", async () => {
+     const { session } = fakeSandbox()
+     const input = agentInput(session)
+     input.output = z.object({ answer: z.string() })
+@@ -220,9 +222,23 @@ describe("codexEngine", () => {
+     }).agent(input)
+     expect(result.output).toEqual({ answer: "ok" })
+     expect(result.metadata).toMatchObject({ provider: "codex", turnId: "turn-1" })
++  })
++
++  it("prepares one sandbox bridge once per engine and session", async () => {
++    const { session, commands } = fakeSandbox()
++    const engine = codexEngine({
++      auth: { source: "preinstalled" },
++      installCodexCli: false,
++    })
++
++    await engine.agent(agentInput(session))
++    await engine.agent(agentInput(session))
+ 
+-    await expect(codexEngine().agent(agentInput())).rejects.toThrow(
+-      "codex_engine_sandbox_required",
+-    )
++    expect(commands.filter(command =>
++      command.args?.join(" ").includes("codex_engine_prepare_ok"),
++    )).toHaveLength(1)
++    expect(commands.filter(command =>
++      command.args?.join(" ").includes("codex_engine_bridge_ok"),
++    )).toHaveLength(1)
+   })
+ })
+diff --git a/packages/dataset/src/schema-entry.ts b/packages/dataset/src/schema-entry.ts
+new file mode 100644
+index 0000000..2c5bdcb
+--- /dev/null
++++ b/packages/dataset/src/schema-entry.ts
+@@ -0,0 +1 @@
++export { datasetSchemaDomain } from "./schema.js"
+diff --git a/packages/reactors/openai-reactor/src/codex.local.ts b/packages/reactors/openai-reactor/src/codex.local.ts
+new file mode 100644
+index 0000000..b815ac9
+--- /dev/null
++++ b/packages/reactors/openai-reactor/src/codex.local.ts
+@@ -0,0 +1,551 @@
++import {
++  spawn,
++  type ChildProcessWithoutNullStreams,
++} from "node:child_process"
++import { randomUUID } from "node:crypto"
++import type { Dirent } from "node:fs"
++import { access, readdir, stat } from "node:fs/promises"
++import { homedir } from "node:os"
++import { delimiter, join } from "node:path"
++import { createInterface } from "node:readline"
++
++import type {
++  CodexActionRequest,
++  CodexDynamicTool,
++  CodexTurnResult,
++} from "./codex.runtime.js"
++
++type JsonRecord = Record<string, unknown>
++
++type PendingRequest = {
++  resolve(value: JsonRecord): void
++  reject(error: Error): void
++  timer: ReturnType<typeof setTimeout>
++}
++
++type CodexAppServerIdentity = Readonly<{
++  executable: string
++  codexHome: string
++}>
++
++export type LocalCodexPrepared = CodexAppServerIdentity & Readonly<{
++  repoPath: string
++  server: LocalCodexAppServer
++}>
++
++export type LocalCodexConfig = Readonly<{
++  codexPath?: string
++  codexHome?: string
++  repoPath?: string
++}>
++
++export type LocalCodexTurnInput = Readonly<{
++  instruction: string
++  dynamicTools: readonly CodexDynamicTool[]
++  repoPath: string
++  model?: string
++  state?: CodexTurnResult
++  actionResponse?: JsonRecord
++}>
++
++let localServerIdentity: CodexAppServerIdentity | undefined
++let localServerPromise: Promise<LocalCodexAppServer> | undefined
++
++export async function prepareLocalCodex(
++  config: LocalCodexConfig,
++): Promise<LocalCodexPrepared> {
++  const executable = await resolveCodexExecutable(config.codexPath)
++  const codexHome = resolveLocalCodexHome(config.codexHome)
++  const identity = Object.freeze({ executable, codexHome })
++  if (localServerPromise && (await localServerPromise).isClosed) {
++    localServerIdentity = undefined
++    localServerPromise = undefined
++  }
++  const identityKey = JSON.stringify(identity)
++  const activeKey = localServerIdentity
++    ? JSON.stringify(localServerIdentity)
++    : undefined
++
++  if (activeKey && activeKey !== identityKey) {
++    throw new Error("codex_engine_local_app_server_config_conflict")
++  }
++  if (!localServerPromise) {
++    localServerIdentity = identity
++    localServerPromise = LocalCodexAppServer.start(identity).catch(error => {
++      localServerIdentity = undefined
++      localServerPromise = undefined
++      throw error
++    })
++  }
++
++  return Object.freeze({
++    ...identity,
++    repoPath: config.repoPath ?? process.cwd(),
++    server: await localServerPromise,
++  })
++}
++
++export function resolveLocalCodexHome(configured?: string): string {
++  return configured || process.env.CODEX_HOME || join(homedir(), ".codex")
++}
++
++export async function resolveCodexExecutable(configured?: string): Promise<string> {
++  if (configured) return configured
++  if (process.platform !== "win32") return "codex"
++
++  const localAppData = process.env.LOCALAPPDATA
++  let staleDesktopBin: string | undefined
++  if (localAppData) {
++    const desktopBin = join(localAppData, "OpenAI", "Codex", "bin")
++    staleDesktopBin = desktopBin
++    const candidates = await versionedDesktopCodexCandidates(desktopBin)
++    if (candidates.length > 0) return candidates[0]!.path
++  }
++
++  const fromPath = await findExecutableOnPath(
++    "codex.exe",
++    staleDesktopBin ? new Set([staleDesktopBin.toLowerCase()]) : new Set(),
++  )
++  if (fromPath) return fromPath
++  throw new Error("codex_engine_local_codex_not_found")
++}
++
++async function versionedDesktopCodexCandidates(root: string) {
++  let entries: Dirent[]
++  try {
++    entries = await readdir(root, { withFileTypes: true })
++  } catch {
++    return []
++  }
++
++  const candidates = await Promise.all(
++    entries
++      .filter(entry => entry.isDirectory())
++      .map(async entry => {
++        const path = join(root, entry.name, "codex.exe")
++        try {
++          const metadata = await stat(path)
++          return metadata.isFile()
++            ? { path, modifiedAt: metadata.mtimeMs, directory: entry.name }
++            : undefined
++        } catch {
++          return undefined
++        }
++      }),
++  )
++
++  return candidates
++    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
++    .sort((left, right) =>
++      right.modifiedAt - left.modifiedAt ||
++      right.directory.localeCompare(left.directory))
++}
++
++async function findExecutableOnPath(
++  filename: string,
++  excludedDirectories: ReadonlySet<string>,
++): Promise<string | undefined> {
++  for (const directory of String(process.env.PATH ?? "").split(delimiter)) {
++    const normalized = directory.trim().replace(/^"|"$/g, "")
++    if (!normalized) continue
++    if (excludedDirectories.has(normalized.toLowerCase())) continue
++    const candidate = join(normalized, filename)
++    try {
++      await access(candidate)
++      return candidate
++    } catch {
++      // Continue to the next PATH entry.
++    }
++  }
++  return undefined
++}
++
++export class LocalCodexAppServer {
++  private readonly pending = new Map<string, PendingRequest>()
++  private readonly subscribers = new Set<(message: JsonRecord) => void>()
++  private readonly reader: ReturnType<typeof createInterface>
++  private stderr = ""
++  private closed = false
++
++  private constructor(
++    private readonly child: ChildProcessWithoutNullStreams,
++  ) {
++    this.reader = createInterface({ input: child.stdout })
++    this.reader.on("line", line => this.receive(line))
++    child.stderr.on("data", chunk => {
++      this.stderr = `${this.stderr}${String(chunk)}`.slice(-16_000)
++    })
++    child.once("error", error => this.close(error))
++    child.once("exit", code => {
++      this.close(new Error(
++        `codex_app_server_exited:${String(code)}${this.stderr ? `:${this.stderr}` : ""}`,
++      ))
++    })
++  }
++
++  static async start(identity: CodexAppServerIdentity) {
++    const child = spawn(identity.executable, ["app-server", "--enable", "apps"], {
++      env: {
++        ...process.env,
++        CODEX_HOME: identity.codexHome,
++      },
++      stdio: ["pipe", "pipe", "pipe"],
++      windowsHide: true,
++    })
++    child.unref()
++    ;(child.stdin as any).unref?.()
++    ;(child.stdout as any).unref?.()
++    ;(child.stderr as any).unref?.()
++
++    const server = new LocalCodexAppServer(child)
++    process.once("exit", () => {
++      if (!child.killed) child.kill()
++    })
++    try {
++      await server.request("initialize", {
++        clientInfo: { name: "ekairos-codex-engine", version: "1.0.0" },
++        capabilities: { experimentalApi: true },
++      })
++      server.notify("initialized", {})
++      return server
++    } catch (error) {
++      if (!child.killed) child.kill()
++      throw error
++    }
++  }
++
++  get isClosed() {
++    return this.closed
++  }
++
++  async runTurn(input: LocalCodexTurnInput): Promise<CodexTurnResult> {
++    return await runLocalCodexTurn(this, input)
++  }
++
++  request(
++    method: string,
++    params: JsonRecord = {},
++    timeoutMs = 60_000,
++  ): Promise<JsonRecord> {
++    const id = randomUUID()
++    return new Promise((resolve, reject) => {
++      const timer = setTimeout(() => {
++        this.pending.delete(id)
++        reject(new Error(`codex_app_server_rpc_timeout:${method}`))
++      }, timeoutMs)
++      this.pending.set(id, { resolve, reject, timer })
++      this.write({ id, method, params })
++    })
++  }
++
++  notify(method: string, params: JsonRecord) {
++    this.write({ method, params })
++  }
++
++  respond(payload: JsonRecord) {
++    this.write(payload)
++  }
++
++  subscribe(subscriber: (message: JsonRecord) => void) {
++    this.subscribers.add(subscriber)
++    return () => this.subscribers.delete(subscriber)
++  }
++
++  private write(message: JsonRecord) {
++    if (this.closed) throw new Error("codex_app_server_closed")
++    this.child.stdin.write(`${JSON.stringify(message)}\n`)
++  }
++
++  private receive(line: string) {
++    let message: JsonRecord
++    try {
++      message = JSON.parse(line) as JsonRecord
++    } catch {
++      return
++    }
++    const id = asString(message.id)
++    const pending = id ? this.pending.get(id) : undefined
++    if (pending) {
++      this.pending.delete(id)
++      clearTimeout(pending.timer)
++      const error = asRecord(message.error)
++      if (message.error) {
++        pending.reject(new Error(
++          asString(error.message) || asString(message.error) || "codex_app_server_rpc_error",
++        ))
++      } else {
++        pending.resolve(message)
++      }
++      return
++    }
++    for (const subscriber of this.subscribers) subscriber(message)
++  }
++
++  private close(error: Error) {
++    if (this.closed) return
++    this.closed = true
++    this.reader.close()
++    for (const pending of this.pending.values()) {
++      clearTimeout(pending.timer)
++      pending.reject(error)
++    }
++    this.pending.clear()
++    const closed = {
++      method: "ekairos/app-server/closed",
++      params: { message: error.message },
++    }
++    for (const subscriber of this.subscribers) subscriber(closed)
++    this.subscribers.clear()
++  }
++}
++
++async function runLocalCodexTurn(
++  server: LocalCodexAppServer,
++  input: LocalCodexTurnInput,
++): Promise<CodexTurnResult> {
++  let threadId = asString(input.state?.providerContextId)
++  let turnId = asString(input.state?.turnId)
++  let assistantText = asString(input.state?.assistantText)
++  let reasoningText = asString(input.state?.reasoningText)
++  let diff = asString(input.state?.diff)
++  let usage = asRecord(input.state?.usage)
++  let completedTurn: JsonRecord = {}
++  let ready = Boolean(threadId && turnId)
++  const buffered: JsonRecord[] = []
++
++  return await new Promise<CodexTurnResult>((resolve, reject) => {
++    let settled = false
++    const timeout = setTimeout(
++      () => settleError(new Error(`codex_turn_timeout:${turnId || "unknown"}`)),
++      300_000,
++    )
++    const unsubscribe = server.subscribe(message => {
++      if (!ready) {
++        buffered.push(message)
++        return
++      }
++      handle(message)
++    })
++
++    const cleanup = () => {
++      clearTimeout(timeout)
++      unsubscribe()
++    }
++    const settle = (result: CodexTurnResult) => {
++      if (settled) return
++      settled = true
++      cleanup()
++      resolve(Object.freeze(result))
++    }
++    const settleError = (error: Error) => {
++      if (settled) return
++      settled = true
++      cleanup()
++      reject(error)
++    }
++    const handle = (event: JsonRecord) => {
++      if (settled) return
++      const method = asString(event.method)
++      if (method === "ekairos/app-server/closed") {
++        settleError(new Error(
++          asString(asRecord(event.params).message) || "codex_app_server_closed",
++        ))
++        return
++      }
++      if (!method || method.startsWith("codex/event/")) return
++      const params = asRecord(event.params)
++      const eventTurnId = asString(params.turnId) || asString(asRecord(params.turn).id)
++      const eventThreadId =
++        asString(params.threadId) ||
++        asString(asRecord(params.turn).threadId)
++      const scoped = eventTurnId
++        ? eventTurnId === turnId
++        : eventThreadId
++          ? eventThreadId === threadId
++          : false
++      if (!scoped) return
++
++      if (method === "item/tool/call" && event.id !== undefined && event.id !== null) {
++        settle({
++          status: "action_required",
++          providerContextId: threadId,
++          turnId,
++          assistantText,
++          reasoningText,
++          diff,
++          usage,
++          action: {
++            requestId: event.id as string | number,
++            ...actionDetails(params),
++          },
++        })
++        return
++      }
++      if (method === "item/agentMessage/delta") {
++        assistantText += asString(params.delta)
++      }
++      if (
++        method === "item/reasoning/summaryTextDelta" ||
++        method === "item/reasoning/textDelta"
++      ) {
++        reasoningText += asString(params.delta)
++      }
++      if (method === "turn/diff/updated") diff = asString(params.diff)
++      if (
++        method === "thread/tokenUsage/updated" ||
++        method === "context/tokenUsage/updated"
++      ) {
++        usage = asRecord(params.tokenUsage)
++      }
++      if (method === "item/completed") {
++        const item = asRecord(params.item)
++        if (asString(item.type) === "agentMessage" && asString(item.text).trim()) {
++          assistantText = asString(item.text)
++        }
++        if (asString(item.type) === "reasoning" && asString(item.summary).trim()) {
++          reasoningText = asString(item.summary)
++        }
++      }
++      if (method === "turn/failed") {
++        settleError(new Error(`codex_turn_failed:${eventTurnId || turnId || "unknown"}`))
++        return
++      }
++      if (method === "turn/completed") {
++        completedTurn = asRecord(params.turn)
++        const status = asString(completedTurn.status).trim().toLowerCase()
++        const error = asRecord(completedTurn.error)
++        if (status === "failed" || Object.keys(error).length > 0) {
++          settleError(new Error(
++            asString(error.message) ||
++              asString(error.error) ||
++              `codex_turn_failed:${eventTurnId || turnId || "unknown"}`,
++          ))
++          return
++        }
++        settle({
++          status: "completed",
++          providerContextId: threadId,
++          turnId: asString(completedTurn.id) || turnId,
++          assistantText,
++          reasoningText,
++          diff,
++          usage,
++          completedTurn,
++        })
++      }
++    }
++
++    void (async () => {
++      try {
++        if (input.actionResponse) {
++          server.respond(input.actionResponse)
++        } else {
++          const threadParams = codexTurnParams(
++            input.repoPath,
++            input.model,
++            input.dynamicTools,
++          )
++          const threadStart = await server.request("thread/start", threadParams)
++          threadId =
++            asString(asRecord(asRecord(threadStart.result).thread).id) ||
++            asString(asRecord(threadStart.result).id) ||
++            asString(threadStart.threadId)
++          if (!threadId) throw new Error("codex_thread_id_missing")
++
++          const turnParams: JsonRecord = {
++            ...threadParams,
++            threadId,
++            input: [{ type: "text", text: input.instruction }],
++          }
++          const turnStart = await server.request("turn/start", turnParams)
++          turnId =
++            asString(asRecord(asRecord(turnStart.result).turn).id) ||
++            asString(asRecord(turnStart.result).id) ||
++            asString(turnStart.turnId)
++          if (!turnId) throw new Error("codex_turn_id_missing")
++        }
++        ready = true
++        buffered.splice(0).forEach(handle)
++      } catch (error) {
++        settleError(error instanceof Error ? error : new Error(String(error)))
++      }
++    })()
++  })
++}
++
++function codexTurnParams(
++  repoPath: string,
++  model: string | undefined,
++  dynamicTools: readonly CodexDynamicTool[],
++): JsonRecord {
++  return {
++    cwd: repoPath,
++    approvalPolicy: "never",
++    sandboxPolicy: {
++      type: "externalSandbox",
++      networkAccess: "enabled",
++    },
++    ...(model ? { model } : {}),
++    ...(dynamicTools.length > 0
++      ? {
++          dynamicTools,
++          dynamic_tools: dynamicTools,
++          experimentalRawEvents: true,
++          persistExtendedHistory: true,
++        }
++      : {}),
++  }
++}
++
++function actionDetails(params: JsonRecord): Omit<CodexActionRequest, "requestId"> {
++  const item = asRecord(params.item)
++  const rawInput =
++    params.arguments ??
++    params.input ??
++    params.args ??
++    item.arguments ??
++    item.input ??
++    item.args ??
++    {}
++  let input = rawInput
++  if (typeof rawInput === "string") {
++    try {
++      input = JSON.parse(rawInput)
++    } catch {
++      // Keep the raw tool input so the action schema reports the error.
++    }
++  }
++  return {
++    callId: asString(
++      params.callId ??
++      params.toolCallId ??
++      params.itemId ??
++      item.callId ??
++      item.toolCallId ??
++      item.id,
++    ),
++    name: asString(
++      params.actionName ??
++      params.tool ??
++      params.toolName ??
++      params.name ??
++      item.actionName ??
++      item.tool ??
++      item.toolName ??
++      item.name,
++    ),
++    input,
++  }
++}
++
++function asRecord(value: unknown): JsonRecord {
++  return value && typeof value === "object" && !Array.isArray(value)
++    ? value as JsonRecord
++    : {}
++}
++
++function asString(value: unknown): string {
++  if (typeof value === "string") return value
++  if (value === null || value === undefined) return ""
++  return String(value)
++}
+diff --git a/packages/reactors/openai-reactor/src/tests/codex.local.test.ts b/packages/reactors/openai-reactor/src/tests/codex.local.test.ts
+new file mode 100644
+index 0000000..e21ed21
+--- /dev/null
++++ b/packages/reactors/openai-reactor/src/tests/codex.local.test.ts
+@@ -0,0 +1,242 @@
++import { spawn } from "node:child_process"
++import { EventEmitter } from "node:events"
++import {
++  mkdtemp,
++  mkdir,
++  rm,
++  utimes,
++  writeFile,
++} from "node:fs/promises"
++import { tmpdir } from "node:os"
++import { join } from "node:path"
++import { PassThrough } from "node:stream"
++
++import {
++  toModelActionName,
++  type ReactionEngineInput,
++} from "@ekairos/reactor"
++import { afterEach, describe, expect, it, vi } from "vitest"
++import { z } from "zod"
++
++import { codexEngine } from "../codex.engine.js"
++import { resolveCodexExecutable } from "../codex.local.js"
++
++vi.mock("node:child_process", async importOriginal => ({
++  ...await importOriginal<typeof import("node:child_process")>(),
++  spawn: vi.fn(),
++}))
++
++function agentInput(
++  actions: ReactionEngineInput["actions"] = {},
++): ReactionEngineInput {
++  const trigger = {
++    id: "evt-trigger",
++    type: "inbox.messageReceived",
++    domain: "inbox",
++    name: "messageReceived",
++    channel: "test",
++    createdAt: new Date("2026-07-31T00:00:00.000Z"),
++    payload: { message: "Choose a supplier" },
++    links: {},
++    physicalLinks: {},
++    metadata: {},
++    eventParts: [],
++  }
++  return {
++    reactionKey: "award.answer",
++    runtime: {} as ReactionEngineInput["runtime"],
++    context: {
++      ref: { id: "ctx-1", key: "ctx:award" },
++      content: { phase: "current-context" },
++    },
++    trigger,
++    sessionId: "session-1",
++    reactionId: "reaction-1",
++    given: [trigger],
++    messages: [{
++      role: "user",
++      content: [{ type: "text", text: "Choose the approved supplier." }],
++    }] as any,
++    instruction: "Choose the approved supplier.",
++    actions,
++  }
++}
++
++function fakeAppServerProcess() {
++  const child = new EventEmitter() as EventEmitter & {
++    stdin: PassThrough
++    stdout: PassThrough
++    stderr: PassThrough
++    killed: boolean
++    kill: ReturnType<typeof vi.fn>
++    unref: ReturnType<typeof vi.fn>
++  }
++  child.stdin = new PassThrough()
++  child.stdout = new PassThrough()
++  child.stderr = new PassThrough()
++  child.killed = false
++  child.kill = vi.fn(() => {
++    child.killed = true
++    return true
++  })
++  child.unref = vi.fn()
++  let inputBuffer = ""
++  let threadIndex = 0
++  let turnIndex = 0
++
++  const send = (message: unknown) => {
++    child.stdout.write(`${JSON.stringify(message)}\n`)
++  }
++  const complete = (threadId: string, turnId: string, text: string) => {
++    send({
++      method: "item/agentMessage/delta",
++      params: { threadId, turnId, delta: text },
++    })
++    send({
++      method: "turn/completed",
++      params: { threadId, turnId, turn: { id: turnId, status: "completed" } },
++    })
++  }
++
++  child.stdin.on("data", chunk => {
++    inputBuffer += String(chunk)
++    const lines = inputBuffer.split("\n")
++    inputBuffer = lines.pop() ?? ""
++    for (const line of lines) {
++      if (!line) continue
++      const message = JSON.parse(line)
++      if (message.method === "initialize") {
++        send({ id: message.id, result: {} })
++        continue
++      }
++      if (message.method === "initialized") continue
++      if (message.method === "thread/start") {
++        threadIndex += 1
++        send({
++          id: message.id,
++          result: { thread: { id: `thread-${threadIndex}` } },
++        })
++        continue
++      }
++      if (message.method === "turn/start") {
++        turnIndex += 1
++        const threadId = message.params.threadId
++        const turnId = `turn-${turnIndex}`
++        send({ id: message.id, result: { turn: { id: turnId } } })
++        if (turnIndex === 1) {
++          send({
++            id: "tool-request-1",
++            method: "item/tool/call",
++            params: {
++              threadId,
++              turnId,
++              callId: "call-1",
++              name: toModelActionName("supplier.lookup"),
++              arguments: { supplierId: "supplier-7" },
++            },
++          })
++        } else {
++          complete(threadId, turnId, "second turn")
++        }
++        continue
++      }
++      if (message.id === "tool-request-1" && message.result) {
++        complete("thread-1", "turn-1", JSON.stringify({ selected: "supplier-7" }))
++      }
++    }
++  })
++
++  return child
++}
++
++afterEach(() => {
++  vi.unstubAllEnvs()
++  vi.clearAllMocks()
++})
++
++describe("local codexEngine", () => {
++  it.runIf(process.platform === "win32")(
++    "prefers the newest versioned Codex Desktop executable over the stale root binary",
++    async () => {
++      const root = await mkdtemp(join(tmpdir(), "ekairos-codex-bin-"))
++      const desktopBin = join(root, "OpenAI", "Codex", "bin")
++      const oldDirectory = join(desktopBin, "old-version")
++      const currentDirectory = join(desktopBin, "current-version")
++      await mkdir(oldDirectory, { recursive: true })
++      await mkdir(currentDirectory, { recursive: true })
++      await writeFile(join(desktopBin, "codex.exe"), "")
++      await writeFile(join(oldDirectory, "codex.exe"), "")
++      await writeFile(join(currentDirectory, "codex.exe"), "")
++      await utimes(join(oldDirectory, "codex.exe"), new Date(1), new Date(1))
++      await utimes(join(currentDirectory, "codex.exe"), new Date(2), new Date(2))
++      vi.stubEnv("LOCALAPPDATA", root)
++      vi.stubEnv("PATH", "")
++
++      try {
++        await expect(resolveCodexExecutable()).resolves.toBe(
++          join(currentDirectory, "codex.exe"),
++        )
++      } finally {
++        await rm(root, { recursive: true, force: true })
++      }
++    },
++  )
++
++  it("spawns one reusable app-server and preserves tools plus structured output", async () => {
++    const child = fakeAppServerProcess()
++    vi.mocked(spawn).mockReturnValue(child as any)
++    const received: unknown[] = []
++    const engine = codexEngine({
++      codexPath: "C:\\OpenAI\\current\\codex.exe",
++      codexHome: "C:\\Users\\tester\\.codex",
++      model: "gpt-5.6",
++      repoPath: "C:\\work\\flagship",
++    })
++    const firstInput = agentInput({
++      "supplier.lookup": {
++        description: "Load a supplier.",
++        input: z.object({ supplierId: z.string() }),
++        output: z.object({ found: z.boolean() }),
++        async execute(value) {
++          received.push(value)
++          return { found: true }
++        },
++      },
++    })
++    firstInput.output = z.object({ selected: z.string() })
++
++    const first = await engine.agent(firstInput)
++    const second = await engine.agent(agentInput())
++
++    expect(first.output).toEqual({ selected: "supplier-7" })
++    expect(first.parts).toEqual([
++      expect.objectContaining({
++        type: "action",
++        content: expect.objectContaining({
++          status: "started",
++          actionName: "supplier.lookup",
++        }),
++      }),
++      expect.objectContaining({
++        type: "action",
++        content: expect.objectContaining({
++          status: "completed",
++          actionName: "supplier.lookup",
++        }),
++      }),
++    ])
++    expect(second.output).toBe("second turn")
++    expect(received).toEqual([{ supplierId: "supplier-7" }])
++    expect(spawn).toHaveBeenCalledTimes(1)
++    expect(spawn).toHaveBeenCalledWith(
++      "C:\\OpenAI\\current\\codex.exe",
++      ["app-server", "--enable", "apps"],
++      expect.objectContaining({
++        env: expect.objectContaining({
++          CODEX_HOME: "C:\\Users\\tester\\.codex",
++        }),
++        windowsHide: true,
++      }),
++    )
++  })
++})
+diff --git a/packages/reactors/openai-reactor/src/tests/codex.local.live.test.ts b/packages/reactors/openai-reactor/src/tests/codex.local.live.test.ts
+new file mode 100644
+index 0000000..b64ecce
+--- /dev/null
++++ b/packages/reactors/openai-reactor/src/tests/codex.local.live.test.ts
+@@ -0,0 +1,46 @@
++import type { ReactionEngineInput } from "@ekairos/reactor"
++import { expect, it } from "vitest"
++
++import { codexEngine } from "../codex.engine.js"
++
++const itLive = process.env.CODEX_LOCAL_LIVE === "1" ? it : it.skip
++
++itLive("runs one minimal turn against the logged-in local Codex", async () => {
++  const trigger = {
++    id: "local-live-trigger",
++    type: "test.prompted",
++    domain: "test",
++    name: "prompted",
++    channel: "test",
++    createdAt: new Date(),
++    payload: { prompt: "Reply with the single word ok." },
++    links: {},
++    physicalLinks: {},
++    metadata: {},
++    eventParts: [],
++  }
++  const input: ReactionEngineInput = {
++    reactionKey: "codex.local.live",
++    runtime: {} as ReactionEngineInput["runtime"],
++    context: {
++      ref: { id: "local-live-context", key: "codex:local:live" },
++      content: {},
++    },
++    trigger,
++    sessionId: "local-live-session",
++    reactionId: "local-live-reaction",
++    given: [trigger],
++    messages: [{
++      role: "user",
++      content: [{ type: "text", text: "Reply with the single word ok." }],
++    }] as any,
++    instruction: "Reply with the single word ok.",
++    actions: {},
++  }
++
++  const result = await codexEngine({
++    model: process.env.CODEX_LOCAL_MODEL,
++  }).agent(input)
++
++  expect(String(result.output).trim().toLowerCase()).toBe("ok")
++})
+*** End Git Diff
+*** End ECU Patch

@@ -9,7 +9,7 @@ import { executeReaction } from "@ekairos/reactor/internal"
 import { z } from "zod"
 
 import { createDatasetId } from "../id.js"
-import { datasetDomain } from "../schema.js"
+import { datasetDomain } from "../domain.js"
 import {
   datasetGetByIdStep,
   datasetInferAndUpdateSchemaStep,

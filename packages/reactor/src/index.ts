@@ -6,6 +6,7 @@ export {
   ai,
   isAiEngine,
 } from "./reactor.js"
+export { toModelActionName } from "./action-name.js"
 export type {
   GivenOperations,
   ReactionAgentInput,

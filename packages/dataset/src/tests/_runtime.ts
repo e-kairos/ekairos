@@ -2,7 +2,7 @@ import { init } from "@instantdb/admin"
 import { configureRuntime } from "@ekairos/domain/runtime"
 import { domain } from "@ekairos/domain"
 import { contextDomain } from "@ekairos/events"
-import { datasetDomain } from "../schema"
+import { datasetDomain } from "../domain"
 import { sandboxDomain } from "@ekairos/sandbox/schema"
 
 export async function configureDatasetTestRuntime() {

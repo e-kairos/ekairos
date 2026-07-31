@@ -7,11 +7,11 @@ import { i } from "@instantdb/core"
 import { defineEvent, domain, EkairosRuntime } from "@ekairos/domain"
 import { Events, contextDomain } from "@ekairos/events"
 import { defineReaction } from "@ekairos/reactor"
-import { sandboxDomain } from "@ekairos/sandbox/schema"
-import { afterAll, beforeAll, expect } from "vitest"
+import { afterAll, beforeAll, expect, it } from "vitest"
 import { z } from "zod"
 
 import { Context } from "../../../context/src/index.ts"
+import { sandboxDomain } from "../../../sandbox/src/actions.ts"
 import {
   describeInstant,
   destroyContextTestApp,
@@ -19,8 +19,17 @@ import {
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
 import { buildReactionDataset } from "../reactionDataset.js"
-import { datasetDomain } from "../schema.js"
+import { datasetDomain } from "../domain.js"
+import { DatasetService } from "../service.js"
 import { actionStep, deterministicReactionEngine } from "./_reactionEngine.js"
+
+const liveSandboxExternalId = String(
+  process.env.DATASET_TEST_LIVE_SANDBOX_ID ?? "",
+).trim()
+const liveSandboxProvider = String(
+  process.env.DATASET_TEST_LIVE_SANDBOX_PROVIDER ?? "sprites",
+).trim()
+const itLiveSandbox = liveSandboxExternalId ? itInstant : it.skip
 
 const inboxDomain = domain("datasetInbox")
   .includes(contextDomain)
@@ -50,8 +59,10 @@ const appDomain = domain("dataset-reaction-test")
   .includes(sandboxDomain)
   .includes(datasetDomain)
   .withSchema({ entities: {}, links: {}, rooms: {} })
-  .withActions(sandboxDomain.actions)
-  .withActions(datasetDomain.actions)
+  .withActions({
+    ...sandboxDomain.actions,
+    ...datasetDomain.actions,
+  })
 
 type TestEnv = { appId: string; adminToken: string }
 
@@ -71,9 +82,7 @@ class DatasetReactionRuntime extends EkairosRuntime<
     } as any)
   }
 
-  async materializeDataset(input: Parameters<typeof buildReactionDataset>[0]) {
-    return await buildReactionDataset(input)
-  }
+  readonly materializeDataset = buildReactionDataset
 }
 
 describeInstant("Reaction Dataset operation", () => {
@@ -99,15 +108,15 @@ describeInstant("Reaction Dataset operation", () => {
     await destroyContextTestApp(appId)
   }, 60_000)
 
-  itInstant("materializes a causal Event in a linked child Session", async () => {
+  itLiveSandbox("materializes a causal Event in a linked child Session", async () => {
     const runtime = new DatasetReactionRuntime({ appId, adminToken })
     const sandboxId = randomUUID()
     const messageId = randomUUID()
     await db.transact([
       db.tx.dataset_inbox_messages[messageId].update({ subject: "Quote CSV" }),
       db.tx.sandbox_sandboxes[sandboxId].update({
-        provider: "sprites",
-        externalSandboxId: sandboxId,
+        provider: liveSandboxProvider,
+        externalSandboxId: liveSandboxExternalId,
         status: "active",
         createdAt: Date.now(),
       }),
@@ -263,5 +272,109 @@ describeInstant("Reaction Dataset operation", () => {
       "dataset.executeCommand",
       "dataset.completeDataset",
     ]))
+  }, 120_000)
+
+  itInstant("lets Agent materialize a scoped InstaQL Dataset", async () => {
+    const runtime = new DatasetReactionRuntime({ appId, adminToken })
+    const messages = [
+      { id: randomUUID(), subject: "Cohort alpha" },
+      { id: randomUUID(), subject: "Cohort beta" },
+      { id: randomUUID(), subject: "Cohort gamma" },
+    ]
+    await db.transact(messages.map(message =>
+      db.tx.dataset_inbox_messages[message.id].update({ subject: message.subject })))
+
+    const context = await Context(runtime).create({
+      key: `dataset-agent-query:${randomUUID()}`,
+      content: { purpose: "cohort-query" },
+    })
+    const trigger = await Events(runtime).emit(
+      inboxDomain.events.received({ subject: "Group all inbox messages" }).link({
+        message: messages[0]!.id,
+      }),
+      { id: randomUUID(), channel: "web", contextId: context.id },
+    )
+    const engine = deterministicReactionEngine({
+      steps: [
+        actionStep("dataset.materialize", {
+          title: "Inbox cohort",
+          explanation: "Read the complete scoped inbox collection once.",
+          query: {
+            dataset_inbox_messages: {
+              $: { fields: ["subject"] },
+            },
+          },
+        }),
+      ],
+    })
+    const definition = defineReaction(
+      inboxDomain.events.received,
+      {
+        key: "dataset-inbox.agent-query",
+        scope: inboxDomain,
+        engine,
+        sandbox: false,
+      },
+      async reaction => {
+        const analysis = await reaction.given(reaction.trigger).agent({
+          instruction: "Materialize the full collection before answering.",
+          output: z.object({
+            completed: z.literal(true),
+            action: z.literal("dataset.materialize"),
+            output: z.object({
+              datasetId: z.string(),
+              mode: z.enum(["opened", "built"]),
+              preview: z.array(z.unknown()),
+              count: z.number().optional(),
+            }),
+          }),
+        })
+        return await reaction.given(analysis).emit(
+          inboxDomain.events.answered({
+            datasetId: analysis.payload.output.datasetId,
+            itemCount: analysis.payload.output.count ?? analysis.payload.output.preview.length,
+          }).link({ message: messages[0]!.id }),
+        )
+      },
+    )
+
+    const answer = await context.react(trigger, definition)
+    expect(answer.payload.itemCount).toBeGreaterThanOrEqual(messages.length)
+
+    const stored = await db.query({
+      dataset_datasets: {
+        $: { where: { datasetId: answer.payload.datasetId } },
+        dataFile: {},
+      },
+      context_sessions: {
+        $: { where: { context: context.id } },
+        reactions: {
+          effects: {
+            eventParts: { $: { order: { index: "asc" } } },
+          },
+        },
+      },
+    } as any)
+    const dataset = (stored as any).dataset_datasets[0]
+    expect(dataset.status).toBe("completed")
+    expect(dataset.actualGeneratedRowCount).toBe(answer.payload.itemCount)
+    expect(dataset.dataFile).toMatchObject({ id: expect.any(String) })
+
+    const read = await new DatasetService(db as any).readRows({
+      datasetId: answer.payload.datasetId,
+      limit: 100,
+    })
+    if (!read.ok) throw new Error(read.error)
+    expect(read.data.rows.map((row: any) => row.subject)).toEqual(
+      expect.arrayContaining(messages.map(message => message.subject)),
+    )
+
+    const session = (stored as any).context_sessions[0]
+    const agent = session.reactions.find((reaction: any) => reaction.type === "agent")
+    const actionParts = agent.effects[0].eventParts
+      .map((part: any) => part.content)
+      .filter((part: any) => part.actionName === "dataset.materialize")
+    expect(actionParts.map((part: any) => part.status)).toEqual(["started", "completed"])
+    expect(actionParts[1].output.datasetId).toBe(answer.payload.datasetId)
   }, 120_000)
 })

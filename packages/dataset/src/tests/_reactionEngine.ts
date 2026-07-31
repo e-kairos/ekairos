@@ -71,10 +71,11 @@ class DeterministicReactionEngine implements ReactionEngine<any> {
         throw new Error(String(record.error ?? record.message ?? `${actionName} failed`))
       }
 
+      const summary = record?.summary ?? (step.input as any)?.summary
       completion = {
         completed: true,
         action: actionName,
-        summary: record?.summary ?? (step.input as any)?.summary,
+        ...(summary === undefined ? {} : { summary }),
         output,
       }
     }

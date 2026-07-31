@@ -1,12 +1,12 @@
 import type { InstantAdminDatabase } from "@instantdb/admin"
 import { SchemaOf } from "@ekairos/domain";
-import { datasetDomain } from "./schema.js";
+import { datasetSchemaDomain } from "./schema.js";
 import { createDatasetId } from "./id.js";
 
 
 export type ServiceResult<T = any> = { ok: true; data: T } | { ok: false; error: string }
 
-type DatasetSchemaType = SchemaOf<typeof datasetDomain>;
+type DatasetSchemaType = SchemaOf<typeof datasetSchemaDomain>;
 
 export class DatasetService {
     private readonly db: InstantAdminDatabase<DatasetSchemaType>;
@@ -110,22 +110,38 @@ export class DatasetService {
         try {
             const resolved = await this.resolveDatasetEntityId(params.datasetId)
             if (!resolved.ok) return resolved as ServiceResult<{ savedCount: number }>
-            const mutations: any[] = []
 
-            for (const record of params.records) {
-                const recordId = createDatasetId()
-                mutations.push(
-                    this.db.tx.dataset_records[recordId].update({
-                        rowContent: record.rowContent,
-                        order: record.order,
-                        createdAt: Date.now(),
-                    }),
-                    this.db.tx.dataset_datasets[resolved.data].link({ records: [recordId] })
-                )
+            // Un unico transact con todas las filas supera el limite de
+            // parametros de InstantDB y serializa la escritura. El chunking
+            // con concurrencia acotada es mecanismo del service: los callers
+            // entregan todas las filas en una sola llamada.
+            const CHUNK_SIZE = 150
+            const CONCURRENCY = 8
+            const chunks: Array<Array<{ rowContent: any; order: number }>> = []
+            for (let offset = 0; offset < params.records.length; offset += CHUNK_SIZE) {
+                chunks.push(params.records.slice(offset, offset + CHUNK_SIZE))
             }
 
-            if (mutations.length > 0) {
-                await this.db.transact(mutations)
+            const transactChunk = async (chunk: Array<{ rowContent: any; order: number }>) => {
+                const mutations: any[] = []
+                for (const record of chunk) {
+                    const recordId = createDatasetId()
+                    mutations.push(
+                        this.db.tx.dataset_records[recordId].update({
+                            rowContent: record.rowContent,
+                            order: record.order,
+                            createdAt: Date.now(),
+                        }),
+                        this.db.tx.dataset_datasets[resolved.data].link({ records: [recordId] })
+                    )
+                }
+                if (mutations.length > 0) {
+                    await this.db.transact(mutations)
+                }
+            }
+
+            for (let group = 0; group < chunks.length; group += CONCURRENCY) {
+                await Promise.all(chunks.slice(group, group + CONCURRENCY).map(transactChunk))
             }
 
             return { ok: true, data: { savedCount: params.records.length } }

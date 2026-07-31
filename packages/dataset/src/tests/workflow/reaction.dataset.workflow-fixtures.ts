@@ -10,12 +10,12 @@ import {
   defineReaction,
 } from "@ekairos/reactor"
 import { executeReaction } from "@ekairos/reactor/internal"
-import { sandboxDomain } from "@ekairos/sandbox/schema"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { z } from "zod"
 
 import { buildReactionDataset } from "../../reactionDataset.ts"
-import { datasetDomain } from "../../schema.ts"
+import { datasetDomain } from "../../domain.ts"
+import { sandboxDomain } from "../../../../sandbox/src/actions.ts"
 import { actionStep, deterministicReactionEngine } from "../_reactionEngine.ts"
 
 const sourceItemSchema = z.object({
@@ -38,8 +38,10 @@ export const reactionDatasetWorkflowDomain = domain("reactionDatasetWorkflow")
     received: defineEvent({ payload: z.array(sourceItemSchema) }),
     materialized: defineEvent({ payload: materializedSchema }),
   })
-  .withActions(datasetDomain.actions)
-  .withActions(sandboxDomain.actions)
+  .withActions({
+    ...datasetDomain.actions,
+    ...sandboxDomain.actions,
+  })
 
 export type ReactionDatasetWorkflowEnv = {
   appId: string

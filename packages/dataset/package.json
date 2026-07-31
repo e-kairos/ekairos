@@ -30,6 +30,11 @@
       "import": "./dist/domain.js",
       "default": "./dist/domain.js"
     },
+    "./schema": {
+      "types": "./dist/schema-entry.d.ts",
+      "import": "./dist/schema-entry.js",
+      "default": "./dist/schema-entry.js"
+    },
     "./query": {
       "types": "./dist/query/index.d.ts",
       "import": "./dist/query/index.js",

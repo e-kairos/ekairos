@@ -6,7 +6,7 @@ import { getStepMetadata, getWorkflowMetadata } from "workflow"
 
 import { materializeDataset } from "../../dataset.ts"
 import { getDatasetOutputPath, getDatasetSourcesDir } from "../../datasetFiles.ts"
-import { datasetDomain } from "../../schema.ts"
+import { datasetDomain } from "../../domain.ts"
 import { actionStep, deterministicReactionEngine } from "../_reactionEngine.ts"
 
 const queryDomain = domain("dataset-workflow-query").schema({

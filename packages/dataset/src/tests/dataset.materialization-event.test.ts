@@ -4,9 +4,16 @@ import { lookup } from "@instantdb/admin"
 import { describe, expect, it } from "vitest"
 
 import { createDatasetTriggerEvent } from "../builder/materialize.js"
-import { datasetDomain } from "../schema.js"
+import { datasetDomain } from "../domain.js"
+import { datasetSchemaDomain } from "../schema-entry.js"
 
 describe("dataset materialization event", () => {
+  it("keeps the schema entrypoint free of server actions", () => {
+    expect(Object.keys((datasetSchemaDomain as any).actions ?? {})).toEqual([])
+    expect(Object.keys(datasetDomain.actions)).toContain("completeDataset")
+    expect(datasetSchemaDomain.instantSchema().entities).toHaveProperty("dataset_datasets")
+  })
+
   it("declares reflective dataset and file links", () => {
     const event = datasetDomain.events.materializationRequested
 

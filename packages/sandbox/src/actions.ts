@@ -69,7 +69,7 @@ function createSandboxDomain() {
   return sandboxSchemaDomain.withActions({
     createSandbox: defineAction({
       input: z.object({
-        provider: z.enum(["vercel", "daytona", "sprites"]).optional(),
+        provider: z.enum(["vercel", "daytona", "sprites", "local"]).optional(),
         runtime: z.string().optional(),
         timeoutMs: z.number().optional(),
         ports: z.array(z.number()).optional(),

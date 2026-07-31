@@ -1,6 +1,6 @@
 import type { DomainActionInputResolver } from "@ekairos/domain/internal"
 
-import { datasetDomain } from "./schema.js"
+import { datasetSchemaDomain } from "./schema.js"
 
 const JSON_SCHEMA_ANNOTATIONS = new Set([
   "$comment",
@@ -34,7 +34,7 @@ export function createDatasetActionInputResolver(
 ): DomainActionInputResolver {
   return async ({ actionId, path, runtime, value }) => {
     const datasetId = String((value as any)?.datasetId ?? "").trim()
-    const activeDataset = await (runtime as any).use(datasetDomain)
+    const activeDataset = await (runtime as any).use(datasetSchemaDomain)
     const result = await activeDataset.db.query({
       dataset_datasets: {
         $: {

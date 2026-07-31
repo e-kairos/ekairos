@@ -19,7 +19,7 @@
 import { domain } from "@ekairos/domain"
 import { sandboxDomain } from "@ekairos/sandbox/schema"
 import { contextDomain } from "@ekairos/events"
-import { datasetDomain } from "../schema"
+import { datasetDomain } from "../domain"
 
 // Compose what tests need:
 // - dataset + sandbox (for FileParseContext + sandbox steps)

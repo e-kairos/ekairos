@@ -34,6 +34,7 @@ import {
   safeVercelConfigForRecord,
 } from "./vercel-options.js"
 import { withPosixEnvironment } from "./shell-environment.js"
+import { createSandboxSession, localSandbox, type SandboxSession } from "./session.js"
 import { randomUUID } from "node:crypto"
 import path from "node:path"
 
@@ -753,7 +754,27 @@ export class SandboxService {
     const sandboxId = id()
     const now = Date.now()
     const provider = resolveProvider(config)
-    if (provider === "local" || provider === "justbash" || provider === "agentos") {
+    if (provider === "local") {
+      // Local runs on this machine's filesystem: the record is the whole state,
+      // params.workspaceRoot is the contract readSandboxState relies on.
+      const baseParams =
+        config.params && typeof config.params === "object" && !Array.isArray(config.params) ? config.params : {}
+      const workspaceRoot = String((baseParams as any).workspaceRoot ?? "").trim()
+      if (!workspaceRoot) return { ok: false, error: "local_workspace_root_required" }
+      await this.adminDb.transact(
+        this.adminDb.tx.sandbox_sandboxes[sandboxId].update({
+          status: "active",
+          provider,
+          purpose: config.purpose,
+          params: { ...baseParams, workspaceRoot },
+          externalSandboxId: `local:${sandboxId}`,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      )
+      return { ok: true, data: { sandboxId } }
+    }
+    if (provider === "justbash" || provider === "agentos") {
       return { ok: false, error: `${provider}_requires_sandbox_session` }
     }
     const resolvedVercel =
@@ -995,6 +1016,17 @@ export class SandboxService {
 
       if (!record || !record.externalSandboxId) {
         return { ok: false, error: "Valid sandbox record not found" }
+      }
+
+      if (record.provider === "local") {
+        const workspaceRoot = String(record?.params?.workspaceRoot ?? "").trim()
+        if (!workspaceRoot) return { ok: false, error: "local_workspace_root_missing" }
+        const session = await createSandboxSession(localSandbox({ basePath: workspaceRoot }), {
+          sandboxId,
+          workspaceRoot,
+        })
+        ;(session as any).__provider = "local"
+        return { ok: true, data: { sandbox: session as any } }
       }
 
       if (record.provider === "daytona") {
@@ -1461,7 +1493,9 @@ export class SandboxService {
       if (result.ok) {
         try {
           const sandbox: any = result.data.sandbox as any
-          if (isVercelSandbox(sandbox)) {
+          if (sandbox?.__provider === "local") {
+            // Nothing to tear down: the workspace folder stays on disk.
+          } else if (isVercelSandbox(sandbox)) {
             await (sandbox as VercelSandbox).stop({ blocking: true })
             if (deleteOnStop) {
               await (sandbox as VercelSandbox).delete()
@@ -1559,6 +1593,31 @@ export class SandboxService {
 
       const sandbox = sandboxResult.data.sandbox
       const env = normalizeCommandEnvironment(opts?.env)
+      if ((sandbox as any).__provider === "local") {
+        const session = sandbox as unknown as SandboxSession
+        // `test -e` is the portable exists probe used by Sandbox.exists; on
+        // Windows there is no `test` binary, so answer it via the session.
+        if (command === "test" && args.length === 2 && args[0] === "-e") {
+          const found = await session.exists(String(args[1]))
+          return {
+            ok: true,
+            data: {
+              success: found,
+              exitCode: found ? 0 : 1,
+              output: "",
+              error: "",
+              command: `test -e ${args[1]}`,
+            },
+          }
+        }
+        const result = await session.exec({
+          command,
+          args: args.map((arg) => String(arg)),
+          ...(opts?.cwd ? { cwd: opts.cwd } : {}),
+          ...(env ? { env } : {}),
+        })
+        return { ok: true, data: result }
+      }
       if (isVercelSandbox(sandbox)) {
         const result = await runCommandInSandbox(sandbox as VercelSandbox, command, args, {
           cwd: opts?.cwd,
@@ -1927,6 +1986,12 @@ export class SandboxService {
       if (!sandboxResult.ok) return { ok: false, error: sandboxResult.error }
 
       const sandbox = sandboxResult.data.sandbox
+      if ((sandbox as any).__provider === "local") {
+        await (sandbox as unknown as SandboxSession).writeFiles(
+          files.map((f) => ({ path: f.path, content: f.contentBase64, encoding: "base64" as const })),
+        )
+        return { ok: true, data: undefined }
+      }
       if (isVercelSandbox(sandbox)) {
         await (sandbox as VercelSandbox).writeFiles(
           files.map((f) => ({
@@ -1972,6 +2037,10 @@ export class SandboxService {
       if (!sandboxResult.ok) return { ok: false, error: sandboxResult.error }
 
       const sandbox = sandboxResult.data.sandbox
+      if ((sandbox as any).__provider === "local") {
+        const bytes = await (sandbox as unknown as SandboxSession).readFile(path)
+        return { ok: true, data: { contentBase64: Buffer.from(bytes).toString("base64") } }
+      }
       if (isVercelSandbox(sandbox)) {
         const stream = await (sandbox as VercelSandbox).readFile({ path })
         if (!stream) {

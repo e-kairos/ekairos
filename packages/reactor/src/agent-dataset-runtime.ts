@@ -2,6 +2,7 @@ import type { ContextEvent } from "@ekairos/events"
 import { z } from "zod"
 
 import {
+  AGENT_DATASET_ACTION,
   describeAgentDatasetDomain,
   validateAgentDatasetQuery,
   type AgentDatasetCapability,
@@ -12,7 +13,7 @@ import type {
   DatasetAdapterSource,
 } from "./dataset-adapter.js"
 
-export const AGENT_DATASET_ACTION = "dataset.materialize"
+export { AGENT_DATASET_ACTION }
 export const AGENT_DATASET_READ_ACTION = "dataset.read"
 
 export type AgentDatasetAvailable = Readonly<{

@@ -1,5 +1,5 @@
 import { DatasetService } from "../service.js"
-import { datasetDomain } from "../schema.js"
+import { datasetSchemaDomain } from "../schema.js"
 import {
   annotateNotationEvidence,
   inferQueryNotation,
@@ -33,7 +33,7 @@ export function defaultTextSourceName(source: DatasetTextSourceInput): string {
 export async function getDatasetDb<Runtime extends AnyDatasetRuntime>(
   runtime: Runtime,
 ) {
-  const scoped = await (runtime as any).use(datasetDomain)
+  const scoped = await (runtime as any).use(datasetSchemaDomain)
   return scoped.db as any
 }
 

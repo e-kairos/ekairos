@@ -10,7 +10,7 @@ import type { z } from "zod"
 import { buildObjectOutputInstructions } from "./builder/instructions.js"
 import { resolveDatasetSourceContext } from "./builder/context.js"
 import { createDatasetId } from "./id.js"
-import { datasetDomain } from "./schema.js"
+import { datasetSchemaDomain } from "./schema.js"
 import {
   completeDatasetStep,
   materializeDerivedDataset,
@@ -81,7 +81,7 @@ type RuntimeRootDomain<Runtime extends AnyDatasetRuntime> = NonNullable<
 
 type DatasetRuntimeBoundary<Runtime extends AnyDatasetRuntime> =
   Exclude<
-    IncludedDomainNamesOf<typeof datasetDomain>,
+    IncludedDomainNamesOf<typeof datasetSchemaDomain>,
     IncludedDomainNamesOf<RuntimeRootDomain<Runtime>>
   > extends never
     ? unknown

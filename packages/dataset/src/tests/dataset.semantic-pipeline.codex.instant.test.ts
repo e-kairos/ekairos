@@ -9,7 +9,6 @@ import { configureRuntime } from "@ekairos/domain/runtime"
 import { Events, contextDomain } from "@ekairos/events"
 import { defineReaction } from "@ekairos/reactor"
 import { SandboxService } from "@ekairos/sandbox/service"
-import { sandboxDomain } from "@ekairos/sandbox/schema"
 import { codexEngine } from "@ekairos/openai-reactor"
 import { createTestApp } from "../../../ekairos-test/src/provision.ts"
 import { z } from "zod"
@@ -18,8 +17,9 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { DatasetService } from "../service"
-import { datasetDomain } from "../schema"
+import { datasetDomain } from "../domain"
 import { Context } from "../../../context/src/index.ts"
+import { sandboxDomain } from "../../../sandbox/src/actions.ts"
 
 dotenvConfig({ path: "C:/ek/.env.local", quiet: true })
 
@@ -72,8 +72,10 @@ const appDomain = domain("dataset-semantic-pipeline")
   .includes(salesDomain)
   .schema({ entities: {}, links: {}, rooms: {} })
   .withEvents({ pipelineRequested, pipelineCompleted })
-  .withActions(sandboxDomain.actions)
-  .withActions(datasetDomain.actions)
+  .withActions({
+    ...sandboxDomain.actions,
+    ...datasetDomain.actions,
+  })
 
 type TestEnv = {
   orgId: string

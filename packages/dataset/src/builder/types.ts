@@ -3,7 +3,7 @@ import type { DomainInstantSchema, MaterializedDomainLike } from "@ekairos/domai
 import type { EkairosRuntime, RuntimeForDomain } from "@ekairos/domain/runtime"
 import type { AiReactionEngine, ReactionEngine } from "@ekairos/reactor"
 
-import { datasetDomain } from "../schema.js"
+import { datasetSchemaDomain } from "../schema.js"
 import type { DatasetNotation } from "../notation.js"
 
 export type DatasetQuerySourceInput<
@@ -106,7 +106,7 @@ export type DatasetReactionEngine = ReactionEngine<any> | AiReactionEngine
 export type AnyDatasetRuntime = EkairosRuntime<any, any, any>
 export type DatasetRuntimeHandle<Runtime extends AnyDatasetRuntime> = RuntimeForDomain<
   Runtime,
-  typeof datasetDomain
+  typeof datasetSchemaDomain
 >
 export type CompatibleQueryDomain<
   Runtime extends AnyDatasetRuntime,

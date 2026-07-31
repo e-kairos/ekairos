@@ -14,7 +14,7 @@ import {
   readDatasetSandboxTextFileStep,
   runDatasetSandboxCommandStep,
 } from "../sandbox/steps"
-import { datasetDomain } from "../schema"
+import { datasetDomain } from "../domain"
 import { actionStep, deterministicReactionEngine } from "./_reactionEngine"
 
 const shouldRun = process.env.RUN_ESOLBAY_DATASET_REPRO === "1"
