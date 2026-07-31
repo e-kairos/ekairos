@@ -8,6 +8,7 @@ import {
   type DomainEventDraft,
   type DomainEventMethods,
   type DomainEventsOf,
+  type DomainInstantSchema,
   type DomainLike,
 } from "@ekairos/domain"
 import { getDomainActionBinding } from "@ekairos/domain/internal"
@@ -19,6 +20,7 @@ import {
   type ContextRuntimeServiceHandle,
   type StoredContext,
 } from "@ekairos/events"
+import type { ValidQuery } from "@instantdb/core"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { z } from "zod"
 
@@ -119,6 +121,16 @@ export type SessionDatasetInput<TRecord> = Readonly<{
   schema: z.ZodType<TRecord>
 }>
 
+export type SessionQueryDatasetInput<
+  TScope extends DomainLike,
+  Q extends ValidQuery<Q, DomainInstantSchema<TScope>>,
+  TRecord = unknown,
+> = Readonly<{
+  title: string
+  query: Q
+  schema?: z.ZodType<TRecord>
+}>
+
 type SessionGitOutput<TInput extends ReactionGitInput> =
   TInput["operation"] extends "clone" ? ReactorGitCloneOutput
     : TInput["operation"] extends "commit" ? ReactorGitCommitOutput
@@ -138,6 +150,12 @@ export interface SessionFrom<TScope extends DomainLike> {
   ): Promise<ContextEvent<DomainActionOutput<TAction>>>
   dataset<TRecord>(
     input: SessionDatasetInput<TRecord>,
+  ): Promise<ContextEvent<SessionDatasetHandle<TRecord>>>
+  dataset<
+    const Q extends ValidQuery<Q, DomainInstantSchema<TScope>>,
+    TRecord = unknown,
+  >(
+    input: SessionQueryDatasetInput<TScope, Q, TRecord>,
   ): Promise<ContextEvent<SessionDatasetHandle<TRecord>>>
   loadFiles(): Promise<ContextEvent<ReactorLoadFilesOutput>>
   storeFiles(input: ReactorStoreFilesInput): Promise<ContextEvent<ReactorStoreFilesOutput>>
@@ -286,9 +304,23 @@ export class Session<
       },
       dataset: async (input: any) => {
         this.assertOpen()
+        const events = await resolveEvents()
+        if ("query" in input) {
+          return await this.operation(events, {
+            kind: "dataset",
+            instruction: input.title,
+            recordSchema: input.schema
+              ? z.toJSONSchema(input.schema, { target: "draft-7" })
+              : undefined,
+            source: {
+              query: input.query,
+              domain: this.config.scope,
+              title: input.title,
+            },
+          })
+        }
         this.assertEngine()
         if (!input?.schema) throw new Error("reaction_dataset_schema_required")
-        const events = await resolveEvents()
         return await this.operation(events, {
           kind: "dataset",
           instruction: requiredInstruction(input.instruction),

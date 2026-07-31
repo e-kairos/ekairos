@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { i } from "@instantdb/core"
 import { z } from "zod"
 
 import { defineEvent, domain } from "../../../domain/src/index.ts"
@@ -7,7 +8,16 @@ import { ai } from "../reactor.ts"
 import { Session } from "../session.ts"
 
 const conversation = domain("conversationSessionTest")
-  .withSchema({ entities: {}, links: {}, rooms: {} })
+  .withSchema({
+    entities: {
+      conversationSessionTest_messages: i.entity({
+        text: i.string(),
+        createdAt: i.number().indexed(),
+      }),
+    },
+    links: {},
+    rooms: {},
+  })
   .withEvents({
     received: defineEvent({ payload: z.object({ text: z.string() }) }),
     closed: defineEvent({ payload: z.object({ reason: z.string() }) }),
@@ -120,6 +130,61 @@ describe("Session", () => {
 
     expect(appended).toEqual(["first", "second"])
     expect(operationPoints).toEqual(["event-1", "event-2"])
+  })
+
+  it("wires an explicit query Dataset to the scoped Domain without an engine", async () => {
+    const queryContext = new ContextHandle(runtime, {
+      id: "context-query",
+      key: "conversation-query",
+      content: null,
+      createdAt: new Date(),
+    } as any)
+    ;(queryContext as any).append = async (draft: any) => ({
+      id: "query-trigger",
+      type: draft.kind,
+      domain: draft.domain,
+      name: draft.name,
+      createdAt: new Date(),
+      contextId: queryContext.id,
+      payload: draft.payload,
+      links: {},
+      physicalLinks: {},
+      metadata: { causeIds: [] },
+      eventParts: [],
+    })
+    const session = new Session(runtime, queryContext, {
+      scope: conversationScope,
+      engine: false,
+    })
+    let captured: any
+    ;(session as any).operation = async (events: any[], operation: any) => {
+      captured = { events, operation }
+      return events[0]
+    }
+    const query = {
+      conversationSessionTest_messages: {
+        $: { order: { createdAt: "asc" } },
+      },
+    } as const
+
+    await session.from(
+      conversation.events.received({ text: "important messages" }),
+    ).dataset({
+      title: "Important messages",
+      query,
+    })
+
+    expect(captured.events.map((event: any) => event.id)).toEqual(["query-trigger"])
+    expect(captured.operation).toEqual({
+      kind: "dataset",
+      instruction: "Important messages",
+      recordSchema: undefined,
+      source: {
+        query,
+        domain: conversationScope,
+        title: "Important messages",
+      },
+    })
   })
 
   it("makes explicit completion and async disposal idempotent", async () => {

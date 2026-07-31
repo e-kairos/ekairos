@@ -46,6 +46,29 @@ Reactor orchestrates `contextDomain`; it owns no InstantDB schema.
 14. Session implements Workflow serialization/deserialization so the same
     object survives durable replays.
 
+## Deterministic query selection
+
+Queries decide what to inspect, bounded AI interprets that selected evidence,
+and a later Agent synthesizes the result. The query-backed Dataset operation
+does not invoke the Session engine:
+
+```ts
+const moments = await session.from(msg).dataset({
+  title: "Momentos importantes",
+  query: {
+    rocket_replay_events: {
+      $: {
+        where: { kind: { $in: ["goal", "save"] } },
+        order: { time: "asc" },
+      },
+    },
+  },
+})
+```
+
+Pass `moments` to the bounded analysis Agent, then pass those analysis Events to
+the synthesis Agent.
+
 ## Canonical coach flow
 
 ```ts

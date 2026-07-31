@@ -22,9 +22,11 @@ schema.
 ## Causal model
 
 1. A domain Event is an immutable fact.
-2. A Context is pure durable data: `content` and its optional `previous`
-   revision.
-3. A Session is one invocation of a Reaction definition in one Context.
+2. A Context owns durable `content` and an ordered Event timeline. An exogenous
+   Event appended to the Context records the previous timeline head in
+   `metadata.causeIds`.
+3. A Session is one flat configured execution in one Context. It is persisted
+   lazily by its first operation with definition `"session"`.
 4. A Reaction links one or more cause Events to one or more effect Events.
 5. Every observable operation is represented by a child Reaction. Most
    operations produce one effect Event; `agent` records every model round and
@@ -35,14 +37,14 @@ schema.
    Events replace their provisional projections independently as they complete.
 7. Event Parts are the ordered, streamable content of an Event: messages,
    reasoning, sources, actions, and structured values.
-8. `reaction.given(event)` selects explicit causal input. An Event array is the
-   explicit fan-in form.
-9. `agent`, `action`, `dataset`, `workspace`, `shell`, `git`, and `emit` all
+8. `session.from(event)` selects the Event and its causal ancestry as material
+   and records the selected point as the operation Reaction cause. An Event
+   array is the explicit fan-in form.
+9. `agent`, `action`, `dataset`, `loadFiles`, `storeFiles`, `shell`, and `git`
    return Events. Later operations consume those Events.
-10. Reactor passes only the invoking `reactionId` into a domain action. An
-    action resolves the owning Context explicitly when it must emit an effect
-    or start a child Reaction; executable Reactor capabilities never enter the
-    action contract.
+10. Reactor passes the Session execution environment to domain actions as
+    `{ context: { id, key }, sessionId, reactionId, causeIds }`. Action input
+    contains only domain data that cannot be inferred from that environment.
 
 ## Composition
 
@@ -62,3 +64,64 @@ CLIs, imports, and UIs are adapters over the composed runtime.
 Files remain Event links until explicitly materialized in a Reaction workspace.
 Engines and sandboxes are declared by each Reaction and never stored in Context
 content.
+
+## Canonical durable coaching flow
+
+```ts
+const publishReview = defineAction({
+  input: z.object({ review: coachingSchema }),
+  output: z.object({ reviewId: z.string() }),
+  async execute({ input, domain }, executionContext) {
+    "use step"
+    if (!executionContext) throw new Error("session_execution_context_required")
+    return await publishCoachingReview(domain.db, {
+      contextKey: executionContext.context.key,
+      review: input.review,
+    })
+  },
+})
+
+export const rocket = domain("rocket")
+  .withSchema({ entities: {}, links: {}, rooms: {} })
+  .withEvents({ messageReceived })
+  .withActions({ publishReview })
+
+const coaching = rocket.scope({
+  events: [rocket.events.messageReceived],
+  actions: [rocket.actions.publishReview],
+})
+
+export async function coachMatch(
+  runtime: RocketRuntime,
+  matchId: string,
+  text: string,
+) {
+  "use workflow"
+
+  await using session = await Context(runtime).session(
+    `rocket:${matchId}`,
+    coaching,
+    ai({ model: "anthropic/claude-haiku-4.5" }),
+    { sandbox: false },
+  )
+  const triage = await session
+    .from(rocket.events.messageReceived({ text }))
+    .agent({
+      instruction: "Choose the relevant replay windows.",
+      output: triageSchema,
+      datasets: false,
+    })
+  const final = await session.from(triage).agent({
+    instruction: "Synthesize one coaching paragraph and two priorities.",
+    output: coachingSchema,
+    datasets: false,
+  })
+  return await session.from(final).action(
+    rocket.actions.publishReview,
+    { review: final.payload },
+  )
+}
+```
+
+`"use workflow"` is the flagship durable form. Scripts and tests may run the
+same orchestration without the directive.

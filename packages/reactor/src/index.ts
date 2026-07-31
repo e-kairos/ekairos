@@ -15,6 +15,7 @@ export type {
   SessionDatasetInput,
   SessionFrom,
   SessionPoint,
+  SessionQueryDatasetInput,
   SessionTextAgentInput,
 } from "./session.js"
 

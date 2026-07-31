@@ -290,6 +290,7 @@ async function runOperation(
   }
 
   if (operation.kind === "dataset") {
+    const queryBacked = "query" in operation.source
     const provider = request.runtime.materializeDataset
     if (typeof provider !== "function") {
       throw new Error("reaction_dataset_provider_not_configured")
@@ -302,27 +303,42 @@ async function runOperation(
       contextId: request.context.ref.id,
       context: request.context,
       trigger: request.trigger,
-      ...(request.engine === false ? {} : { engine: request.engine }),
+      ...(!queryBacked && request.engine !== false
+        ? { engine: request.engine }
+        : {}),
       spec: {
         datasetId: request.eventId,
         ensure: {
           source: operation.source,
-          instructions: operation.instruction,
-          schema: { schema: operation.recordSchema },
+          ...(queryBacked && operation.source.title
+            ? { title: operation.source.title }
+            : {}),
+          ...(queryBacked ? {} : { instructions: operation.instruction }),
+          ...(operation.recordSchema === undefined
+            ? {}
+            : { schema: { schema: operation.recordSchema } }),
         },
       },
     })
-    const schema = schemaFromJson(operation.recordSchema, "reaction_dataset_record")
-    const preview = (result.previewRows ?? result.preview ?? []).map((row: unknown) => schema.parse(row))
+    const rows = result.previewRows ?? result.preview ?? []
+    const schema = operation.recordSchema === undefined
+      ? undefined
+      : schemaFromJson(operation.recordSchema, "reaction_dataset_record")
+    const preview = schema === undefined
+      ? rows
+      : rows.map((row: unknown) => schema.parse(row))
     const handle: DatasetAdapterHandle = Object.freeze({
       datasetId: String(result.datasetId ?? request.eventId),
       mode: result.mode === "opened" ? "opened" : "built",
       preview: Object.freeze(preview),
       ...(typeof result.count === "number" ? { count: result.count } : {}),
     })
-    return await createOperationEvent(request, handle, [Part.json(handle)], {
-      instruction: operation.instruction,
-    })
+    return await createOperationEvent(
+      request,
+      handle,
+      [Part.json(handle)],
+      queryBacked ? {} : { instruction: operation.instruction },
+    )
   }
 
   if (operation.kind === "loadFiles") {
@@ -387,6 +403,7 @@ function operationType(operation: ReactionOperation) {
 }
 
 function operationInstruction(operation: ReactionOperation) {
+  if (operation.kind === "dataset" && "query" in operation.source) return undefined
   return "instruction" in operation ? operation.instruction : undefined
 }
 

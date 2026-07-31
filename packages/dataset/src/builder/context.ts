@@ -123,7 +123,6 @@ async function persistDatasetSourceContextStep(params: {
     params.runtime as unknown as ContextRuntimeServiceHandle,
     {
       key: `dataset:${params.datasetId}`,
-      name: `Dataset ${params.datasetId}`,
       content: { datasetId: params.datasetId, sources },
     },
   )

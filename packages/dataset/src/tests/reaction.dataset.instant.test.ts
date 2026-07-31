@@ -57,8 +57,32 @@ const inboxScope = inboxDomain.scope({
   actions: [],
 })
 
+const rocketReplayDomain = domain("rocketReplay")
+  .includes(contextDomain)
+  .withSchema({
+    entities: {
+      rocket_replay_events: i.entity({
+        kind: i.string().indexed(),
+        time: i.number().indexed(),
+        label: i.string(),
+      }),
+    },
+    links: {},
+    rooms: {},
+  })
+  .withEvents({
+    messageReceived: defineEvent({
+      payload: z.object({ text: z.string() }),
+    }),
+  })
+const rocketReplayScope = rocketReplayDomain.scope({
+  events: [rocketReplayDomain.events.messageReceived],
+  actions: [],
+})
+
 const appDomain = domain("dataset-reaction-test")
   .includes(inboxDomain)
+  .includes(rocketReplayDomain)
   .includes(sandboxDomain)
   .includes(datasetDomain)
   .withSchema({ entities: {}, links: {}, rooms: {} })
@@ -197,7 +221,7 @@ describeInstant("Reaction Dataset operation", () => {
     expect(parent.status).toBe("completed")
 
     const datasetReaction = parent.reactions.find((row: any) => row.type === "dataset")
-    expect(datasetReaction.causeIds).toEqual([trigger.id])
+    expect(datasetReaction.causeIds).toEqual([parent.trigger.id])
     expect(datasetReaction.effects[0].payload).toEqual({
       datasetId: answer.payload.datasetId,
       mode: "built",
@@ -209,6 +233,110 @@ describeInstant("Reaction Dataset operation", () => {
     })
     expect(datasetReaction.effects[0].payload).not.toHaveProperty("reader")
 
+  }, 120_000)
+
+  itInstant("materializes an explicit scoped query without invoking an engine", async () => {
+    const runtime = new DatasetReactionRuntime({ appId, adminToken })
+    const replayEvents = [
+      { id: randomUUID(), kind: "goal", time: 12, label: "Opening goal" },
+      { id: randomUUID(), kind: "foul", time: 18, label: "Midfield foul" },
+      { id: randomUUID(), kind: "save", time: 27, label: "Near-post save" },
+      { id: randomUUID(), kind: "goal", time: 41, label: "Winning goal" },
+    ]
+    await db.transact(replayEvents.map(event =>
+      db.tx.rocket_replay_events[event.id].update({
+        kind: event.kind,
+        time: event.time,
+        label: event.label,
+      })))
+    const query = {
+      rocket_replay_events: {
+        $: {
+          where: { kind: { $in: ["goal", "save"] } },
+          order: { time: "asc" },
+        },
+      },
+    } as const
+
+    await using session = await Context(runtime).session(
+      `dataset-query:${randomUUID()}`,
+      rocketReplayScope,
+      false,
+      { sandbox: false },
+    )
+    const answer = await session.from(
+      rocketReplayDomain.events.messageReceived({
+        text: "Review the important moments.",
+      }),
+    ).dataset({
+      title: "Momentos importantes",
+      query,
+    })
+    await session.complete()
+
+    expect(answer.payload.count).toBe(3)
+    expect(answer.payload.preview.map(row => ({
+      kind: (row as any).kind,
+      time: (row as any).time,
+      label: (row as any).label,
+    }))).toEqual([
+      { kind: "goal", time: 12, label: "Opening goal" },
+      { kind: "save", time: 27, label: "Near-post save" },
+      { kind: "goal", time: 41, label: "Winning goal" },
+    ])
+
+    const stored = await db.query({
+      dataset_datasets: {
+        $: { where: { datasetId: answer.payload.datasetId } },
+        context: {},
+      },
+      context_sessions: {
+        $: { where: { context: session.context.id } },
+        trigger: {},
+        reactions: { causes: {}, effects: {} },
+      },
+    } as any)
+    const dataset = (stored as any).dataset_datasets[0]
+    expect(dataset.status).toBe("completed")
+    expect(dataset.actualGeneratedRowCount).toBe(3)
+    expect(dataset.notation).toMatchObject({
+      latex: expect.stringContaining("\\mathcal{D}"),
+      predicates: expect.arrayContaining([
+        expect.objectContaining({
+          id: "cardinality",
+          check: { kind: "row_count", op: "=", value: 3 },
+        }),
+      ]),
+    })
+    expect(dataset.context.content.sources).toMatchObject([
+      {
+        kind: "query",
+        name: "Momentos importantes",
+        query,
+      },
+    ])
+
+    const read = await new DatasetService(db as any).readRows({
+      datasetId: answer.payload.datasetId,
+      limit: 100,
+    })
+    if (!read.ok) throw new Error(read.error)
+    expect(read.data.rows.map((row: any) => ({
+      kind: row.kind,
+      time: row.time,
+      label: row.label,
+    }))).toEqual([
+      { kind: "goal", time: 12, label: "Opening goal" },
+      { kind: "save", time: 27, label: "Near-post save" },
+      { kind: "goal", time: 41, label: "Winning goal" },
+    ])
+
+    const storedSession = (stored as any).context_sessions[0]
+    const datasetReaction = storedSession.reactions.find(
+      (reaction: any) => reaction.type === "dataset",
+    )
+    expect(datasetReaction.causeIds).toEqual([storedSession.trigger.id])
+    expect(datasetReaction.effects[0].payload.datasetId).toBe(answer.payload.datasetId)
   }, 120_000)
 
   itInstant("lets Agent materialize a scoped InstaQL Dataset", async () => {
