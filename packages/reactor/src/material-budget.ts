@@ -6,6 +6,8 @@ export const DATASET_PREVIEW_ROW_CHARS = 2_048
 export const DATASET_PREVIEW_TOTAL_CHARS = 40_960
 export const DATASET_READ_ROW_CHARS = 16_384
 export const DATASET_READ_TOTAL_CHARS = 131_072
+export const AGENT_MATERIAL_TOTAL_CHARS = 320_000
+export const AGENT_MATERIAL_EVENT_MIN_CHARS = 8_192
 
 export type BoundedRows = Readonly<{
   rows: readonly unknown[]

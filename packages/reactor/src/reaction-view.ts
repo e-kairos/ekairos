@@ -7,6 +7,11 @@ import type {
 
 import type { ReactorInitialContext } from "./reactor.js"
 import { toModelActionName } from "./action-name.js"
+import {
+  AGENT_MATERIAL_EVENT_MIN_CHARS,
+  AGENT_MATERIAL_TOTAL_CHARS,
+  compactJsonValue,
+} from "./material-budget.js"
 
 export function buildAgentSystemPrompt(input: {
   reactionKey: string
@@ -35,8 +40,12 @@ export async function buildAgentModelMessages<TContext>(input: {
   events: readonly ContextEvent[]
 }): Promise<ModelMessage[]> {
   const messages: ModelMessage[] = [textMessage("user", renderContext(input.context))]
+  const eventBudget = Math.max(
+    AGENT_MATERIAL_EVENT_MIN_CHARS,
+    Math.floor(AGENT_MATERIAL_TOTAL_CHARS / Math.max(1, input.events.length)),
+  )
   for (const event of input.events) {
-    messages.push(...await eventToModelMessages(input.runtime, event))
+    messages.push(...await eventToModelMessages(input.runtime, event, eventBudget))
   }
   messages.push(textMessage("user", [
     "## Current session operation",
@@ -51,18 +60,20 @@ export async function buildAgentModelMessages<TContext>(input: {
 export async function eventToModelMessages(
   runtime: ContextRuntimeServiceHandle,
   event: ContextEvent,
+  maxChars: number = AGENT_MATERIAL_TOTAL_CHARS,
 ): Promise<ModelMessage[]> {
   if (event.type === "context.action") {
     return actionPartsToModelMessages(event.eventParts)
   }
   const role = event.type === "context.model" ? "assistant" : "user"
-  const content: any[] = [{ type: "text", text: renderEvent(event) }]
-  appendMessageParts(content, event.eventParts)
+  const content: any[] = [{ type: "text", text: renderEvent(event, maxChars) }]
+  appendMessageParts(content, event.eventParts, maxChars)
   await appendLinkedFiles(runtime, content, event)
 
-  const messages: ModelMessage[] = [{ role, content } as ModelMessage]
-  messages.push(...actionPartsToModelMessages(event.eventParts))
-  return messages
+  // Cone material carries each Event's value: its payload and message parts.
+  // Internal action traffic (tool calls of the Reaction that produced the
+  // Event) is not replayed into other operations' model views.
+  return [{ role, content } as ModelMessage]
 }
 
 export function actionPartsToModelMessages(
@@ -127,7 +138,7 @@ function renderContext<TContext>(context: ReactorInitialContext<TContext>) {
   return lines.join("\n")
 }
 
-function renderEvent(event: ContextEvent) {
+function renderEvent(event: ContextEvent, maxChars: number = AGENT_MATERIAL_TOTAL_CHARS) {
   return [
     "## Event",
     "",
@@ -140,26 +151,38 @@ function renderEvent(event: ContextEvent) {
       channel: event.channel,
       metadata: event.metadata,
       links: event.links,
-      payload: event.payload,
+      payload: compactJsonValue(event.payload, maxChars),
     }),
   ].join("\n")
 }
 
-function appendMessageParts(content: any[], parts: readonly ContextEventPart[]) {
+function appendMessageParts(
+  content: any[],
+  parts: readonly ContextEventPart[],
+  maxChars: number = AGENT_MATERIAL_TOTAL_CHARS,
+) {
   for (const part of parts) {
     if (part.type !== "message") continue
     const value = part.content as any
     if (typeof value?.text === "string" && value.text) {
-      content.push({ type: "text", text: value.text })
+      content.push({ type: "text", text: boundText(value.text, maxChars) })
     }
     for (const block of value?.blocks ?? []) {
-      if (block?.type === "text") content.push({ type: "text", text: block.text })
+      if (block?.type === "text") {
+        content.push({ type: "text", text: boundText(block.text, maxChars) })
+      }
       if (block?.type === "json") {
-        content.push({ type: "text", text: codeJson(block.value) })
+        content.push({ type: "text", text: codeJson(compactJsonValue(block.value, maxChars)) })
       }
       if (block?.type === "file") appendFileBlock(content, block)
     }
   }
+}
+
+function boundText(text: string, maxChars: number) {
+  return text.length <= maxChars
+    ? text
+    : `${text.slice(0, maxChars)}...[truncated]`
 }
 
 async function appendLinkedFiles(
