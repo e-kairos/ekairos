@@ -1,21 +1,137 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry.json",
   "name": "ekairos",
-  "homepage": "https://github.com/e-kairos/ekairos/tree/main/packages/registry",
+  "homepage": "http://localhost:3030/registry",
   "items": [
     {
-      "name": "event-context-panel",
-      "type": "registry:component",
-      "title": "EventContextPanel",
-      "description": "Client event context panel that uses @ekairos/events/react directly.",
+      "name": "reaction-graph",
+      "type": "registry:lib",
+      "title": "Reaction graph",
+      "description": "Pure causal Event timeline builder and types for Ekairos Context Sessions.",
       "dependencies": [
-        "@ekairos/events@beta"
+        "@ekairos/events"
       ],
       "files": [
         {
-          "path": "components/ekairos/events/event-context-panel.tsx",
+          "path": "components/ekairos/reactions/reaction-graph.ts",
+          "type": "registry:lib",
+          "target": "components/ekairos/reactions/reaction-graph.ts"
+        }
+      ]
+    },
+    {
+      "name": "event-timeline",
+      "type": "registry:component",
+      "title": "Event timeline",
+      "description": "Git-style causal Session viewer with lanes, dots, and Bezier flow edges.",
+      "dependencies": [
+        "@ekairos/events"
+      ],
+      "files": [
+        {
+          "path": "components/ekairos/reactions/event-timeline.tsx",
           "type": "registry:component",
-          "target": "components/ekairos/events/event-context-panel.tsx"
+          "target": "components/ekairos/reactions/event-timeline.tsx"
+        },
+        {
+          "path": "components/ekairos/reactions/reaction-graph.ts",
+          "type": "registry:lib",
+          "target": "components/ekairos/reactions/reaction-graph.ts"
+        },
+        {
+          "path": "components/ekairos/reactions/event-timeline.css",
+          "type": "registry:file",
+          "target": "components/ekairos/reactions/event-timeline.css"
+        }
+      ]
+    },
+    {
+      "name": "context-chat",
+      "type": "registry:component",
+      "title": "Context chat",
+      "description": "Minimal MessageList and PromptBar over the current useContext reaction-stream API.",
+      "dependencies": [
+        "@ekairos/events"
+      ],
+      "files": [
+        {
+          "path": "components/ekairos/reactions/context-chat.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/reactions/context-chat.tsx"
+        },
+        {
+          "path": "components/ekairos/reactions/context-chat.css",
+          "type": "registry:file",
+          "target": "components/ekairos/reactions/context-chat.css"
+        }
+      ]
+    },
+    {
+      "name": "channel-badge",
+      "type": "registry:component",
+      "title": "ChannelBadge",
+      "description": "Platform identity chip for canonical channel messages.",
+      "dependencies": [],
+      "files": [
+        {
+          "path": "components/ekairos/channel/channel-badge.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/channel/channel-badge.tsx"
+        }
+      ]
+    },
+    {
+      "name": "channel-message",
+      "type": "registry:component",
+      "title": "ChannelMessageBubble",
+      "description": "Canonical message bubble for any channel_messages record.",
+      "dependencies": [
+        "@ekairos/channel"
+      ],
+      "registryDependencies": [
+        "@ekairos/channel-badge"
+      ],
+      "files": [
+        {
+          "path": "components/ekairos/channel/channel-message.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/channel/channel-message.tsx"
+        }
+      ]
+    },
+    {
+      "name": "channel-timeline",
+      "type": "registry:component",
+      "title": "ChannelTimeline",
+      "description": "Reactive multichannel conversation timeline over the channel_messages InstantDB schema.",
+      "dependencies": [
+        "@ekairos/channel"
+      ],
+      "registryDependencies": [
+        "@ekairos/channel-message"
+      ],
+      "files": [
+        {
+          "path": "components/ekairos/channel/channel-timeline.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/channel/channel-timeline.tsx"
+        }
+      ]
+    },
+    {
+      "name": "channel-composer",
+      "type": "registry:component",
+      "title": "ChannelComposer",
+      "description": "Outbound composer that posts to your send endpoint with channel selection.",
+      "dependencies": [],
+      "registryDependencies": [
+        "@ekairos/channel-badge"
+      ],
+      "files": [
+        {
+          "path": "components/ekairos/channel/channel-composer.tsx",
+          "type": "registry:component",
+          "target": "components/ekairos/channel/channel-composer.tsx"
         }
       ]
     }

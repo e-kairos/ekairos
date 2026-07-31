@@ -1,0 +1,16 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel-badge",
+  "title": "ChannelBadge",
+  "description": "Platform identity chip for canonical channel messages.",
+  "dependencies": [],
+  "files": [
+    {
+      "path": "components/ekairos/channel/channel-badge.tsx",
+      "content": "\"use client\";\n\nimport { cn } from \"@/lib/utils\";\n\nexport type ChannelBadgeProps = {\n  /** Channel kind: web, email, whatsapp, slack, teams, discord, telegram, ... */\n  channel: string;\n  className?: string;\n};\n\nconst CHANNEL_ACCENTS: Record<string, string> = {\n  web: \"#61e9ff\",\n  email: \"#f59e0b\",\n  whatsapp: \"#25d366\",\n  slack: \"#e01e5a\",\n  teams: \"#6264a7\",\n  gchat: \"#34a853\",\n  discord: \"#5865f2\",\n  telegram: \"#2aabee\",\n};\n\n/**\n * Platform identity chip for a canonical channel message. Unknown channels\n * render with a neutral accent, so custom channels work out of the box.\n */\nexport function ChannelBadge({ channel, className }: ChannelBadgeProps) {\n  const accent = CHANNEL_ACCENTS[channel] ?? \"#a1a1aa\";\n  return (\n    <span\n      className={cn(\n        \"inline-flex items-center gap-1.5 border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground\",\n        className,\n      )}\n    >\n      <span\n        aria-hidden=\"true\"\n        className=\"h-1.5 w-1.5 shrink-0 rounded-full\"\n        style={{ backgroundColor: accent }}\n      />\n      {channel}\n    </span>\n  );\n}\n",
+      "type": "registry:component",
+      "target": "components/ekairos/channel/channel-badge.tsx"
+    }
+  ],
+  "type": "registry:component"
+}

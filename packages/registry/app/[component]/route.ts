@@ -24,7 +24,7 @@ function resolveRegistryRoot() {
   for (const candidate of candidates) {
     if (
       existsSync(join(candidate, "registry.json")) &&
-      existsSync(join(candidate, "components", "ekairos", "events", "event-context-panel.tsx"))
+      existsSync(join(candidate, "components", "ekairos", "reactions", "event-timeline.tsx"))
     ) {
       return candidate;
     }
@@ -83,21 +83,24 @@ const registryOrigin =
     ? `${protocol}://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
     : process.env.NEXT_PUBLIC_APP_URL ??
       inferredDevOrigin ??
-      (process.env.NODE_ENV === "development" ? "http://localhost:3001" : "");
+      (process.env.NODE_ENV === "development" ? "http://localhost:3030" : "");
 
 const homepage = registryOrigin
   ? new URL("/registry", registryOrigin).toString()
-  : "http://localhost:3001/registry";
+  : "http://localhost:3030/registry";
 
 const componentsRoot = join(registryRoot, "components");
 const defaultAiElementsRegistry = "https://registry.ai-sdk.dev/";
 const aiElementsRegistryBase =
   process.env.AI_ELEMENTS_REGISTRY_URL ?? defaultAiElementsRegistry;
 const runtimeProvidedDependencies = new Set(["next", "react", "react-dom"]);
-const versionlessDependencies = new Set(["ai", "streamdown"]);
+const versionlessDependencies = new Set([
+  "@ekairos/channel",
+  "@ekairos/events",
+  "ai",
+  "streamdown",
+]);
 const packageVersionOverrides: Record<string, string> = {
-  "@ekairos/events": process.env.EKAIROS_EVENTS_PACKAGE_VERSION ?? "beta",
-  "@ekairos/channel": process.env.EKAIROS_CHANNEL_PACKAGE_VERSION ?? "beta",
   ai: "^5.0.102",
   streamdown: "^1.3.0",
 };
@@ -152,7 +155,9 @@ const toComponentName = (relativePath: string) =>
   stripExtension(relativePath).split("/").join("-").toLowerCase();
 
 const PUBLISHED_EKAIROS_NAMES: Record<string, string> = {
-  "ekairos/events/event-context-panel": "event-context-panel",
+  "ekairos/reactions/reaction-graph": "reaction-graph",
+  "ekairos/reactions/event-timeline": "event-timeline",
+  "ekairos/reactions/context-chat": "context-chat",
   "ekairos/channel/channel-badge": "channel-badge",
   "ekairos/channel/channel-message": "channel-message",
   "ekairos/channel/channel-timeline": "channel-timeline",
@@ -172,7 +177,9 @@ function getRegistryName(relativePath: string) {
 }
 
 const KNOWN_TITLES: Record<string, string> = {
-  "ekairos/events/event-context-panel": "EventContextPanel",
+  "ekairos/reactions/reaction-graph": "Reaction graph",
+  "ekairos/reactions/event-timeline": "Event timeline",
+  "ekairos/reactions/context-chat": "Context chat",
   "ekairos/channel/channel-badge": "ChannelBadge",
   "ekairos/channel/channel-message": "ChannelMessageBubble",
   "ekairos/channel/channel-timeline": "ChannelTimeline",
@@ -197,8 +204,12 @@ const toTitle = (relativePath: string) => {
     .join(" / ");
 };
 
-const toRegistryItemType = (_relativePath: string): "registry:component" =>
-  "registry:component";
+const toRegistryItemType = (
+  relativePath: string,
+): "registry:component" | "registry:lib" =>
+  stripExtension(relativePath) === "ekairos/reactions/reaction-graph"
+    ? "registry:lib"
+    : "registry:component";
 
 const toDescription = (relativePath: string) => {
   const basePath = stripExtension(relativePath);
@@ -206,8 +217,12 @@ const toDescription = (relativePath: string) => {
   const fileName = segments[segments.length - 1] ?? basePath;
 
   switch (basePath) {
-    case "ekairos/events/event-context-panel":
-      return "Client event context panel that uses @ekairos/events/react directly.";
+    case "ekairos/reactions/reaction-graph":
+      return "Pure causal Event timeline builder and types for Ekairos Context Sessions.";
+    case "ekairos/reactions/event-timeline":
+      return "Git-style causal Session viewer with lanes, dots, and Bezier flow edges.";
+    case "ekairos/reactions/context-chat":
+      return "Minimal MessageList and PromptBar over the current useContext reaction-stream API.";
     case "ekairos/channel/channel-badge":
       return "Platform identity chip for canonical channel messages.";
     case "ekairos/channel/channel-message":

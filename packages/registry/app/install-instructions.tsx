@@ -2,10 +2,10 @@
 
 import React, { useState } from "react"
 
-const REGISTRY_HOST = "registry.ekairos.dev"
+const REGISTRY_HOST = "localhost:3030"
 
 const COMMAND =
-  "pnpm dlx shadcn@4.8.0 add https://registry.ekairos.dev/r/<nombre-componente>.json"
+  "npx shadcn@latest add http://localhost:3030/r/<nombre-componente>.json"
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -35,7 +35,7 @@ export function InstallInstructions() {
           instalacion
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          Usa el CLI de shadcn para instalar los componentes publicados por dominio.
+          Usa el CLI de shadcn para copiar componentes desde el registry local.
         </p>
       </div>
 

@@ -1,39 +1,47 @@
 # Ekairos Registry
 
-Domain-first shadcn-compatible component registry for Ekairos UI packages.
-The registry is organized as `domain -> components -> /r/*.json`; domain
-runtime APIs stay in package dependencies such as `@ekairos/events`.
+Local-first shadcn-compatible source registry for Ekairos UI. Components are
+copied into the consumer; the registry does not require an npm UI package or a
+GitHub URL.
 
-## Start
+## Build the static registry
 
 ```bash
+pnpm --filter registry registry:build
+```
+
+The consumable JSON files are written to `packages/registry/public/r`.
+
+## Consume from the local Next server
+
+Build the registry first, then start the app:
+
+```bash
+pnpm --filter registry registry:build
 pnpm --filter registry dev
 ```
 
-Default URL:
+From a Vite application initialized with shadcn, install from the static
+endpoint served by Next:
+
+```bash
+npx shadcn@latest add http://localhost:3030/r/event-timeline.json
+```
+
+The component source imports `@ekairos/events/react`. The registry dependency
+is versionless so the consumer can resolve the current package release or its
+own workspace dependency.
+
+Demo fixture:
 
 ```txt
-http://localhost:3030
+http://localhost:3030/demo/event-timeline
 ```
 
-## Consume from another app
-
-```json
-{
-  "registries": {
-    "@ekairos": "http://localhost:3030/r/{name}.json"
-  }
-}
-```
-
-Example for the first published domain component:
+## Verification
 
 ```bash
-pnpm dlx shadcn@4.8.0 add https://registry.ekairos.dev/r/event-context-panel.json
-```
-
-## E2E
-
-```bash
-pnpm --filter registry test:e2e
+pnpm --filter registry typecheck
+pnpm --filter ekairos-workbench-v3 typecheck
+pnpm --filter ekairos-workbench-v3 test -- reaction-graph.test.ts
 ```

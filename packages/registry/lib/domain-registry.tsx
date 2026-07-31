@@ -11,7 +11,7 @@ export type DomainRegistryComponentLink = {
   dependency: string;
   packageImport: string;
   status: DomainRegistryComponentStatus;
-  kind: "component";
+  kind: "component" | "lib";
   group: string;
 };
 
@@ -197,8 +197,13 @@ if (!context) throw new Error("context_not_found");
 await context.react(triggerEvent, tenderReaction);
 
 export function TenderAgent({ db, contextKey }) {
-  const context = useContext(db, { apiUrl: "/api/tender/react", contextKey });
-  return <EventContextPanel context={context} />;
+  return (
+    <ContextChat
+      db={db}
+      apiUrl="/api/tender/react"
+      contextKey={contextKey}
+    />
+  );
 }`,
   componentSurface:
     "Events is the first published UI surface because product apps need to render live context state, prompt input, causal history, and reaction progress.",
@@ -206,19 +211,49 @@ export function TenderAgent({ db, contextKey }) {
   routes: domainRoutes("events"),
   components: [
     {
-      id: "event-context-panel",
-      label: "EventContextPanel",
+      id: "reaction-graph",
+      label: "Reaction graph",
       description:
-        "Interactive panel for rendering an event context timeline and appending input through the canonical events React API.",
-      href: "/events/components#event-context-panel",
-      registryName: "event-context-panel",
-      registryPath: "/r/event-context-panel.json",
-      target: "components/ekairos/events/event-context-panel.tsx",
-      dependency: "@ekairos/events@beta",
+        "Pure causal Event graph builder used by the timeline renderer and downstream custom views.",
+      href: "/demo/event-timeline",
+      registryName: "reaction-graph",
+      registryPath: "/r/reaction-graph.json",
+      target: "components/ekairos/reactions/reaction-graph.ts",
+      dependency: "@ekairos/events",
+      packageImport: "@ekairos/events/react",
+      status: "published",
+      kind: "lib",
+      group: "Reactions",
+    },
+    {
+      id: "event-timeline",
+      label: "Event timeline",
+      description:
+        "Git-style Context Session viewer with causal lanes, selection, and reaction-stream Events.",
+      href: "/demo/event-timeline",
+      registryName: "event-timeline",
+      registryPath: "/r/event-timeline.json",
+      target: "components/ekairos/reactions/event-timeline.tsx",
+      dependency: "@ekairos/events",
       packageImport: "@ekairos/events/react",
       status: "published",
       kind: "component",
-      group: "Panels",
+      group: "Reactions",
+    },
+    {
+      id: "context-chat",
+      label: "Context chat",
+      description:
+        "Minimal MessageList and PromptBar over useContext and its live reaction-stream projections.",
+      href: "/registry/context-chat",
+      registryName: "context-chat",
+      registryPath: "/r/context-chat.json",
+      target: "components/ekairos/reactions/context-chat.tsx",
+      dependency: "@ekairos/events",
+      packageImport: "@ekairos/events/react",
+      status: "published",
+      kind: "component",
+      group: "Reactions",
     },
     {
       id: "context-agent",

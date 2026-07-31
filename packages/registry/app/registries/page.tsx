@@ -52,7 +52,7 @@ export default function RegistriesPage() {
           <p className="mt-4 max-w-md text-sm leading-6 text-muted-foreground">
             After the registries are configured, every item installs by namespace:
             <span className="ml-1 font-mono text-foreground">
-              shadcn add @ekairos-events/event-context-panel
+              npx shadcn@latest add http://localhost:3030/r/event-timeline.json
             </span>
             .
           </p>

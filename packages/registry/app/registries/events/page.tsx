@@ -103,7 +103,7 @@ export default function EventsRegistryPage() {
               <code>{buildRegistriesConfig([registry])}</code>
             </pre>
             <pre className="overflow-x-auto bg-muted/45 p-4 font-mono text-xs leading-6">
-              <code>{`pnpm dlx shadcn@latest add ${registry.namespace}/event-context-panel`}</code>
+              <code>{`npx shadcn@latest add http://localhost:3030/r/event-timeline.json`}</code>
             </pre>
           </div>
         </div>
