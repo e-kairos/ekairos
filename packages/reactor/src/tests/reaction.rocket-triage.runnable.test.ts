@@ -1,5 +1,5 @@
 /* @vitest-environment node */
-// Runnable proof of the canonical Context.append + Session.from fork/join flow.
+// Runnable proof of the canonical Context(...).session + Session.from flow.
 
 import { randomUUID } from "node:crypto"
 
@@ -9,13 +9,13 @@ import { z } from "zod"
 
 import { EkairosRuntime, defineEvent, domain } from "@ekairos/domain"
 import { ContextHandle, Part, contextDomain } from "@ekairos/events"
+import { Context } from "../../../context/src/index.ts"
 import {
   destroyContextTestApp,
   itInstant,
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
 import type { ReactionEngine, ReactionEngineInput } from "../reactor.ts"
-import { Session } from "../session.ts"
 
 const rocket = domain("rocketTriageRunnable")
   .includes(contextDomain)
@@ -23,6 +23,10 @@ const rocket = domain("rocketTriageRunnable")
   .withEvents({
     messageReceived: defineEvent({ payload: z.object({ text: z.string() }) }),
   })
+const coaching = rocket.scope({
+  events: [rocket.events.messageReceived],
+  actions: [],
+})
 
 class RunnableRuntime extends EkairosRuntime<
   { appId: string; adminToken: string },
@@ -73,19 +77,20 @@ describe("rocket triage runnable flat Session", () => {
 
   itInstant("forks Dataset analysis and joins the resulting causal cone", async () => {
     const runtime = new RunnableRuntime({ appId, adminToken })
-    const context = await ContextHandle.open(runtime, {
-      key: `rocket:${randomUUID()}`,
+    const contextKey = `rocket:${randomUUID()}`
+    await ContextHandle.open(runtime, {
+      key: contextKey,
       content: { score: [2, 1], player: "VFex" },
     })
-    const message = await context.append(
-      rocket.events.messageReceived({ text: "Analiza el gol rival." }),
+    await using session = await Context(runtime).session(
+      contextKey,
+      coaching,
+      new CoachEngine(),
+      { sandbox: false },
     )
-    const session = new Session(runtime, context, {
-      scope: rocket,
-      engine: new CoachEngine(),
-      sandbox: false,
-    })
-    const triage = await session.from(message).agent({
+    const triage = await session.from(
+      rocket.events.messageReceived({ text: "Analiza el gol rival." }),
+    ).agent({
       instruction: "triage",
       output: z.object({
         plays: z.array(z.object({
@@ -111,12 +116,10 @@ describe("rocket triage runnable flat Session", () => {
       output: z.object({ feedback: z.string() }),
       datasets: false,
     })
-    await session.complete()
-
     expect(final.payload.feedback).toContain("boost")
     const graph = await (await runtime.db()).query({
       context_sessions: {
-        $: { where: { context: context.id } },
+        $: { where: { context: session.context.id } },
         rootReaction: { effects: {} },
         reactions: { causes: {}, effects: {} },
       },

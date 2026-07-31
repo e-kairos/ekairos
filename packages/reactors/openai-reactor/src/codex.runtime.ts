@@ -1,5 +1,6 @@
 import {
   toModelActionName,
+  type DomainActionExecutionContext,
   type ReactionEngineActions,
   type ReactionEngineInput,
 } from "@ekairos/reactor"
@@ -135,7 +136,7 @@ export function buildCodexDynamicTools(actions: ReactionEngineActions): CodexDyn
 export async function executeCodexAction(
   actions: ReactionEngineActions,
   request: CodexActionRequest,
-  executionContext: Record<string, unknown>,
+  executionContext: DomainActionExecutionContext,
 ): Promise<{ success: boolean; output: unknown; errorText?: string }> {
   const action = actions[request.name]
   if (!action) {

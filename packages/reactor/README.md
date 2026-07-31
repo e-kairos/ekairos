@@ -14,17 +14,21 @@ import { Session, ai } from "@ekairos/reactor"
 Applications normally construct a Session through `@ekairos/context`:
 
 ```ts
-const context = await Context(runtime).open({ key, content })
-const message = await context.append(app.events.messageReceived(payload))
-const session = context.session({
-  scope: app,
-  engine: ai({ model: "openai/gpt-5.2" }),
-  sandbox: false,
+const answering = app.scope({
+  events: [app.events.messageReceived],
+  actions: [app.actions.saveDecision],
 })
+await using session = await Context(runtime).session(
+  key,
+  answering,
+  ai({ model: "openai/gpt-5.2" }),
+  { sandbox: false },
+)
+const message = app.events.messageReceived(payload)
 ```
 
-The configuration is exactly `scope`, `engine`, and optional `sandbox`.
-Actions are never Session defaults.
+The concrete scope is the execution boundary for domain Events and actions.
+Actions are still exposed explicitly to each Agent operation.
 
 ## Operations
 
@@ -56,11 +60,11 @@ const saved = await session.from(decision).action(
   app.actions.saveDecision,
   decision.payload,
 )
-
-await session.complete()
 ```
 
-`from(event)` supplies the Event and its complete causal ancestry.
+`from(event)` supplies the Event and its complete causal ancestry. A domain
+Event draft is appended to `session.context` first, then its persisted Event is
+used as the point.
 `from([a, b])` supplies the ordered union of both cones. The operation Reaction
 stores the passed Event ids exactly as its `causeIds`.
 
@@ -82,9 +86,10 @@ turn it off. Agent actions are explicit in that operation's `actions` array.
 
 ## Completion and failure
 
-`complete(): Promise<void>` completes the Session and records the last
-operation result as the root Reaction effect. An operation failure marks the
-root Reaction and Session failed and rethrows.
+`await using` is canonical. Clean disposal calls the idempotent
+`complete(): Promise<void>` and records the last operation result as the root
+Reaction effect. Explicit `complete()` remains optional. An operation failure
+marks the root Reaction and Session failed before the error escapes.
 
 There is no public callback definition, app-facing execution function,
 `given`, or Session `emit`.
@@ -94,15 +99,20 @@ There is no public callback definition, app-facing execution function,
 The same code can run inside an explicit Workflow:
 
 ```ts
-export async function analyze(context: SessionContextHandle, message: ContextEvent) {
+export async function analyze(runtime: AppRuntime, contextKey: string) {
   "use workflow"
 
-  const session = context.session({ scope: app, engine, sandbox: false })
-  const answer = await session.from(message).agent({
+  await using session = await Context(runtime).session(
+    contextKey,
+    answering,
+    engine,
+    { sandbox: false },
+  )
+  return await session.from(app.events.messageReceived(payload)).agent({
     instruction: "Answer.",
     output: answerSchema,
   })
-  await session.complete()
-  return answer
 }
 ```
+
+For direct scripts and tests, use the same code without `"use workflow"`.

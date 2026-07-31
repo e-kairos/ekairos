@@ -6,26 +6,37 @@ Module: `@ekairos/context`
 the flat Reactor Session.
 
 ```ts
-const context = await Context(runtime).open({ key, content })
-const message = await context.append(appDomain.events.messageReceived(payload))
-const session = context.session({ scope: appDomain, engine, sandbox: false })
-const answer = await session.from(message).agent({
+const coaching = appDomain.scope({
+  events: [appDomain.events.messageReceived],
+  actions: [appDomain.actions.saveAnswer],
+})
+await using session = await Context(runtime).session(
+  key,
+  coaching,
+  engine,
+  { sandbox: false },
+)
+const answer = await session.from(
+  appDomain.events.messageReceived(payload),
+).agent({
   instruction,
   output,
   actions: [appDomain.actions.saveAnswer],
 })
-await session.complete()
 ```
 
 ## Invariants
 
-- `Context(runtime).open(...)` is the only application-facing Context entry.
+- `Context(runtime).open(contextKey)` opens only the durable timeline handle.
+- `Context(runtime).session(contextKey, scope, engine, options)` is the
+  execution entry.
 - Context owns durable content and the complete Event timeline.
-- Exogenous facts enter through `context.append(...)`.
+- Drafts passed to `from(...)` are appended before execution.
 - Session configuration contains only `scope`, `engine`, and optional
   `sandbox`.
+- `session.context` exposes the opened timeline handle.
 - Agent actions are explicit per operation.
 - `from(...)` selects both causal points and their complete material cones.
 - Session operations write directly to the Context timeline.
-- `complete()` returns nothing; effects are already persisted Events.
+- Async disposal is canonical; `complete()` is optional and idempotent.
 - Dispatch and subscriptions are outside this package.

@@ -4,6 +4,10 @@ import {
   type DomainActionInput,
   type DomainActionOutput,
   type DomainActionRegistration,
+  type DomainActionsOf,
+  type DomainEventDraft,
+  type DomainEventMethods,
+  type DomainEventsOf,
   type DomainLike,
 } from "@ekairos/domain"
 import { getDomainActionBinding } from "@ekairos/domain/internal"
@@ -15,6 +19,7 @@ import {
   type ContextRuntimeServiceHandle,
   type StoredContext,
 } from "@ekairos/events"
+import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { z } from "zod"
 
 import {
@@ -53,11 +58,28 @@ import type {
   ReactorStoreFilesOutput,
 } from "./reactor.js"
 type AnyDomainAction = DomainActionRegistration<any, any, any, any>
-type EventSource = ContextEvent | readonly ContextEvent[]
+type AnyDomainEventDraft = DomainEventDraft<any, any, any, any, any, any>
+
+type ScopedDomainEventDraft<TScope extends DomainLike> = {
+  [Key in keyof DomainEventsOf<TScope> & string]:
+    ReturnType<DomainEventMethods<DomainEventsOf<TScope>>[Key]>
+}[keyof DomainEventsOf<TScope> & string]
+
+export type SessionPoint<TScope extends DomainLike> =
+  | ContextEvent
+  | ScopedDomainEventDraft<TScope>
+
+type EventSource<TScope extends DomainLike> =
+  | SessionPoint<TScope>
+  | readonly SessionPoint<TScope>[]
 
 type ActionAllowedInScope<TAction, TScope> =
-  TAction extends AnyDomainAction
-    ? DomainActionBelongsTo<TAction, TScope> extends false ? never : TAction
+  TAction extends DomainActionRegistration<any, any, any, any, infer Key>
+    ? DomainActionBelongsTo<TAction, TScope> extends false
+      ? never
+      : Key extends keyof DomainActionsOf<TScope>
+        ? TAction
+        : never
     : never
 
 export type SessionDatasetHandle<TRecord> = Readonly<{
@@ -156,17 +178,18 @@ export class Session<
   TContext,
   TScope extends DomainLike,
 > {
-  private readonly rootReactionId = globalThis.crypto.randomUUID()
+  private rootReactionId: string = globalThis.crypto.randomUUID()
   private nextPosition = 1
   private prepared?: PreparedSession
   private preparing?: Promise<PreparedSession>
+  private completing?: Promise<void>
   private lastEvent?: ContextEvent
   private failed?: unknown
   private completed = false
 
   constructor(
     private readonly runtime: SessionRuntime,
-    private readonly contextHandle: ContextHandle<TContext>,
+    readonly context: ContextHandle<TContext>,
     private readonly config: SessionConfig<TContext, TScope>,
   ) {
     if (!config?.scope) throw new Error("session_scope_required")
@@ -174,12 +197,51 @@ export class Session<
     sessionIds.set(this, globalThis.crypto.randomUUID())
   }
 
-  from(source: EventSource): SessionFrom<TScope> {
-    const events = normalizeEvents(source)
-    for (const event of events) {
-      if (event.contextId && event.contextId !== this.contextHandle.id) {
-        throw new Error(`session_event_outside_context:${event.id}`)
-      }
+  static [WORKFLOW_SERIALIZE](instance: Session<any, any>) {
+    return {
+      runtime: instance.runtime,
+      context: instance.context,
+      config: instance.config,
+      rootReactionId: instance.rootReactionId,
+      nextPosition: instance.nextPosition,
+      prepared: instance.prepared,
+      lastEvent: instance.lastEvent,
+      failed: instance.failed,
+      completed: instance.completed,
+      sessionId: getSessionId(instance),
+    }
+  }
+
+  static [WORKFLOW_DESERIALIZE](data: {
+    runtime: SessionRuntime
+    context: ContextHandle<unknown>
+    config: SessionConfig<unknown, DomainLike>
+    rootReactionId: string
+    nextPosition: number
+    prepared?: PreparedSession
+    lastEvent?: ContextEvent
+    failed?: unknown
+    completed: boolean
+    sessionId: string
+  }) {
+    const session = new Session(data.runtime, data.context, data.config)
+    session.rootReactionId = data.rootReactionId
+    session.nextPosition = data.nextPosition
+    session.prepared = data.prepared
+    session.lastEvent = data.lastEvent
+    session.failed = data.failed
+    session.completed = data.completed
+    sessionIds.set(session, data.sessionId)
+    return session
+  }
+
+  from(source: EventSource<TScope>): SessionFrom<TScope> {
+    const points = normalizePoints(source)
+    for (const point of points) this.assertPoint(point)
+    let resolving: Promise<readonly ContextEvent[]> | undefined
+    const resolveEvents = () => {
+      resolving ??= this.resolvePoints(points)
+      return resolving
     }
     return Object.freeze({
       agent: async (input: any) => {
@@ -187,6 +249,7 @@ export class Session<
         this.assertEngine()
         const actions = input.actions ?? []
         actions.forEach((action: AnyDomainAction) => this.assertAction(action))
+        const events = await resolveEvents()
         const datasetEnabled = input.datasets !== false
         const provider = this.runtime.materializeDataset
         if (datasetEnabled && typeof provider !== "function") {
@@ -214,6 +277,7 @@ export class Session<
       action: async (action: AnyDomainAction, input: unknown) => {
         this.assertOpen()
         this.assertAction(action)
+        const events = await resolveEvents()
         return await this.operation(events, {
           kind: "action",
           action: toReactionOperationActionRef(action),
@@ -224,6 +288,7 @@ export class Session<
         this.assertOpen()
         this.assertEngine()
         if (!input?.schema) throw new Error("reaction_dataset_schema_required")
+        const events = await resolveEvents()
         return await this.operation(events, {
           kind: "dataset",
           instruction: requiredInstruction(input.instruction),
@@ -234,29 +299,52 @@ export class Session<
       loadFiles: async () => {
         this.assertOpen()
         this.assertSandboxConfigured()
+        const events = await resolveEvents()
         return await this.operation(events, { kind: "loadFiles" })
       },
       storeFiles: async (input: ReactorStoreFilesInput) => {
         this.assertOpen()
         this.assertSandboxConfigured()
+        const events = await resolveEvents()
         return await this.operation(events, { kind: "storeFiles", input })
       },
       shell: async (input: ReactorShellRunInput) => {
         this.assertOpen()
         this.assertSandboxConfigured()
+        const events = await resolveEvents()
         return await this.operation(events, { kind: "shell", input })
       },
       git: async (input: ReactionGitInput) => {
         this.assertOpen()
         this.assertSandboxConfigured()
+        const events = await resolveEvents()
         return await this.operation(events, { kind: "git", input })
       },
     }) as SessionFrom<TScope>
   }
 
   async complete(): Promise<void> {
+    if (this.completed) return
+    if (this.completing) return await this.completing
     this.assertOpen()
     if (this.failed !== undefined) throw this.failed
+    this.completing = this.completeNow()
+    try {
+      await this.completing
+    } catch (error) {
+      this.failed = error
+      throw error
+    } finally {
+      this.completing = undefined
+    }
+  }
+
+  async [Symbol.asyncDispose](): Promise<void> {
+    if (this.completed || this.failed !== undefined) return
+    await this.complete()
+  }
+
+  private async completeNow(): Promise<void> {
     const prepared = this.prepared ?? await this.preparing
     if (!prepared) throw new Error("session_not_started")
     if (!this.lastEvent) throw new Error("session_has_no_effect")
@@ -264,10 +352,21 @@ export class Session<
       await finishSession(this.runtime, prepared, this.lastEvent)
       this.completed = true
     } catch (error) {
-      this.failed = error
       await failSession(this.runtime, prepared, error).catch(() => undefined)
       throw error
     }
+  }
+
+  private async resolvePoints(
+    points: readonly (ContextEvent | AnyDomainEventDraft)[],
+  ): Promise<readonly ContextEvent[]> {
+    const persisted: ContextEvent[] = []
+    for (const point of points) {
+      persisted.push(isDomainEventDraft(point)
+        ? await this.context.append(point)
+        : point)
+    }
+    return normalizeEvents(persisted)
   }
 
   private async operation(
@@ -315,7 +414,7 @@ export class Session<
     if (!this.preparing) {
       this.preparing = prepareSession({
         runtime: this.runtime,
-        context: this.contextHandle.context,
+        context: this.context.context,
         trigger: events[0]!,
         sandbox: this.config.sandbox ?? false,
         sessionId: getSessionId(this),
@@ -353,6 +452,32 @@ export class Session<
     if (!available.has(binding.id)) {
       throw new Error(`reaction_action_outside_scope:${binding.id}`)
     }
+  }
+
+  private assertPoint(point: ContextEvent | AnyDomainEventDraft) {
+    if (isDomainEventDraft(point)) {
+      this.assertDomainEvent(point.domain, point.name, point.kind)
+      return
+    }
+    assertContextEvent(point)
+    if (point.contextId && point.contextId !== this.context.id) {
+      throw new Error(`session_event_outside_context:${point.id}`)
+    }
+    if (point.domain && point.name) {
+      this.assertDomainEvent(point.domain, point.name, point.type)
+    }
+  }
+
+  private assertDomainEvent(domain: string, name: string, kind: string) {
+    const eventMap = typeof (this.config.scope as any).getEventMap === "function"
+      ? (this.config.scope as any).getEventMap()
+      : {}
+    const available = Object.values(eventMap as Record<string, any>).some(event =>
+      event?.domain === domain &&
+      event?.name === name &&
+      event?.kind === kind
+    )
+    if (!available) throw new Error(`reaction_event_outside_scope:${kind}`)
   }
 }
 
@@ -459,9 +584,18 @@ async function failSession(
   await store.completeSession(prepared.sessionId, "failed", error)
 }
 
-function normalizeEvents(source: EventSource): readonly ContextEvent[] {
+function normalizePoints<TScope extends DomainLike>(
+  source: EventSource<TScope>,
+): readonly (ContextEvent | AnyDomainEventDraft)[] {
   const values = Array.isArray(source) ? source : [source]
   if (values.length === 0) throw new Error("session_from_event_required")
+  for (const value of values) {
+    if (!isDomainEventDraft(value)) assertContextEvent(value)
+  }
+  return Object.freeze([...values]) as readonly (ContextEvent | AnyDomainEventDraft)[]
+}
+
+function normalizeEvents(values: readonly ContextEvent[]): readonly ContextEvent[] {
   const events: ContextEvent[] = []
   const seen = new Set<string>()
   for (const value of values) {
@@ -472,6 +606,19 @@ function normalizeEvents(source: EventSource): readonly ContextEvent[] {
     }
   }
   return Object.freeze(events)
+}
+
+function isDomainEventDraft(value: unknown): value is AnyDomainEventDraft {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof (value as any).kind === "string" &&
+      typeof (value as any).domain === "string" &&
+      typeof (value as any).name === "string" &&
+      typeof (value as any).link === "function" &&
+      (value as any).definition &&
+      typeof (value as any).definition === "object",
+  )
 }
 
 function assertContextEvent(value: unknown): asserts value is ContextEvent {

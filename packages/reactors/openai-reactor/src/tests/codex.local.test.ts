@@ -52,6 +52,7 @@ function agentInput(
     trigger,
     sessionId: "session-1",
     reactionId: "reaction-1",
+    causeIds: [trigger.id],
       events: [trigger],
     messages: [{
       role: "user",

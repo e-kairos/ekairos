@@ -73,6 +73,7 @@ describe("agent output wire integration", () => {
         },
         sessionId: "session-1",
         reactionId: "reaction-1",
+        causeIds: [],
         events: [],
         messages: [],
         instruction: "Find the SKU and answer.",

@@ -1,5 +1,5 @@
 /* @vitest-environment node */
-// Canonical live demo: Context.append + flat Session.from fan-out/join.
+// Canonical live demo: Context(...).session + flat Session.from fan-out/join.
 
 import { randomUUID } from "node:crypto"
 
@@ -9,13 +9,13 @@ import { z } from "zod"
 
 import { EkairosRuntime, defineEvent, domain } from "@ekairos/domain"
 import { ContextHandle, contextDomain } from "@ekairos/events"
+import { Context } from "../../../context/src/index.ts"
 import {
   destroyContextTestApp,
   itInstant,
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
 import { ai } from "../reactor.ts"
-import { Session } from "../session.ts"
 
 const MODEL = "anthropic/claude-haiku-4.5"
 const rocketDemo = domain("rocketTriageDemo")
@@ -24,6 +24,10 @@ const rocketDemo = domain("rocketTriageDemo")
   .withEvents({
     messageReceived: defineEvent({ payload: z.object({ text: z.string() }) }),
   })
+const coaching = rocketDemo.scope({
+  events: [rocketDemo.events.messageReceived],
+  actions: [],
+})
 
 type MatchContext = {
   replay: { mapName: string; score: [number, number]; player: string }
@@ -69,19 +73,21 @@ class DemoRuntime extends EkairosRuntime<
 
 async function runCoach(
   runtime: DemoRuntime,
-  context: ContextHandle<MatchContext>,
+  contextKey: string,
   message: string,
 ) {
-  const trigger = await context.append(rocketDemo.events.messageReceived({ text: message }))
-  const session = new Session(runtime, context, {
-    scope: rocketDemo,
-    engine: ai({ model: MODEL }),
-    sandbox: false,
-  })
-  const triage = await session.from(trigger).agent({
+  await using session = await Context(runtime).session(
+    contextKey,
+    coaching,
+    ai({ model: MODEL }),
+    { sandbox: false },
+  )
+  const triage = await session.from(
+    rocketDemo.events.messageReceived({ text: message }),
+  ).agent({
     instruction: [
       "Sos el analista post-partido de Rocket League de VFex.",
-      JSON.stringify(context.content),
+      JSON.stringify(session.context.content),
       `Mensaje: ${message}`,
       "Responde mode=chat para charla trivial o mode=analyze con 1 a 3 ventanas relevantes.",
     ].join("\n"),
@@ -97,7 +103,6 @@ async function runCoach(
     datasets: false,
   })
   if (triage.payload.mode === "chat") {
-    await session.complete()
     return triage
   }
 
@@ -125,7 +130,6 @@ async function runCoach(
     output: z.object({ feedback: z.string() }),
     datasets: false,
   })
-  await session.complete()
   return final
 }
 
@@ -146,24 +150,26 @@ describe("rocket triage flat Session demo (live)", () => {
 
   itInstant("chat trivial completes without a Dataset", async () => {
     const runtime = new DemoRuntime({ appId, adminToken })
-    const context = await ContextHandle.open(runtime, {
-      key: `demo:${randomUUID()}`,
+    const contextKey = `demo:${randomUUID()}`
+    await ContextHandle.open(runtime, {
+      key: contextKey,
       content: MATCH,
     })
-    const final = await runCoach(runtime, context, "hola coach, como salio?")
+    const final = await runCoach(runtime, contextKey, "hola coach, como salio?")
     expect(final.type).toBe("context.model")
     expect(runtime.datasetWindows).toHaveLength(0)
   }, 240_000)
 
   itInstant("analysis fans out from triage and joins analyses for synthesis", async () => {
     const runtime = new DemoRuntime({ appId, adminToken })
-    const context = await ContextHandle.open(runtime, {
-      key: `demo:${randomUUID()}`,
+    const contextKey = `demo:${randomUUID()}`
+    await ContextHandle.open(runtime, {
+      key: contextKey,
       content: MATCH,
     })
     const final = await runCoach(
       runtime,
-      context,
+      contextKey,
       "analizame los goles del partido y decime que hice mal",
     )
     expect(final.type).toBe("context.model")

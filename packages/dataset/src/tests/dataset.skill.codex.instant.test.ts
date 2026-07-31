@@ -252,6 +252,20 @@ const appDomain = domain("dataset-skill-codex-tests")
   .schema({ entities: {}, links: {}, rooms: {} })
   .withEvents({ skillRequested, skillCompleted })
   .withActions(datasetDomain.actions)
+const datasetSkillScope = appDomain.scope({
+  events: [appDomain.events.skillRequested],
+  actions: [
+    appDomain.actions.executeCommand,
+    appDomain.actions.completeDataset,
+    appDomain.actions.clearDataset,
+    appDomain.actions.defineNotation,
+    appDomain.actions.generateSchema,
+    appDomain.actions.replaceRows,
+    appDomain.actions.completeObject,
+    appDomain.actions.prepareFileMaterialization,
+    appDomain.actions.prepareTransformMaterialization,
+  ],
+})
 
 type TestEnv = {
   repoPath: string
@@ -412,24 +426,22 @@ describe("dataset skill + codex real", () => {
         approvalPolicy: "never",
       }
       const runtime = new DatasetSkillRuntime(env)
-      const context = await Context(runtime as any).open({
-        key: `dataset-skill:${Date.now()}:${Math.random().toString(36).slice(2)}`,
-        content: { repoPath: params.repoPath },
-      })
-      const trigger = await context.append(
-        appDomain.events.skillRequested({ prompt: params.prompt }),
+      const contextKey =
+        `dataset-skill:${Date.now()}:${Math.random().toString(36).slice(2)}`
+      await using session = await Context(runtime as any).session(
+        contextKey,
+        datasetSkillScope,
+        createDatasetCodexEngine(runner!, params.repoPath),
+        { sandbox: false },
       )
-      const session = context.session({
-        scope: appDomain,
-        engine: createDatasetCodexEngine(runner!, params.repoPath),
-        sandbox: false,
-      })
-      const effect = await session.from(trigger).agent({
+      const effect = await session.from(
+        appDomain.events.skillRequested({ prompt: params.prompt }),
+      ).agent({
         instruction: [
           "Use installed skills when they are relevant.",
           "Persist the final dataset result when the task asks for a dataset.",
           "When the dataset is persisted, return a concise structured completion summary.",
-          `Task: ${trigger.payload.prompt}`,
+          `Task: ${params.prompt}`,
         ].join("\n"),
         output: z.object({
           completed: z.boolean(),
@@ -452,7 +464,7 @@ describe("dataset skill + codex real", () => {
       await session.complete()
       const snapshot: any = await db!.query({
         context_sessions: {
-          $: { where: { context: context.id as any }, limit: 20 },
+          $: { where: { context: session.context.id as any }, limit: 20 },
           rootReaction: { effects: {} },
           reactions: { effects: {} },
         },

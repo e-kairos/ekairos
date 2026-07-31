@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import {
   defineDomainAction,
+  defineEvent,
   domain,
 } from "@ekairos/domain"
 import { ContextHandle, type ContextEvent } from "@ekairos/events"
@@ -18,13 +19,32 @@ const saveAnswer = defineDomainAction({
 })
 const conversation = domain("conversation")
   .withSchema({ entities: {}, links: {}, rooms: {} })
-  .withActions({ saveAnswer })
+  .withEvents({
+    messageReceived: defineEvent({
+      payload: z.object({ message: z.string() }),
+    }),
+    conversationClosed: defineEvent({
+      payload: z.object({ reason: z.string() }),
+    }),
+  })
+  .withActions({
+    saveAnswer,
+    closeConversation: defineDomainAction({
+      input: z.object({ reason: z.string() }),
+      output: z.object({ ok: z.boolean() }),
+      execute: () => ({ ok: true }),
+    }),
+  })
+const coaching = conversation.scope({
+  events: [conversation.events.messageReceived],
+  actions: [conversation.actions.saveAnswer],
+})
 const runtime = null as any
 const context = null as unknown as ContextHandle<{ policy: string }>
 const source = null as unknown as ContextEvent<{ message: string }>
 
 const session = new Session(runtime, context, {
-  scope: conversation,
+  scope: coaching,
   engine: false,
   sandbox: false,
 })
@@ -42,6 +62,12 @@ const answer = await session.from(source).agent({
 })
 answer.payload.answer satisfies string
 const checked: ContextEvent<{ answer: string }> = answer
+
+await session.from(conversation.events.messageReceived({ message: "hello" })).agent({
+  instruction: "Answer.",
+})
+// @ts-expect-error draft event is outside the concrete scope
+session.from(conversation.events.conversationClosed({ reason: "done" }))
 
 const files = await session.from(checked).loadFiles()
 files.payload.path satisfies ReactorPath
@@ -81,6 +107,12 @@ await session.from(checked).agent({
   actions: [
     conversation.actions.saveAnswer.scope({ conversationId: "conversation-1" }),
   ],
+})
+
+await session.from(checked).agent({
+  instruction: "Invalid scoped action.",
+  // @ts-expect-error action is outside the concrete scope
+  actions: [conversation.actions.closeConversation],
 })
 
 await session.from(checked).agent({

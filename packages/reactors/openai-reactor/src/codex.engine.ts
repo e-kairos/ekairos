@@ -408,14 +408,16 @@ async function runCodexAgent<
         input: action.input,
       },
     })
+    const contextKey = input.context.ref.key
+    if (!contextKey) throw new Error("reaction_context_key_required")
     const actionResult = await executeCodexAction(input.actions, action, {
-      runtime: input.runtime,
-      context: input.context,
-      trigger: input.trigger,
+      context: {
+        id: input.context.ref.id,
+        key: contextKey,
+      },
       sessionId: input.sessionId,
       reactionId: input.reactionId,
-      reactionKey: input.reactionKey,
-      actionCallId: action.callId,
+      causeIds: input.causeIds,
     })
     parts.push({
       type: "action",

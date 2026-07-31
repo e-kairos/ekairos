@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest"
+import { z } from "zod"
 
-import { domain } from "../../../domain/src/index.ts"
+import { defineEvent, domain } from "../../../domain/src/index.ts"
 import { ContextHandle } from "../../../events/src/index.ts"
 import { ai } from "../reactor.ts"
 import { Session } from "../session.ts"
 
 const conversation = domain("conversationSessionTest")
   .withSchema({ entities: {}, links: {}, rooms: {} })
+  .withEvents({
+    received: defineEvent({ payload: z.object({ text: z.string() }) }),
+    closed: defineEvent({ payload: z.object({ reason: z.string() }) }),
+  })
+const conversationScope = conversation.scope({
+  events: [conversation.events.received],
+  actions: [],
+})
 
 const runtime = {
   db: async () => null,
@@ -32,12 +41,14 @@ describe("Session", () => {
 
   it("creates one lazy, explicitly scoped execution", () => {
     const session = new Session(runtime, context, {
-      scope: conversation,
+      scope: conversationScope,
       engine: false,
     })
 
     expect(session.from).toBeTypeOf("function")
     expect(session.complete).toBeTypeOf("function")
+    expect(session.context).toBe(context)
+    expect(session[Symbol.asyncDispose]).toBeTypeOf("function")
   })
 
   it("requires scope and engine while sandbox remains optional", () => {
@@ -46,7 +57,86 @@ describe("Session", () => {
     } as never)).toThrow("session_scope_required")
 
     expect(() => new Session(runtime, context, {
-      scope: conversation,
+      scope: conversationScope,
     } as never)).toThrow("session_engine_declaration_required")
+  })
+
+  it("rejects domain events outside the concrete scope", () => {
+    const session = new Session(runtime, context, {
+      scope: conversationScope,
+      engine: false,
+    })
+
+    expect(session.from(conversation.events.received({ text: "hello" })))
+      .toHaveProperty("agent")
+    expect(() => session.from(
+      conversation.events.closed({ reason: "done" }) as never,
+    )).toThrow(
+      "reaction_event_outside_scope:conversationSessionTest.closed",
+    )
+  })
+
+  it("appends draft points in order before executing their joined operation", async () => {
+    const appended: string[] = []
+    const operationPoints: string[] = []
+    const draftContext = new ContextHandle(runtime, {
+      id: "context-drafts",
+      key: "conversation-drafts",
+      content: null,
+      createdAt: new Date(),
+    } as any)
+    ;(draftContext as any).append = async (draft: any) => {
+      appended.push(draft.payload.text)
+      return {
+        id: `event-${appended.length}`,
+        type: draft.kind,
+        domain: draft.domain,
+        name: draft.name,
+        createdAt: new Date(),
+        contextId: draftContext.id,
+        payload: draft.payload,
+        links: {},
+        physicalLinks: {},
+        metadata: { causeIds: [] },
+        eventParts: [],
+      }
+    }
+    const session = new Session(runtime, draftContext, {
+      scope: conversationScope,
+      engine: { agent: async () => ({ output: "unused" }) },
+    })
+    ;(session as any).operation = async (events: any[]) => {
+      operationPoints.push(...events.map(event => event.id))
+      return events.at(-1)
+    }
+
+    await session.from([
+      conversation.events.received({ text: "first" }),
+      conversation.events.received({ text: "second" }),
+    ]).agent({
+      instruction: "Join both drafts.",
+      datasets: false,
+    })
+
+    expect(appended).toEqual(["first", "second"])
+    expect(operationPoints).toEqual(["event-1", "event-2"])
+  })
+
+  it("makes explicit completion and async disposal idempotent", async () => {
+    const session = new Session(runtime, context, {
+      scope: conversationScope,
+      engine: false,
+    })
+    let completions = 0
+    ;(session as any).completeNow = async () => {
+      completions += 1
+      ;(session as any).completed = true
+    }
+
+    await Promise.all([session.complete(), session.complete()])
+    await session.complete()
+    await session[Symbol.asyncDispose]()
+
+    expect(completions).toBe(1)
   })
 })

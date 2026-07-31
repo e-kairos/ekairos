@@ -65,6 +65,7 @@ export type ReactionEngineInput<
   trigger: ContextEvent
   sessionId: string
   reactionId: string
+  causeIds: readonly string[]
   events: readonly ContextEvent[]
   messages: readonly ModelMessage[]
   instruction: string

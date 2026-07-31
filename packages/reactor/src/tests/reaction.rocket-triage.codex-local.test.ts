@@ -11,6 +11,7 @@ import { z } from "zod"
 
 import { EkairosRuntime, defineEvent, domain } from "@ekairos/domain"
 import { ContextHandle, contextDomain } from "@ekairos/events"
+import { Context } from "../../../context/src/index.ts"
 import { codexEngine } from "../../../reactors/openai-reactor/src/codex.engine.ts"
 import {
   createSandboxSession,
@@ -23,7 +24,6 @@ import {
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
 import type { ReactionEngine, ReactionEngineInput } from "../reactor.ts"
-import { Session } from "../session.ts"
 
 const CODEX_HOME = "C:\\Users\\aleja\\.codex"
 const CODEX_BIN = "C:\\Users\\aleja\\AppData\\Local\\OpenAI\\Codex\\bin\\69066b736e1e17a4"
@@ -33,6 +33,10 @@ const rocket = domain("rocketTriageCodex")
   .withEvents({
     messageReceived: defineEvent({ payload: z.object({ text: z.string() }) }),
   })
+const coaching = rocket.scope({
+  events: [rocket.events.messageReceived],
+  actions: [],
+})
 
 class LocalCodexEngine implements ReactionEngine<unknown> {
   constructor(private readonly sandbox: SandboxSession) {}
@@ -101,25 +105,26 @@ describe("rocket triage flat Session (Codex local live)", () => {
 
   itInstant("forks Dataset-backed analyses and joins them into final coaching", async () => {
     const runtime = new DemoRuntime({ appId, adminToken })
-    const context = await ContextHandle.open(runtime, {
-      key: `codex-rocket:${randomUUID()}`,
+    const contextKey = `codex-rocket:${randomUUID()}`
+    await ContextHandle.open(runtime, {
+      key: contextKey,
       content: {
         score: [2, 1],
         player: "VFex",
         timeline: [{ time: 322, kind: "goal", team: "blue" }],
       },
     })
-    const trigger = await context.append(
+    await using session = await Context(runtime).session(
+      contextKey,
+      coaching,
+      new LocalCodexEngine(sandbox),
+      { sandbox: false },
+    )
+    const triage = await session.from(
       rocket.events.messageReceived({
         text: "Analiza los goles y dame dos prioridades.",
       }),
-    )
-    const session = new Session(runtime, context, {
-      scope: rocket,
-      engine: new LocalCodexEngine(sandbox),
-      sandbox: false,
-    })
-    const triage = await session.from(trigger).agent({
+    ).agent({
       instruction: "Elige 1 o 2 ventanas del timeline para analizar.",
       output: z.object({
         plays: z.array(z.object({
@@ -145,8 +150,6 @@ describe("rocket triage flat Session (Codex local live)", () => {
       output: z.object({ feedback: z.string() }),
       datasets: false,
     })
-    await session.complete()
-
     expect(final.payload.feedback).toEqual(expect.any(String))
     expect(runtime.windows.length).toBeGreaterThanOrEqual(1)
   }, 900_000)

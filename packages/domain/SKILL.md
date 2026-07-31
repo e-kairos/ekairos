@@ -13,6 +13,8 @@ Use this skill when creating, editing, reviewing, or operating Ekairos domain co
 - Prefer typed action calls in app-owned code:
   `const scoped = await runtime.use(appDomain); await scoped.actions.launchOrder(input);`
 - Use string action names only for dynamic runtime/HTTP/CLI execution.
+- Read Session identity and causality from the optional second
+  `DomainActionExecutionContext` argument; never duplicate them in action input.
 - Use explicit runtime classes that extend `EkairosRuntime`.
 - New Next.js apps expose `/api/domain` through `createRuntimeRouteHandler({ createRuntime })`.
 - Do not use or reintroduce `withRuntime(...)`.

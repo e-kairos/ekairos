@@ -98,7 +98,8 @@ function agentInput(
     trigger,
     sessionId: "session-1",
     reactionId: "reaction-1",
-      events: [trigger],
+    causeIds: [trigger.id],
+    events: [trigger],
     messages: [
       { role: "user", content: [{ type: "text", text: "## Context\n\ncurrent-context\nprevious-context" }] },
       { role: "user", content: [{ type: "text", text: "## Event\n\nevt-trigger" }] },
@@ -171,6 +172,7 @@ describe("codexEngine", () => {
     ]
     const { session, files, commands } = fakeSandbox(index => runnerResults[index]!)
     const receivedInputs: unknown[] = []
+    const receivedExecutionContexts: unknown[] = []
     const result = await codexEngine({
       auth: { source: "preinstalled" },
       installCodexCli: false,
@@ -179,8 +181,9 @@ describe("codexEngine", () => {
         description: "Load a supplier by canonical id.",
         input: z.object({ supplierId: z.string() }),
         output: z.object({ found: z.boolean(), supplier: z.object({ supplierId: z.string() }) }),
-        async execute(input) {
+        async execute(input, executionContext) {
           receivedInputs.push(input)
+          receivedExecutionContexts.push(executionContext)
           return { found: true, supplier: input }
         },
       },
@@ -188,6 +191,12 @@ describe("codexEngine", () => {
 
     expect(result.output).toBe(JSON.stringify({ selected: "supplier-7" }))
     expect(receivedInputs).toEqual([{ supplierId: "supplier-7" }])
+    expect(receivedExecutionContexts).toEqual([{
+      context: { id: "ctx-1", key: "ctx:award" },
+      sessionId: "session-1",
+      reactionId: "reaction-1",
+      causeIds: ["evt-trigger"],
+    }])
     expect(result.parts).toEqual([
       expect.objectContaining({
         type: "action",

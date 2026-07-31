@@ -2,12 +2,21 @@ import { z } from "zod";
 
 type ActionSchema = z.ZodType;
 
+export type DomainActionExecutionContext = Readonly<{
+  context: Readonly<{
+    id: string;
+    key: string;
+  }>;
+  sessionId: string;
+  reactionId: string;
+  causeIds: readonly string[];
+}>;
+
 type ActionImplementation = (params: {
   input: unknown;
   runtime: unknown;
   domain: unknown;
-  reactionId?: string;
-}) => unknown;
+}, executionContext?: DomainActionExecutionContext) => unknown;
 
 type ActionDescriptor = Readonly<{
   description?: string;
@@ -58,7 +67,7 @@ export type DomainActionExecutionPreparationView = Readonly<{
 export type DomainActionExecutionOptions = Readonly<{
   activeDomain?: unknown;
   stack?: readonly string[];
-  reactionId?: string;
+  executionContext?: DomainActionExecutionContext;
 }>;
 
 export type DomainActionInputResolverContext = Readonly<{
@@ -686,8 +695,7 @@ export async function executeDomainActionPrivate(
     input: prepared.effectiveInput,
     runtime,
     domain: prepared.executionDomain,
-    ...(options.reactionId ? { reactionId: options.reactionId } : {}),
-  });
+  }, options.executionContext);
   const output = prepared.action.outputSchema.parse(rawOutput);
   return Object.freeze({ output, effectiveInput: prepared.effectiveInput });
 }

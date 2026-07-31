@@ -141,4 +141,37 @@ describe("breaking domain event DX", () => {
     expect(Object.keys(second.actions)).toEqual(["ping"]);
     expect(first.events).not.toBe(second.events);
   });
+
+  it("creates a concrete capability scope with only selected events and actions", () => {
+    const sales = eventBase("sales")
+      .withEvents({
+        customerChanged,
+        tagged: defineEvent({ payload: z.object({ tag: z.string() }) }),
+      })
+      .withActions({
+        publish: defineAction({
+          input: z.object({ text: z.string() }),
+          output: z.object({ ok: z.boolean() }),
+          execute: () => ({ ok: true }),
+        }),
+        archive: defineAction({
+          input: z.object({}),
+          output: z.object({ ok: z.boolean() }),
+          execute: () => ({ ok: true }),
+        }),
+      });
+
+    const coaching = sales.scope({
+      events: [sales.events.customerChanged],
+      actions: [sales.actions.publish],
+    });
+
+    expect(Object.keys(coaching.events)).toEqual(["customerChanged"]);
+    expect(Object.keys(coaching.actions)).toEqual(["publish"]);
+    expect(coaching.instantSchema().links).toEqual(sales.instantSchema().links);
+    expect(() => sales.scope({
+      events: [eventBase("other").withEvents({ customerChanged }).events.customerChanged],
+      actions: [sales.actions.publish],
+    })).toThrow("domain_scope_event_outside_domain:other.customerChanged");
+  });
 });

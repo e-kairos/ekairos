@@ -6,37 +6,35 @@ Sessions.
 ```ts
 import { Context } from "@ekairos/context"
 
-const context = await Context(runtime).open({
-  key: `conversation:${conversationId}`,
-  content: { conversationId },
+const answering = appDomain.scope({
+  events: [appDomain.events.messageReceived],
+  actions: [appDomain.actions.saveAnswer],
 })
-
-const message = await context.append(
-  appDomain.events.messageReceived({ text }),
-)
-
-const session = context.session({
-  scope: appDomain,
+await using session = await Context(runtime).session(
+  `conversation:${conversationId}`,
+  answering,
   engine,
-  sandbox: false,
-})
-
-const answer = await session.from(message).agent({
+  { sandbox: false },
+)
+const answer = await session.from(
+  appDomain.events.messageReceived({ text }),
+).agent({
   instruction: "Answer the message.",
   output: answerSchema,
   actions: [appDomain.actions.saveAnswer],
 })
-
-await session.complete()
 ```
 
-Context owns durable content and its Event timeline:
+Open only the durable timeline when no execution is needed:
 
 ```ts
+const context = await Context(runtime).open(`conversation:${conversationId}`)
 context.content
 await context.events
+await context.append(appDomain.events.messageReceived({ text }))
 ```
 
 Exogenous facts use `context.append`. Business state changes use domain
-actions. Session configuration contains only `scope`, `engine`, and optional
-`sandbox`; Agent actions are explicit per operation.
+actions. Drafts passed to `session.from(...)` are appended automatically.
+`session.context` exposes the same timeline handle. Async disposal completes a
+clean Session; explicit `complete()` remains optional and idempotent.

@@ -7,9 +7,15 @@ import { i } from "@instantdb/core"
 import { afterAll, beforeAll, expect } from "vitest"
 import { z } from "zod"
 
-import { defineDomainAction, domain, EkairosRuntime } from "@ekairos/domain"
+import {
+  defineDomainAction,
+  domain,
+  EkairosRuntime,
+  type DomainActionExecutionContext,
+} from "@ekairos/domain"
 import {
   Context,
+  ContextHandle,
   contextDomain,
   defineEvent,
 } from "../index.js"
@@ -41,11 +47,14 @@ const emailCore = domain("email")
     }),
   })
 
+let observedExecutionContext: DomainActionExecutionContext | undefined
+
 const completeOrder = defineDomainAction({
   description: "Complete one extracted order.",
   input: z.object({ orderId: z.string().uuid(), code: z.string() }),
   output: z.object({ orderId: z.string().uuid(), code: z.string(), status: z.literal("completed") }),
-  execute: async ({ input, domain: activeDomain }) => {
+  execute: async ({ input, domain: activeDomain }, executionContext) => {
+    observedExecutionContext = executionContext
     const db = (activeDomain as any).db
     await db.transact([
       db.tx.email_orders[input.orderId].update({ code: input.code, status: "completed" }),
@@ -55,6 +64,10 @@ const completeOrder = defineDomainAction({
 })
 
 const emailDomain = emailCore.withActions({ completeOrder })
+const emailCoaching = emailDomain.scope({
+  events: [emailDomain.events.received],
+  actions: [emailDomain.actions.completeOrder],
+})
 const appDomain = domain("context-test-app")
   .includes(emailDomain)
   .withSchema({ entities: {}, links: {}, rooms: {} })
@@ -96,10 +109,12 @@ describeInstant("@ekairos/context flat session", () => {
     await db.transact([
       db.tx.email_messages[messageId].create({ subject: "Factura OC 4400" }),
     ])
-    const context = await Context(runtime).open({
-      key: `email:${messageId}`,
+    const contextKey = `email:${messageId}`
+    await ContextHandle.open(runtime, {
+      key: contextKey,
       content: { requisitionId: "REQ-1", version: 2 },
     })
+    const context = await Context(runtime).open(contextKey)
 
     const received = await context.append(
       emailDomain.events.received({
@@ -123,31 +138,40 @@ describeInstant("@ekairos/context flat session", () => {
     await db.transact([
       db.tx.email_messages[messageId].create({ subject: "OC 6600" }),
     ])
-    const context = await Context(runtime).open({
-      key: `email:session:${messageId}`,
+    const contextKey = `email:session:${messageId}`
+    await ContextHandle.open(runtime, {
+      key: contextKey,
       content: { mailbox: "purchasing" },
     })
-    const trigger = await context.append(
-      emailDomain.events.received({
+    await using session = await Context(runtime).session(
+      contextKey,
+      emailCoaching,
+      false,
+      { sandbox: false },
+    )
+    const completed = await session.from(
+      emailCoaching.events.received({
         from: "supplier@example.com",
         subject: "OC 6600",
       }).link({ message: messageId }),
-    )
-    const session = context.session({
-      scope: emailDomain,
-      engine: false,
-      sandbox: false,
-    })
-    const completed = await session.from(trigger).action(
+    ).action(
       emailDomain.actions.completeOrder.scope({ orderId }),
       { code: "6600" },
     )
     await session.complete()
+    await session.complete()
 
     expect(completed.payload).toEqual({ orderId, code: "6600", status: "completed" })
+    const [trigger] = await session.context.events
+    expect(observedExecutionContext).toEqual({
+      context: { id: session.context.id, key: contextKey },
+      sessionId: expect.any(String),
+      reactionId: expect.any(String),
+      causeIds: [trigger!.id],
+    })
     const graph = await db.query({
       context_sessions: {
-        $: { where: { context: context.id }, limit: 1 },
+        $: { where: { context: session.context.id }, limit: 1 },
         trigger: {},
         rootReaction: { effects: {} },
         reactions: { causes: {}, effects: { eventParts: {} } },
@@ -156,8 +180,8 @@ describeInstant("@ekairos/context flat session", () => {
     const stored = graph.context_sessions[0]
     expect(stored.definition).toBe("session")
     expect(stored.status).toBe("completed")
-    expect(stored.trigger.id).toBe(trigger.id)
+    expect(stored.trigger.id).toBe(trigger!.id)
     expect(stored.rootReaction.effects[0].id).toBe(completed.id)
-    expect(stored.reactions[0].causes[0].id).toBe(trigger.id)
+    expect(stored.reactions[0].causes[0].id).toBe(trigger!.id)
   }, 60_000)
 })

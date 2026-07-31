@@ -1,5 +1,6 @@
 import {
   getDomainActions,
+  type DomainActionExecutionContext,
   type DomainActionRegistration,
 } from "@ekairos/domain"
 import {
@@ -181,6 +182,7 @@ async function runOperation(
         trigger: request.trigger,
         sessionId: request.sessionId,
         reactionId: request.reactionId,
+        causeIds: request.causeIds,
         events,
         messages,
         instruction: modelInstruction,
@@ -254,7 +256,7 @@ async function runOperation(
         request.runtime as any,
         action,
         prepared,
-        { reactionId: request.reactionId },
+        { executionContext: actionExecutionContext(request) },
       )
       const parsed = action.output.parse(executed.output)
       return await createOperationEvent(request, parsed, [
@@ -416,6 +418,22 @@ function runtimeRootDomain(runtime: ReactionOperationRequest["runtime"]) {
   return root
 }
 
+function actionExecutionContext(
+  request: ReactionOperationRequest,
+): DomainActionExecutionContext {
+  const key = request.context.ref.key
+  if (!key) throw new Error("reaction_context_key_required")
+  return Object.freeze({
+    context: Object.freeze({
+      id: request.context.ref.id,
+      key,
+    }),
+    sessionId: request.sessionId,
+    reactionId: request.reactionId,
+    causeIds: Object.freeze([...request.causeIds]),
+  })
+}
+
 function resolveAction(
   runtime: ReactionOperationRequest["runtime"],
   ref: ReactionOperationActionRef,
@@ -440,7 +458,7 @@ function resolveEngineActions(
       description: action.description,
       input: action.input,
       output: action.output,
-      async execute(input: unknown, reactionId) {
+      async execute(input: unknown) {
         const prepared = await prepareDomainActionExecution(
           request.runtime as any,
           action,
@@ -450,7 +468,7 @@ function resolveEngineActions(
           request.runtime as any,
           action,
           prepared,
-          { reactionId },
+          { executionContext: actionExecutionContext(request) },
         )).output
       },
     })

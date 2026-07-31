@@ -35,6 +35,10 @@ export const reactorWorkflowDomain = domain("reactorWorkflow")
     requested: defineEvent({ payload: z.object({ message: z.string() }) }),
     completed: defineEvent({ payload: answerSchema }),
   })
+const reactorWorkflowScope = reactorWorkflowDomain.scope({
+  events: [reactorWorkflowDomain.events.requested],
+  actions: [],
+})
 
 export class ReactorWorkflowRuntime extends EkairosRuntime<
   ReactorWorkflowEnv,
@@ -119,8 +123,8 @@ export async function reactorWorkflow(
 ) {
   "use workflow"
 
-  const session = new Session(context.runtime, context, {
-    scope: reactorWorkflowDomain,
+  await using session = new Session(context.runtime, context, {
+    scope: reactorWorkflowScope,
     engine: new ReactorWorkflowEngine(),
     sandbox: false,
   })
@@ -128,6 +132,5 @@ export async function reactorWorkflow(
     instruction: "Answer the persisted request deterministically.",
     output: answerSchema,
   })
-  await session.complete()
   return answered
 }

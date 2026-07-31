@@ -15,11 +15,12 @@ Reactor orchestrates `contextDomain`; it owns no InstantDB schema.
 
 ## Invariants
 
-1. `context.session({ scope, engine, sandbox? })` is configuration only.
+1. `Context(runtime).session(contextKey, scope, engine, { sandbox? })` opens
+   the Context by key and returns one configured Session.
 2. The Session is persisted lazily on its first operation with definition
    `"session"` and the first `from(...)` point as trigger.
-3. `session.from(event)` and `session.from([a, b])` accept one Event or an
-   ordered, deduplicated array of Events.
+3. `session.from(point)` accepts persisted Events, domain Event drafts, or an
+   array of both. Drafts are appended in order before the normal causal join.
 4. Every operation creates one child Reaction whose `causeIds` are exactly the
    points passed to `from(...)`.
 5. Agent material is the ordered union of the complete causal cones selected
@@ -34,52 +35,63 @@ Reactor orchestrates `contextDomain`; it owns no InstantDB schema.
    materializer when enabled.
 9. Actions are exposed explicitly per Agent operation through
    `agent({ actions: [...] })`; Session configuration never contains actions.
-10. Session operations cannot emit arbitrary domain Events. Exogenous facts use
-    `context.append`; state changes use domain actions.
-11. `complete()` returns nothing. It completes the root Reaction with the last
-    operation result as its effect and completes the Session.
+10. The concrete domain scope limits which domain Events may enter `from(...)`
+    and which actions may execute.
+11. `complete()` returns nothing, is idempotent, and remains an explicit
+    optional operation.
 12. An operation failure marks the root Reaction and Session failed before
     rethrowing the error.
-13. Direct and Workflow execution use the same graph and step-safe operation
-    primitives.
+13. `await using` is canonical: async disposal completes a clean Session and
+    preserves an already-failed Session while the operation error escapes.
+14. Session implements Workflow serialization/deserialization so the same
+    object survives durable replays.
 
 ## Canonical coach flow
 
 ```ts
-const context = await Context(runtime).open({
-  key: `rocket:${matchId}`,
-  content: match,
-})
-const message = await context.append(
-  rocket.events.messageReceived({ text: userMessage }),
-)
-const session = context.session({
-  scope: rocket,
-  engine: ai({ model: "anthropic/claude-haiku-4.5" }),
-  sandbox: false,
+const coaching = rocket.scope({
+  events: [rocket.events.messageReceived],
+  actions: [rocket.actions.publishReview],
 })
 
-const triage = await session.from(message).agent({
+export async function coach(runtime, matchId, userMessage) {
+  "use workflow"
+
+  await using session = await Context(runtime).session(
+    `rocket:${matchId}`,
+    coaching,
+    ai({ model: "anthropic/claude-haiku-4.5" }),
+    { sandbox: false },
+  )
+  const triage = await session.from(
+    rocket.events.messageReceived({ text: userMessage }),
+  ).agent({
   instruction: "Choose the relevant replay windows.",
   output: triageSchema,
   datasets: false,
 })
-const analyses = await Promise.all(triage.payload.plays.map(async play => {
-  const frames = await session.from(triage).dataset({
-    instruction: `Frames ${play.from}-${play.to}`,
-    schema: frameSchema,
+  const analyses = await Promise.all(triage.payload.plays.map(async play => {
+    const frames = await session.from(triage).dataset({
+      instruction: `Frames ${play.from}-${play.to}`,
+      schema: frameSchema,
+    })
+    return await session.from([triage, frames]).agent({
+      instruction: `Analyze ${play.reason} using the frame evidence.`,
+      output: analysisSchema,
+    })
+  }))
+  const final = await session.from(analyses).agent({
+    instruction: "Synthesize one coaching paragraph and two priorities.",
+    output: coachingSchema,
+    datasets: false,
   })
-  return await session.from([triage, frames]).agent({
-    instruction: `Analyze ${play.reason} using the frame evidence.`,
-    output: analysisSchema,
-  })
-}))
-const final = await session.from(analyses).agent({
-  instruction: "Synthesize one coaching paragraph and two priorities.",
-  output: coachingSchema,
-  datasets: false,
-})
-await session.complete()
+  return await session.from(final).action(
+    rocket.actions.publishReview,
+    { review: final.payload },
+  )
+}
 ```
+
+Omit `"use workflow"` only for direct scripts and tests.
 
 Cross-package execution hooks are private under `@ekairos/reactor/internal`.

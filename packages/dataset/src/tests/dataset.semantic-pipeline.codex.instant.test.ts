@@ -75,6 +75,10 @@ const appDomain = domain("dataset-semantic-pipeline")
     ...sandboxDomain.actions,
     ...datasetDomain.actions,
   })
+const semanticPipelineScope = appDomain.scope({
+  events: [appDomain.events.pipelineRequested],
+  actions: [appDomain.actions.replaceRows],
+})
 
 type TestEnv = {
   orgId: string
@@ -299,19 +303,16 @@ describeReal("dataset semantic pipeline with Codex reactors", () => {
         .length(12),
     })
     const engine = createSemanticPipelineEngine(runtime.env)
-    const context = await Context(runtime as any).open({
-      key: `${pipelineId}:semantic`,
-      content: { pipelineId },
-    })
-    const trigger = await context.append(
-      appDomain.events.pipelineRequested({ pipelineId, rows: sourceRows }),
-    )
-    const session = context.session({
-      scope: appDomain,
+    const contextKey = `${pipelineId}:semantic`
+    await using session = await Context(runtime as any).session(
+      contextKey,
+      semanticPipelineScope,
       engine,
-      sandbox: sandboxId,
-    })
-    const computed = await session.from(trigger).agent({
+      { sandbox: sandboxId },
+    )
+    const computed = await session.from(
+      appDomain.events.pipelineRequested({ pipelineId, rows: sourceRows }),
+    ).agent({
       instruction: [
         "Keep only paid orders and group them by week and region.",
         "Sum amount into totalAmount and return exactly one row per week-region pair.",
@@ -356,7 +357,7 @@ describeReal("dataset semantic pipeline with Codex reactors", () => {
       appId,
       pipelineId,
       sandboxId,
-      contexts: { semantic: context.id },
+      contexts: { semantic: session.context.id },
       finalDatasetId: datasetId,
       finalRows,
       entities: snapshot,

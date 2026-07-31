@@ -13,7 +13,9 @@ import {
   scopeDomainActionRegistration,
   setActiveDomainActionScopeFactory,
   setDomainActionMembership,
+  type DomainActionExecutionContext,
 } from "./domain-action.internal.js";
+export type { DomainActionExecutionContext } from "./domain-action.internal.js";
 export {
   EkairosRuntime,
   type RuntimeForDomain,
@@ -110,8 +112,6 @@ export type DomainActionExecuteParams<
     ActionOwnerDomain<Domain>,
     RuntimeEnvOfActionRuntime<Runtime>
   >;
-  /** The durable Reaction that invoked this action, when Reactor is the caller. */
-  reactionId?: string;
 };
 
 export type DomainActionDefinition<
@@ -144,6 +144,7 @@ export type DomainActionImplementationDefinition<
   requiredScopes?: readonly string[];
   execute: (
     params: DomainActionExecuteParams<InputSchema, Runtime, Domain>,
+    executionContext?: DomainActionExecutionContext,
   ) => Promise<z.output<OutputSchema>> | z.output<OutputSchema>;
 };
 
@@ -637,6 +638,16 @@ type MergeEventMaps<
   Next extends DomainEventMap,
 > = Simplify<Omit<Current, keyof Next> & Next>;
 
+type ScopedActionMap<
+  Actions extends DomainActionMap,
+  Selected extends readonly Actions[keyof Actions][],
+> = Pick<Actions, Extract<Selected[number]["key"], keyof Actions>>;
+
+type ScopedEventMap<
+  Events extends DomainEventMap,
+  Selected extends readonly DomainEventMethods<Events>[keyof Events & string][],
+> = Pick<Events, Extract<Selected[number]["name"], keyof Events>>;
+
 type EventDomainCharacter =
   | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
   | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
@@ -1025,6 +1036,22 @@ export type DomainSchemaResult<
     readonly actions: Readonly<Actions>;
     // Pure constructors for immutable event drafts.
     readonly events: DomainEventMethods<Events>;
+    // Restrict executable capabilities without widening the domain schema.
+    scope: <
+      const SelectedEvents extends readonly DomainEventMethods<Events>[keyof Events & string][],
+      const SelectedActions extends readonly Actions[keyof Actions][],
+    >(input: Readonly<{
+      events: SelectedEvents;
+      actions: SelectedActions;
+    }>) => DomainSchemaResult<
+      E,
+      L,
+      R,
+      ScopedActionMap<Actions, SelectedActions>,
+      Name,
+      IncludedNames,
+      ScopedEventMap<Events, SelectedEvents>
+    >;
     // Attach explicit domain actions to this domain result.
     withActions: {
       <Input extends Record<string, DomainActionLike>>(
@@ -2427,12 +2454,13 @@ export function domain(arg?: unknown): any {
           seedActionMap: Actions = {} as Actions,
           seedEventMap: Events = {} as Events,
           rebindOwnerFrom?: object,
+          schemaEventMap: DomainEventMap = seedEventMap,
         ): DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms, Actions, Name, IncludedNames, Events> => {
           type InstantSchemaResult = ReturnType<
             DomainSchemaResult<MergedEntitiesType, MergedLinksType, typeof def.rooms, Actions, Name, IncludedNames, Events>["toInstantSchema"]
           >;
           const capturedEntities = { ...allEntities };
-          const compiledEvents = compileEventLinks(seedEventMap, allLinks);
+          const compiledEvents = compileEventLinks(schemaEventMap, allLinks);
           const capturedLinks = cloneLinksDef({ ...allLinks, ...compiledEvents.links } as MergedLinksType);
           const capturedRooms = cloneRoomsDef(def.rooms);
           let cachedInstantSchema: InstantSchemaResult | null = null;
@@ -2496,7 +2524,7 @@ export function domain(arg?: unknown): any {
               ...finalEntities,
             } as WithBase<MergedEntitiesType>;
 
-            assertEventLinkTargets(seedEventMap, allEntitiesWithBase);
+            assertEventLinkTargets(schemaEventMap, allEntitiesWithBase);
 
             const schemaResult = i.schema({
               entities: allEntitiesWithBase,
@@ -2567,6 +2595,58 @@ export function domain(arg?: unknown): any {
           setStoredEventMap(result as any, seedEventMap);
           (result as any).actions = getStoredActionMap(result as any);
           (result as any).events = createDomainEventMethods(getStoredEventMap(result as any), compiledEvents.physicalByEvent);
+          (result as any).scope = (input: {
+            events: readonly DomainEventConstructor[];
+            actions: readonly DomainActionRegistration[];
+          }) => {
+            if (!input || !Array.isArray(input.events) || !Array.isArray(input.actions)) {
+              throw new Error("domain_scope_events_and_actions_required");
+            }
+
+            const currentActionMap = getStoredActionMap(result as any);
+            const currentActionsById = new Map(
+              Object.entries(currentActionMap).map(([key, action]) => {
+                const binding = getActionBinding(action);
+                return [binding?.id ?? "", { key, action }] as const;
+              }),
+            );
+            const selectedActionMap: Record<string, DomainActionRegistration> = {};
+            for (const selected of input.actions) {
+              const binding = getActionBinding(selected);
+              const current = binding ? currentActionsById.get(binding.id) : undefined;
+              if (!binding || !current) {
+                throw new Error(
+                  `domain_scope_action_outside_domain:${binding?.id ?? "unregistered"}`,
+                );
+              }
+              selectedActionMap[current.key] = current.action;
+            }
+
+            const currentEventMap = getStoredEventMap(result as any);
+            const currentEventMethods = (result as any).events as Record<
+              string,
+              DomainEventConstructor
+            >;
+            const selectedEventMap: DomainEventMap = {};
+            for (const selected of input.events) {
+              const key = typeof selected?.name === "string" ? selected.name : "";
+              if (!key || currentEventMethods[key] !== selected || !currentEventMap[key]) {
+                const kind = typeof selected?.kind === "string"
+                  ? selected.kind
+                  : "unregistered";
+                throw new Error(`domain_scope_event_outside_domain:${kind}`);
+              }
+              selectedEventMap[key] = currentEventMap[key]!;
+            }
+
+            return createDomainResult(
+              Object.values(selectedActionMap),
+              selectedActionMap as any,
+              selectedEventMap as any,
+              undefined,
+              schemaEventMap,
+            );
+          };
           (result as any).withActions = (actionsInput: DomainActionCollection) => {
             const current = getStoredActions(result as any);
             const currentMap = getStoredActionMap(result as any);
@@ -2576,6 +2656,7 @@ export function domain(arg?: unknown): any {
               { ...currentMap, ...additions.actionMap },
               getStoredEventMap(result as any),
               result as object,
+              schemaEventMap,
             );
           };
           (result as any).getActions = () => [...getStoredActions(result as any)];
@@ -2588,6 +2669,7 @@ export function domain(arg?: unknown): any {
               getStoredActionMap(result as any),
               { ...currentMap, ...additions.eventMap },
               result as object,
+              { ...schemaEventMap, ...additions.eventMap },
             );
           };
           (result as any).getEventMap = () => ({ ...getStoredEventMap(result as any) });

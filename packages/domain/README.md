@@ -191,6 +191,43 @@ or string array. Constructors and their metadata are immutable, and every draft
 references the constructor's exact frozen `definition`. Persistence belongs to an
 emitter, not the domain runtime.
 
+## Capability Scopes
+
+Use `domain.scope(...)` to expose an exact execution boundary without changing
+the domain schema:
+
+```ts
+const coaching = rocket.scope({
+  events: [rocket.events.messageReceived],
+  actions: [rocket.actions.publishReview],
+})
+```
+
+Sessions using `coaching` may receive only the selected domain Events and
+execute only the selected actions.
+
+When Reactor invokes an action inside a Session, the action receives the
+ambient execution context as its second argument:
+
+```ts
+const publishReview = defineAction({
+  input: z.object({ review: coachingSchema }),
+  output: z.object({ reviewId: z.string() }),
+  async execute({ input }, executionContext) {
+    "use step"
+    if (!executionContext) throw new Error("session_execution_context_required")
+    return saveReview({
+      contextKey: executionContext.context.key,
+      review: input.review,
+    })
+  },
+})
+```
+
+The public environment is
+`{ context: { id, key }, sessionId, reactionId, causeIds }`. Direct runtime
+calls receive `undefined` because they do not belong to a Session.
+
 ## Public And Full Domains
 
 Use normal domain composition to split browser-visible schema from server/runtime
@@ -358,4 +395,3 @@ Type tests under `src/__type_tests__` are intentionally split by use case:
 When a type regression appears, add one small file or one focused case to the
 matching file. Avoid broad "kitchen sink" type tests; they make IntelliSense and
 compiler failures hard to read.
-

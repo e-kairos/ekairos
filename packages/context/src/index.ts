@@ -19,17 +19,15 @@ import {
   Part,
   contextDomain,
   type ContextEvent,
-  type ContextHandleOpenParams,
   type ContextRuntimeServiceHandle,
   type DomainEventEnvelope,
   type DomainEventItem,
-  type StoredContext,
 } from "@ekairos/events"
 import {
   Session,
-  type SessionConfig,
+  type AnyReactionEngine,
+  type ReactionSandbox,
 } from "@ekairos/reactor"
-import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 
 export {
   ContextHandle,
@@ -41,7 +39,6 @@ export {
 }
 export type {
   ContextEvent,
-  ContextHandleOpenParams,
   ContextRuntimeServiceHandle,
   DomainEventCollection,
   DomainEventConstructor,
@@ -56,7 +53,6 @@ export type {
   DomainEventPhysicalLink,
   DomainEventRegistration,
   DomainEventsOf,
-  SessionConfig,
 }
 
 export type ContextRuntimeWithDomainUse = ContextRuntimeServiceHandle & {
@@ -65,55 +61,47 @@ export type ContextRuntimeWithDomainUse = ContextRuntimeServiceHandle & {
   materializeDataset?: unknown
 }
 
-export class SessionContextHandle<
-  ContextContent = unknown,
-  Runtime extends ContextRuntimeWithDomainUse = ContextRuntimeWithDomainUse,
-> extends ContextHandle<ContextContent> {
-  declare readonly runtime: Runtime
-
-  constructor(runtime: Runtime, context: StoredContext<ContextContent>) {
-    super(runtime, context)
-  }
-
-  static [WORKFLOW_SERIALIZE](instance: SessionContextHandle<unknown, any>) {
-    return {
-      runtime: instance.runtime,
-      context: instance.context,
-    }
-  }
-
-  static [WORKFLOW_DESERIALIZE](data: {
-    runtime: ContextRuntimeWithDomainUse
-    context: StoredContext<unknown>
-  }) {
-    return new SessionContextHandle(data.runtime, data.context)
-  }
-
-  session<Scope extends DomainLike>(
-    config: SessionConfig<ContextContent, Scope>,
-  ): Session<ContextContent, Scope> {
-    return new Session(this.runtime as any, this, config)
-  }
-}
+export type ContextSessionOptions<ContextContent> = Readonly<{
+  sandbox?: ReactionSandbox<ContextContent> | false
+}>
 
 export type ContextClient<Runtime extends ContextRuntimeWithDomainUse> = Readonly<{
-  open<ContextContent = unknown>(
-    params: ContextHandleOpenParams<ContextContent>,
-  ): Promise<SessionContextHandle<ContextContent, Runtime>>
+  open(contextKey: string): Promise<ContextHandle<unknown>>
+  session<
+    Scope extends DomainLike,
+    ContextContent = unknown,
+  >(
+    contextKey: string,
+    scope: Scope,
+    engine: AnyReactionEngine<ContextContent> | false,
+    options?: ContextSessionOptions<ContextContent>,
+  ): Promise<Session<ContextContent, Scope>>
 }>
 
 export function Context<Runtime extends ContextRuntimeWithDomainUse>(
   runtime: Runtime,
 ): ContextClient<Runtime> {
   return Object.freeze({
-    async open<ContextContent = unknown>(
-      params: ContextHandleOpenParams<ContextContent>,
+    async open(contextKey: string) {
+      return await ContextHandle.open(runtime, { key: contextKey })
+    },
+    async session<
+      Scope extends DomainLike,
+      ContextContent = unknown,
+    >(
+      contextKey: string,
+      scope: Scope,
+      engine: AnyReactionEngine<ContextContent> | false,
+      options: ContextSessionOptions<ContextContent> = {},
     ) {
-      const handle = await ContextHandle.open(runtime, params)
-      return new SessionContextHandle<ContextContent, Runtime>(
-        runtime,
-        handle.context as StoredContext<ContextContent>,
-      )
+      const context = await ContextHandle.open<ContextContent>(runtime, {
+        key: contextKey,
+      })
+      return new Session(runtime as any, context, {
+        scope,
+        engine,
+        sandbox: options.sandbox ?? false,
+      })
     },
   })
 }

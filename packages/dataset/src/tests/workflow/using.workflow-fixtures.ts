@@ -1,6 +1,33 @@
 // PRUEBA: `await using` (Symbol.asyncDispose) dentro de "use workflow".
 // Evidencia en banda: el orden de `log` viaja en el returnValue del workflow.
 
+import { domain } from "@ekairos/domain"
+import { ContextHandle } from "@ekairos/events"
+import { Session } from "@ekairos/reactor"
+import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
+
+const sessionScope = domain("usingSessionSerialization")
+  .withSchema({ entities: {}, links: {}, rooms: {} })
+  .scope({ events: [], actions: [] })
+
+class SerializableRuntime {
+  static [WORKFLOW_SERIALIZE]() {
+    return {}
+  }
+
+  static [WORKFLOW_DESERIALIZE]() {
+    return new SerializableRuntime()
+  }
+
+  async db() {
+    return null
+  }
+
+  async use() {
+    return null
+  }
+}
+
 export async function echoStep(value: string): Promise<string> {
   "use step"
   return `step:${value}`
@@ -41,4 +68,28 @@ export async function usingCatchWorkflow() {
     log.push(`caught:${(error as Error).message}`)
   }
   return { log }
+}
+
+export async function sessionSerializationWorkflow() {
+  "use workflow"
+  const runtime = new SerializableRuntime()
+  const context = new ContextHandle(runtime, {
+    id: "context-session-serde",
+    key: "context:session-serde",
+    content: null,
+    createdAt: new Date("2026-07-31T00:00:00.000Z"),
+  })
+  const session = new Session(runtime, context, {
+    scope: sessionScope,
+    engine: false,
+    sandbox: false,
+  })
+
+  const checkpoint = await echoStep("session-checkpoint")
+  return {
+    checkpoint,
+    contextId: session.context.id,
+    contextKey: session.context.key,
+    disposable: typeof session[Symbol.asyncDispose] === "function",
+  }
 }

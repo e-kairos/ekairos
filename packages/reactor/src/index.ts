@@ -7,12 +7,14 @@ export {
   isAiEngine,
 } from "./reactor.js"
 export { toModelActionName } from "./action-name.js"
+export type { DomainActionExecutionContext } from "@ekairos/domain"
 export type {
   SessionAgentInput,
   SessionConfig,
   SessionDatasetHandle,
   SessionDatasetInput,
   SessionFrom,
+  SessionPoint,
   SessionTextAgentInput,
 } from "./session.js"
 

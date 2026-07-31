@@ -52,6 +52,10 @@ const inboxDomain = domain("datasetInbox")
       links: { message: { on: "dataset_inbox_messages", has: "one" } },
     }),
   })
+const inboxScope = inboxDomain.scope({
+  events: [inboxDomain.events.received],
+  actions: [],
+})
 
 const appDomain = domain("dataset-reaction-test")
   .includes(inboxDomain)
@@ -126,17 +130,6 @@ describeInstant("Reaction Dataset operation", () => {
       { contentType: "text/csv", contentDisposition: "items.csv" },
     )
     const fileId = (upload as any).data.id as string
-    const context = await Context(runtime).open({
-      key: `dataset-reaction:${messageId}`,
-      content: { purpose: "quote" },
-    })
-    const trigger = await context.append(
-      inboxDomain.events.received({ subject: "Quote CSV" }).link({
-        message: messageId,
-        files: [fileId],
-      }),
-    )
-
     const pythonCode = [
       "import json",
       "import os",
@@ -170,12 +163,18 @@ describeInstant("Reaction Dataset operation", () => {
       description: z.string(),
       price: z.number(),
     })
-    const session = context.session({
-      scope: inboxDomain,
+    await using session = await Context(runtime).session(
+      `dataset-reaction:${messageId}`,
+      inboxScope,
       engine,
-      sandbox: sandboxId,
-    })
-    const answer = await session.from(trigger).dataset({
+      { sandbox: sandboxId },
+    )
+    const answer = await session.from(
+      inboxDomain.events.received({ subject: "Quote CSV" }).link({
+        message: messageId,
+        files: [fileId],
+      }),
+    ).dataset({
       instruction: "Extract one canonical item row per CSV row.",
       schema: rowSchema,
     })
@@ -188,7 +187,7 @@ describeInstant("Reaction Dataset operation", () => {
 
     const graph = await db.query({
       context_sessions: {
-        $: { where: { context: context.id }, limit: 1 },
+        $: { where: { context: session.context.id }, limit: 1 },
         trigger: {},
         rootReaction: { causes: {}, effects: {} },
         reactions: { causes: {}, effects: { eventParts: {} } },
@@ -222,15 +221,6 @@ describeInstant("Reaction Dataset operation", () => {
     await db.transact(messages.map(message =>
       db.tx.dataset_inbox_messages[message.id].update({ subject: message.subject })))
 
-    const context = await Context(runtime).open({
-      key: `dataset-agent-query:${randomUUID()}`,
-      content: { purpose: "cohort-query" },
-    })
-    const trigger = await context.append(
-      inboxDomain.events.received({ subject: "Group all inbox messages" }).link({
-        message: messages[0]!.id,
-      }),
-    )
     const engine = deterministicReactionEngine({
       steps: [
         actionStep("dataset.materialize", {
@@ -244,12 +234,17 @@ describeInstant("Reaction Dataset operation", () => {
         }),
       ],
     })
-    const session = context.session({
-      scope: inboxDomain,
+    await using session = await Context(runtime).session(
+      `dataset-agent-query:${randomUUID()}`,
+      inboxScope,
       engine,
-      sandbox: false,
-    })
-    const answer = await session.from(trigger).agent({
+      { sandbox: false },
+    )
+    const answer = await session.from(
+      inboxDomain.events.received({ subject: "Group all inbox messages" }).link({
+        message: messages[0]!.id,
+      }),
+    ).agent({
       instruction: "Materialize the full collection before answering.",
       output: z.object({
         completed: z.literal(true),
@@ -272,7 +267,7 @@ describeInstant("Reaction Dataset operation", () => {
         dataFile: {},
       },
       context_sessions: {
-        $: { where: { context: context.id } },
+        $: { where: { context: session.context.id } },
         reactions: {
           effects: {
             eventParts: { $: { order: { index: "asc" } } },
