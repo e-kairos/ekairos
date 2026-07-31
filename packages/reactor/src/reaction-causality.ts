@@ -11,16 +11,16 @@ export async function resolveCausalEvents(input: Readonly<{
 
   const visit = async (eventId: string): Promise<void> => {
     if (visited.has(eventId)) return
-    if (visiting.has(eventId)) throw new Error(`reaction_given_cycle:${eventId}`)
+    if (visiting.has(eventId)) throw new Error(`session_from_cycle:${eventId}`)
     visiting.add(eventId)
     const event = await input.getEvent(eventId)
-    if (!event) throw new Error(`reaction_given_event_not_found:${eventId}`)
+    if (!event) throw new Error(`session_from_event_not_found:${eventId}`)
     const producerId = typeof event.metadata?.reactionId === "string"
       ? event.metadata.reactionId
       : ""
     if (producerId) {
       const producer = await input.getReaction(producerId)
-      if (!producer) throw new Error(`reaction_given_producer_not_found:${producerId}`)
+      if (!producer) throw new Error(`session_from_producer_not_found:${producerId}`)
       for (const causeId of producer.causeIds) await visit(causeId)
       const effectIndex = producer.effectIds.indexOf(eventId)
       if (effectIndex >= 0) {
@@ -28,6 +28,11 @@ export async function resolveCausalEvents(input: Readonly<{
           await visit(precedingId)
         }
       }
+    } else {
+      const causeIds = Array.isArray(event.metadata?.causeIds)
+        ? event.metadata.causeIds.filter((id): id is string => typeof id === "string")
+        : []
+      for (const causeId of causeIds) await visit(causeId)
     }
     visiting.delete(eventId)
     visited.add(eventId)

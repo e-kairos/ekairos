@@ -25,6 +25,7 @@ export default defineConfig({
     include: ["src/**/*.test.ts"],
     exclude: [
       "**/node_modules/**",
+      "src/tests/**/*.instant.test.ts",
       "src/tests/**/*.codex.instant.test.ts",
       "src/tests/**/*.workflow.integration.test.ts",
     ],

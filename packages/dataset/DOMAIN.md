@@ -43,7 +43,7 @@ Full server domain: `datasetDomain`
     reader.
 
 The application-facing materialization API is
-`reaction.given(event).dataset({ instruction, schema })`.
+`session.from(event).dataset({ instruction, schema })`.
 
 When `runtime.materializeDataset` is configured, `reaction.agent(...)` also
 receives the scoped `dataset.materialize` capability by default. Its query

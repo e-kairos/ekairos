@@ -15,7 +15,6 @@ import {
 } from "@ekairos/domain"
 import {
   ContextHandle,
-  Events,
   Part,
   consumeReactionStream,
   contextDomain,
@@ -25,7 +24,7 @@ import {
   itInstant,
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
-import { defineReaction, executeReaction } from "../reaction.ts"
+import { Session } from "../session.ts"
 import type {
   ReactionEngine,
   ReactionEngineInput,
@@ -99,7 +98,7 @@ class GraphEngine implements ReactionEngine<Record<string, unknown>> {
 
   async agent(input: ReactionEngineInput<any, any>) {
     this.calls.push(input)
-    const selected = input.given.map(event => event.payload)
+      const selected = input.events.map(event => event.payload)
     let output: unknown
     if (input.instruction === "normalize") {
       output = { normalized: String((selected[0] as any).message).toUpperCase() }
@@ -183,70 +182,55 @@ describe("Reaction Event graph", () => {
 
   itInstant("persists fan-out, ordered fan-in, Dataset, action, and emit as Reactions over Events", async () => {
     const runtime = new GraphRuntime({ appId, adminToken })
-    const context = await ContextHandle.create(runtime, {
+    const context = await ContextHandle.open(runtime, {
       key: `reaction:${randomUUID()}`,
       content: { requisitionId: "REQ-1", version: 3 },
     })
-    const trigger = await Events(runtime).emit(
+    const trigger = await context.append(
       graphDomain.events.requested({ message: "quote this" }),
-      { contextId: context.id, channel: "web" },
     )
     const engine = new GraphEngine()
     let fanInIds: string[] = []
-    const definition = defineReaction(
-      graphDomain.events.requested,
-      {
-        key: "reactionGraph.answer",
-        scope: graphDomain,
-        engine,
-        sandbox: false,
-      },
-      async reaction => {
-        const normalized = await reaction.given(reaction.trigger).agent({
-          instruction: "normalize",
-          output: z.object({ normalized: z.string() }),
-        })
-        const [items, risks, dataset] = await Promise.all([
-          reaction.given(normalized).agent({
-            instruction: "items",
-            output: z.object({ itemCount: z.number() }),
-          }),
-          reaction.given(normalized).agent({
-            instruction: "risks",
-            output: z.object({ risk: z.string() }),
-          }),
-          reaction.given(normalized).dataset({
-            instruction: "extract items",
-            schema: itemSchema,
-          }),
-        ])
-        fanInIds = [items.id, risks.id, dataset.id]
-        const decision = await reaction.given([items, risks, dataset]).agent({
-          instruction: "decide",
-          output: z.object({ decision: z.string() }),
-        })
-        const accepted = await reaction.given(decision).action(
-          graphDomain.actions.accept.scope({ requestId: "REQ-1" }),
-          { decision: decision.payload.decision, accepted: true },
-        )
-        return await reaction.given(accepted).emit(
-          graphDomain.events.completed({
-            decision: accepted.payload.decision,
-            accepted: accepted.payload.accepted,
-            datasetCount: dataset.payload.count ?? dataset.payload.preview.length,
-          }),
-        )
-      },
+    const execution = new Session(runtime, context, {
+      scope: graphDomain,
+      engine,
+      sandbox: false,
+    })
+    const normalized = await execution.from(trigger).agent({
+      instruction: "normalize",
+      output: z.object({ normalized: z.string() }),
+    })
+    const [items, risks, dataset] = await Promise.all([
+      execution.from(normalized).agent({
+        instruction: "items",
+        output: z.object({ itemCount: z.number() }),
+      }),
+      execution.from(normalized).agent({
+        instruction: "risks",
+        output: z.object({ risk: z.string() }),
+      }),
+      execution.from(normalized).dataset({
+        instruction: "extract items",
+        schema: itemSchema,
+      }),
+    ])
+    fanInIds = [items.id, risks.id, dataset.id]
+    const decision = await execution.from([items, risks, dataset]).agent({
+      instruction: "decide",
+      output: z.object({ decision: z.string() }),
+    })
+    const completed = await execution.from(decision).action(
+      graphDomain.actions.accept.scope({ requestId: "REQ-1" }),
+      { decision: decision.payload.decision, accepted: true },
     )
-
-    const completed = await executeReaction(runtime, context, trigger, definition)
+    await execution.complete()
     expect(completed.payload).toEqual({
+      requestId: "REQ-1",
       decision: "2:low",
       accepted: true,
-      datasetCount: 2,
     })
     const decisionCall = engine.calls.find(call => call.instruction === "decide")
-    expect(decisionCall?.given.map(event => event.payload)).toEqual([
+    expect(decisionCall?.events.map(event => event.payload)).toEqual([
       { message: "quote this" },
       { normalized: "QUOTE THIS" },
       { itemCount: 2 },
@@ -291,7 +275,7 @@ describe("Reaction Event graph", () => {
       : session.rootReaction
     expect(sessionTrigger.id).toBe(trigger.id)
     expect(rootReaction.effects[0].id).toBe(completed.id)
-    expect(session.reactions).toHaveLength(8)
+    expect(session.reactions).toHaveLength(7)
 
     const streamedReactions = session.reactions.filter((row: any) => row.type === "agent")
     expect(streamedReactions).toHaveLength(4)
@@ -320,8 +304,6 @@ describe("Reaction Event graph", () => {
       "agent",
       "dataset",
       "action",
-      "emit",
-      "reactionGraph.answer",
     ]))
     const decisionReaction = session.reactions.find((row: any) =>
       row.instruction === "decide")
@@ -337,29 +319,23 @@ describe("Reaction Event graph", () => {
 
   itInstant("gives agent a scoped Dataset capability by default and supports explicit opt-out", async () => {
     const runtime = new GraphRuntime({ appId, adminToken })
-    const context = await ContextHandle.create(runtime, {
+    const context = await ContextHandle.open(runtime, {
       key: `reaction-dataset-agent:${randomUUID()}`,
       content: { purpose: "dataset-agent" },
     })
-    const trigger = await Events(runtime).emit(
+    const trigger = await context.append(
       graphDomain.events.requested({ message: "Summarize every record." }),
-      { contextId: context.id, channel: "web" },
     )
     const enabledEngine = new DatasetAwareEngine(true)
-    const enabled = defineReaction(
-      graphDomain.events.requested,
-      {
-        key: "reactionGraph.dataset-agent",
-        scope: graphDomain,
-        engine: enabledEngine,
-        sandbox: false,
-      },
-      async reaction => await reaction.given(reaction.trigger).agent({
-        instruction: "Use a Dataset when the answer requires a collection.",
-      }),
-    )
-
-    const answer = await executeReaction(runtime, context, trigger, enabled)
+    const enabled = new Session(runtime, context, {
+      scope: graphDomain,
+      engine: enabledEngine,
+      sandbox: false,
+    })
+    const answer = await enabled.from(trigger).agent({
+      instruction: "Use a Dataset when the answer requires a collection.",
+    })
+    await enabled.complete()
     expect(answer.payload).toContain("contains 2 rows")
     expect(enabledEngine.actionNames).toContain("dataset.materialize")
     expect(enabledEngine.actionNames).toContain("dataset.read")
@@ -373,20 +349,16 @@ describe("Reaction Event graph", () => {
     })
 
     const disabledEngine = new DatasetAwareEngine(false)
-    const disabled = defineReaction(
-      graphDomain.events.requested,
-      {
-        key: "reactionGraph.dataset-agent-disabled",
-        scope: graphDomain,
-        engine: disabledEngine,
-        sandbox: false,
-      },
-      async reaction => await reaction.given(reaction.trigger).agent({
-        instruction: "Answer without Dataset materialization.",
-        datasets: false,
-      }),
-    )
-    const disabledAnswer = await executeReaction(runtime, context, trigger, disabled)
+    const disabled = new Session(runtime, context, {
+      scope: graphDomain,
+      engine: disabledEngine,
+      sandbox: false,
+    })
+    const disabledAnswer = await disabled.from(trigger).agent({
+      instruction: "Answer without Dataset materialization.",
+      datasets: false,
+    })
+    await disabled.complete()
     expect(disabledAnswer.payload).toBe("Dataset disabled.")
     expect(disabledEngine.actionNames).not.toContain("dataset.materialize")
     expect(disabledEngine.actionNames).not.toContain("dataset.read")

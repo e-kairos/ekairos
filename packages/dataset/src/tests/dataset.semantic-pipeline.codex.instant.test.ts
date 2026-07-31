@@ -6,8 +6,7 @@ import { i } from "@instantdb/core"
 import { defineEvent, domain } from "@ekairos/domain"
 import { EkairosRuntime } from "../../../domain/src/runtime-handle.ts"
 import { configureRuntime } from "@ekairos/domain/runtime"
-import { Events, contextDomain } from "@ekairos/events"
-import { defineReaction } from "@ekairos/reactor"
+import { contextDomain } from "@ekairos/events"
 import { SandboxService } from "@ekairos/sandbox/service"
 import { codexEngine } from "@ekairos/openai-reactor"
 import { createTestApp } from "../../../ekairos-test/src/provision.ts"
@@ -300,63 +299,46 @@ describeReal("dataset semantic pipeline with Codex reactors", () => {
         .length(12),
     })
     const engine = createSemanticPipelineEngine(runtime.env)
-    const definition = defineReaction(
-      appDomain.events.pipelineRequested,
-      {
-        key: "dataset.pipeline.semantic",
-        scope: appDomain,
-        engine,
-        sandbox: sandboxId,
-      },
-      async reaction => {
-        const computed = await reaction.given(reaction.trigger).agent({
-          instruction: [
-            "Keep only paid orders and group them by week and region.",
-            "Sum amount into totalAmount and return exactly one row per week-region pair.",
-            "Sort rows by week then region and return exactly these keys: explanation, latex, rows.",
-            "The rows array must contain all 12 week-region pairs and no error field.",
-            `Source rows: ${JSON.stringify(sourceRows)}`,
-          ].join(" "),
-          output: computedSchema,
-          maxRounds: 4,
-        })
-        const persisted = await reaction.given(computed).action(
-          appDomain.actions.replaceRows,
-          {
-            datasetId,
-            sandboxId,
-            schema: rowJsonSchema,
-            rows: computed.payload.rows,
-            summary: "Weekly sales dataset persisted.",
-          },
-        )
-        expect(persisted.payload.success).toBe(true)
-        return await reaction.given(persisted).emit(
-          appDomain.events.pipelineCompleted({
-            datasetId,
-            rowCount: computed.payload.rows.length,
-          }),
-        )
-      },
-    )
-    const context = await Context(runtime as any).create({
+    const context = await Context(runtime as any).open({
       key: `${pipelineId}:semantic`,
       content: { pipelineId },
     })
-    const trigger = await Events(runtime).emit(
+    const trigger = await context.append(
       appDomain.events.pipelineRequested({ pipelineId, rows: sourceRows }),
+    )
+    const session = context.session({
+      scope: appDomain,
+      engine,
+      sandbox: sandboxId,
+    })
+    const computed = await session.from(trigger).agent({
+      instruction: [
+        "Keep only paid orders and group them by week and region.",
+        "Sum amount into totalAmount and return exactly one row per week-region pair.",
+        "Sort rows by week then region and return exactly these keys: explanation, latex, rows.",
+        "The rows array must contain all 12 week-region pairs and no error field.",
+        `Source rows: ${JSON.stringify(sourceRows)}`,
+      ].join(" "),
+      output: computedSchema,
+      maxRounds: 4,
+      datasets: false,
+    })
+    const effect = await session.from(computed).action(
+      appDomain.actions.replaceRows,
       {
-        id: crypto.randomUUID(),
-        channel: "web",
-        contextId: context.id,
-        createdAt: new Date(),
+        datasetId,
+        sandboxId,
+        schema: rowJsonSchema,
+        rows: computed.payload.rows,
+        summary: "Weekly sales dataset persisted.",
       },
     )
-    const effect = await context.react(trigger, definition)
+    await session.complete()
+    expect(effect.payload.success).toBe(true)
 
     const finalRows = await readDatasetRowsFromRecords(db, datasetId)
     expect(finalRows).toHaveLength(12)
-    expect(effect.payload).toEqual({ datasetId, rowCount: 12 })
+    expect(computed.payload.rows).toHaveLength(12)
     expect(
       finalRows.reduce((sum, row) => sum + Number(row.totalAmount), 0),
     ).toBe(1592)

@@ -7,15 +7,15 @@ import * as internal from "../internal.ts"
 describe("@ekairos/reactor public surface", () => {
   it("keeps root as the new Reactor DX only", () => {
     expect(Object.keys(root).sort()).toEqual([
+      "Session",
       "ai",
-      "defineReaction",
       "isAiEngine",
       "toModelActionName",
     ])
   })
 
   it("keeps internal as a narrow cross-package bridge", () => {
-    expect(Object.keys(internal)).toEqual(["executeReaction"])
+    expect(Object.keys(internal).sort()).toEqual(["Session", "getSessionId"])
   })
 
   it("does not publish the old context subpath", () => {

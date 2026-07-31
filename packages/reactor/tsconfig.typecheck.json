@@ -4,6 +4,6 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/index.ts", "src/reactor.ts", "src/reaction.ts", "src/__type_tests__/reaction.typecheck.ts"],
+  "include": ["src/index.ts", "src/reactor.ts", "src/session.ts", "src/__type_tests__/session.typecheck.ts"],
   "exclude": ["node_modules", "src/tests/**", "src/__type_tests__/context-runtime-domain.typecheck.ts"]
 }

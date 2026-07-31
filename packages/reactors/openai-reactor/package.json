@@ -1,7 +1,7 @@
 {
   "name": "@ekairos/openai-reactor",
   "version": "1.22.0",
-  "description": "Codex engine for the @ekairos/reactor Reaction API",
+  "description": "Codex engine for the @ekairos/reactor Session API",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

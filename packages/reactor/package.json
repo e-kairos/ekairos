@@ -1,7 +1,7 @@
 {
   "name": "@ekairos/reactor",
   "version": "1.22.0",
-  "description": "Ekairos Reactor - workflow-safe reaction engine for @ekairos/events",
+  "description": "Ekairos Reactor - flat Session execution over @ekairos/events",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

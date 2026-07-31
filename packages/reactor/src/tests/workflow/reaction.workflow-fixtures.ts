@@ -11,12 +11,11 @@ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { z } from "zod"
 
 import {
-  defineReaction,
+  Session,
   type ReactionEngine,
   type ReactionEngineActions,
   type ReactionEngineInput,
 } from "../../index.ts"
-import { executeReaction } from "../../reaction.ts"
 
 export type ReactorWorkflowEnv = {
   appId: string
@@ -85,12 +84,6 @@ export class ReactorWorkflowContext extends ContextHandle<ReactorWorkflowContent
     return new ReactorWorkflowContext(data.runtime, data.context)
   }
 
-  async react(
-    trigger: ContextEvent,
-    definition: typeof reactorWorkflowReaction,
-  ) {
-    return await executeReaction(this.runtime, this, trigger, definition)
-  }
 }
 
 class ReactorWorkflowEngine implements ReactionEngine<ReactorWorkflowContent> {
@@ -120,31 +113,21 @@ class ReactorWorkflowEngine implements ReactionEngine<ReactorWorkflowContent> {
   }
 }
 
-export const reactorWorkflowReaction = defineReaction(
-  reactorWorkflowDomain.events.requested,
-  {
-    key: "reactor.workflow.integration",
-    scope: reactorWorkflowDomain,
-    engine: new ReactorWorkflowEngine(),
-    sandbox: false,
-  },
-  async reaction => {
-    const answer = await reaction.given(reaction.trigger).agent({
-      instruction: "Answer the persisted request deterministically.",
-      output: answerSchema,
-    })
-    return await reaction.given(answer).emit(
-      reactorWorkflowDomain.events.completed(answer.payload),
-    )
-  },
-)
-
 export async function reactorWorkflow(
   context: ReactorWorkflowContext,
   trigger: ContextEvent,
 ) {
   "use workflow"
 
-  const answered = await context.react(trigger, reactorWorkflowReaction)
+  const session = new Session(context.runtime, context, {
+    scope: reactorWorkflowDomain,
+    engine: new ReactorWorkflowEngine(),
+    sandbox: false,
+  })
+  const answered = await session.from(trigger).agent({
+    instruction: "Answer the persisted request deterministically.",
+    output: answerSchema,
+  })
+  await session.complete()
   return answered
 }

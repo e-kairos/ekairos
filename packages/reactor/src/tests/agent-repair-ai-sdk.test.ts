@@ -135,7 +135,7 @@ function request(overrides: { actions?: Record<string, any> } = {}) {
     },
     sessionId: "session-1",
     reactionId: "reaction-1",
-    given: [],
+    events: [],
     messages: [],
     instruction: "Return the requested answer.",
     output,

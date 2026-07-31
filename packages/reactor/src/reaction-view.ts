@@ -15,7 +15,7 @@ export function buildAgentSystemPrompt(input: {
   hasDatasets: boolean
 }) {
   return [
-    `You are executing the reaction "${input.reactionKey}".`,
+    `You are executing the session operation "${input.reactionKey}".`,
     input.instruction,
     "The messages are an explicit causal view: stable Context first, then selected Events in order, then the current instruction.",
     input.hasDatasets
@@ -39,7 +39,7 @@ export async function buildAgentModelMessages<TContext>(input: {
     messages.push(...await eventToModelMessages(input.runtime, event))
   }
   messages.push(textMessage("user", [
-    "## Current reaction",
+    "## Current session operation",
     "",
     `Definition: ${input.reactionKey}`,
     "",

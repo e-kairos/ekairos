@@ -1,31 +1,31 @@
+import type { DomainEventDraft } from "@ekairos/domain"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 
+import { Events } from "./event.builder.js"
 import { getContextRuntimeServices, type ContextRuntimeServiceHandle } from "./context.runtime.js"
 import type {
   ContextEvent,
   ContextIdentifier,
-  ContextReaction,
-  ContextSession,
-  ContextStore,
+  DomainEventItem,
   StoredContext,
 } from "./context.store.js"
 
-export type ContextHandleCreateParams<Content = unknown> = Readonly<{
-  id?: string
-  key?: string
-  name?: string
-  content?: Content | null
-}>
+export type ContextHandleOpenParams<Content = unknown> = Readonly<
+  ContextIdentifier & {
+    content?: Content | null
+  }
+>
 
-function identifierFrom(params: ContextHandleCreateParams): ContextIdentifier {
+function identifierFrom(params: ContextHandleOpenParams): ContextIdentifier {
   if (params.id?.trim()) return { id: params.id.trim() }
   if (params.key?.trim()) return { key: params.key.trim() }
-  return { id: globalThis.crypto.randomUUID() }
+  throw new Error("context_identifier_required")
 }
 
 export class ContextHandle<Content = unknown> {
   readonly runtime: ContextRuntimeServiceHandle
   readonly context: StoredContext<Content>
+  private appendTail: Promise<void> = Promise.resolve()
 
   constructor(runtime: ContextRuntimeServiceHandle, context: StoredContext<Content>) {
     this.runtime = runtime
@@ -55,60 +55,46 @@ export class ContextHandle<Content = unknown> {
     return this.context.content
   }
 
-  get previous(): Content | undefined {
-    return this.context.previous
+  get events(): Promise<readonly ContextEvent[]> {
+    return this.readEvents()
   }
 
   identifier(): ContextIdentifier {
     return { id: this.id }
   }
 
-  async refresh(): Promise<ContextHandle<Content>> {
-    const { store } = await getContextRuntimeServices(this.runtime)
-    const context = await store.getContext<Content>(this.identifier())
-    if (!context) throw new Error(`context_not_found:${this.id}`)
-    return new ContextHandle(this.runtime, context)
-  }
-
-  async updateContent(content: Content): Promise<ContextHandle<Content>> {
-    const { store } = await getContextRuntimeServices(this.runtime)
-    return new ContextHandle(
-      this.runtime,
-      await store.updateContextContent(this.identifier(), content),
+  async append<Payload>(
+    draft: DomainEventDraft<Payload, any, any, any, any, any>,
+  ): Promise<DomainEventItem<Payload>> {
+    const pending = this.appendTail.then(() => this.appendNow(draft))
+    this.appendTail = pending.then(
+      () => undefined,
+      () => undefined,
     )
+    return await pending
   }
 
-  async openSession(
-    input: Omit<Parameters<ContextStore["openSession"]>[0], "contextId">,
-  ): Promise<ContextSession> {
+  private async appendNow<Payload>(
+    draft: DomainEventDraft<Payload, any, any, any, any, any>,
+  ): Promise<DomainEventItem<Payload>> {
+    const timeline = await this.readEvents()
+    const head = timeline[timeline.length - 1]
+    return await Events(this.runtime).emit(draft, {
+      contextId: this.id,
+      metadata: {
+        causeIds: head ? [head.id] : [],
+      },
+    })
+  }
+
+  private async readEvents(): Promise<readonly ContextEvent[]> {
     const { store } = await getContextRuntimeServices(this.runtime)
-    return await store.openSession({ ...input, contextId: this.id })
+    return Object.freeze([...(await store.getEvents(this.identifier()))])
   }
 
-  async openReaction(
-    input: Parameters<ContextStore["openReaction"]>[0],
-  ): Promise<ContextReaction> {
-    const { store } = await getContextRuntimeServices(this.runtime)
-    return await store.openReaction(input)
-  }
-
-  async event<Payload>(eventId: string): Promise<ContextEvent<Payload> | null> {
-    const { store } = await getContextRuntimeServices(this.runtime)
-    return await store.getEvent<Payload>(eventId)
-  }
-
-  static async get<Content = unknown>(
+  static async open<Content = unknown>(
     runtime: ContextRuntimeServiceHandle,
-    identifier: ContextIdentifier,
-  ): Promise<ContextHandle<Content> | null> {
-    const { store } = await getContextRuntimeServices(runtime)
-    const context = await store.getContext<Content>(identifier)
-    return context ? new ContextHandle(runtime, context) : null
-  }
-
-  static async create<Content = unknown>(
-    runtime: ContextRuntimeServiceHandle,
-    params: ContextHandleCreateParams<Content>,
+    params: ContextHandleOpenParams<Content>,
   ): Promise<ContextHandle<Content>> {
     const { store } = await getContextRuntimeServices(runtime)
     const identifier = identifierFrom(params)
@@ -118,18 +104,4 @@ export class ContextHandle<Content = unknown> {
     }
     return new ContextHandle(runtime, context)
   }
-}
-
-export async function createContextHandle<Content = unknown>(
-  runtime: ContextRuntimeServiceHandle,
-  params: ContextHandleCreateParams<Content>,
-) {
-  return await ContextHandle.create(runtime, params)
-}
-
-export async function getContextHandle<Content = unknown>(
-  runtime: ContextRuntimeServiceHandle,
-  identifier: ContextIdentifier,
-) {
-  return await ContextHandle.get<Content>(runtime, identifier)
 }

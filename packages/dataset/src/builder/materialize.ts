@@ -1,14 +1,8 @@
 import { lookup } from "@instantdb/admin"
-import { ContextHandle, Events } from "@ekairos/events"
-import {
-  defineReaction,
-  type ReactionDefinition,
-  type ReactionEffect,
-} from "@ekairos/reactor"
-import { executeReaction } from "@ekairos/reactor/internal"
+import { ContextHandle } from "@ekairos/events"
+import { Session, getSessionId } from "@ekairos/reactor/internal"
 import { z } from "zod"
 
-import { createDatasetId } from "../id.js"
 import { datasetDomain } from "../domain.js"
 import {
   datasetGetByIdStep,
@@ -360,40 +354,6 @@ export function createDatasetTriggerEvent(params: DatasetTriggerEventParams) {
   })
 }
 
-async function runDatasetMaterializationReaction<
-  Runtime extends AnyDatasetRuntime,
-  Context,
-  Effect extends ReactionEffect,
->(params: {
-  runtime: Runtime
-  contextKey: string
-  trigger: DatasetTriggerEventParams
-  initialContext: Context
-  definition: ReactionDefinition<
-    Context,
-    typeof datasetDomain,
-    typeof datasetDomain.events.materializationRequested,
-    Effect
-  >
-  parentSessionId?: string
-}): Promise<Effect> {
-  const prepared = await prepareDatasetMaterializationReactionStep({
-    runtime: params.runtime,
-    contextKey: params.contextKey,
-    trigger: params.trigger,
-    initialContext: params.initialContext,
-  })
-  const context = new ContextHandle<Context>(params.runtime, prepared.context)
-
-  return await executeReaction(
-    params.runtime,
-    context,
-    prepared.triggerEvent,
-    params.definition,
-    { parentSessionId: params.parentSessionId },
-  )
-}
-
 export async function prepareDatasetMaterializationReactionStep<
   Runtime extends AnyDatasetRuntime,
   Context,
@@ -405,17 +365,12 @@ export async function prepareDatasetMaterializationReactionStep<
 }) {
   "use step"
 
-  const context = await ContextHandle.create<Context>(params.runtime, {
+  const context = await ContextHandle.open<Context>(params.runtime, {
     key: params.contextKey,
     content: params.initialContext,
   })
 
-  const triggerEvent = await Events(params.runtime as any).emit(createDatasetTriggerEvent(params.trigger), {
-    id: createDatasetId(),
-    channel: "web",
-    contextId: context.id,
-    createdAt: new Date(),
-  })
+  const triggerEvent = await context.append(createDatasetTriggerEvent(params.trigger))
 
   return Object.freeze({
     context: context.context,
@@ -651,90 +606,7 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
     filename: context.filename,
     mediaType: context.mediaType,
   }
-  const definition = defineReaction<
-    typeof datasetDomain.events.materializationRequested,
-    FileMaterializationReactionContext,
-    typeof datasetDomain
-  >(
-    datasetDomain.events.materializationRequested,
-    {
-      key: `dataset.file.materialize:${targetDatasetId}`,
-      scope: datasetDomain,
-      engine: state.engine,
-      sandbox: sandboxId,
-    },
-    async reaction => {
-      const input = reaction.context.content
-      const prepared = await reaction.given(reaction.trigger).action(
-        datasetDomain.actions.prepareFileMaterialization,
-        {
-          contextId: reaction.context.id,
-          sessionId: reaction.id,
-          sourceEventId: reaction.trigger.id,
-          datasetId: input.datasetId,
-          fileId: input.fileId,
-          sandboxId: input.sandboxId,
-          instructions: input.instructions,
-          sandboxState: input.sandboxState,
-          filePreview: input.filePreview,
-          schema: input.schema,
-          filename: input.filename,
-          mediaType: input.mediaType,
-        },
-      )
-      const outputPath = (prepared.payload.sandboxState as SandboxState).outputPath
-      const coreActions = [
-        datasetDomain.actions.executeCommand.scope({
-          datasetId: input.datasetId,
-          sandboxId: input.sandboxId,
-          contextId: reaction.context.id,
-          sessionId: reaction.id,
-        }),
-        datasetDomain.actions.completeDataset.scope({
-          datasetId: input.datasetId,
-          sandboxId: input.sandboxId,
-          outputPath,
-        }),
-        datasetDomain.actions.clearDataset.scope({
-          datasetId: input.datasetId,
-          sandboxId: input.sandboxId,
-        }),
-        datasetDomain.actions.defineNotation.scope({
-          datasetId: input.datasetId,
-        }),
-      ] as const
-      const current = reaction.given(prepared)
-      const materialized = input.schema?.schema
-        ? await current.agent({
-            instruction: prepared.payload.instructions,
-            output: datasetMaterializationOutputSchema,
-            actions: coreActions,
-            maxRounds: 20,
-          })
-        : await current.agent({
-            instruction: prepared.payload.instructions,
-            output: datasetMaterializationOutputSchema,
-            actions: [
-              ...coreActions,
-              datasetDomain.actions.generateSchema.scope({
-                datasetId: input.datasetId,
-                fileId: input.fileId,
-              }),
-            ],
-            maxRounds: 20,
-          })
-      const target = reaction.trigger.links.target
-      if (!target) throw new Error("dataset_materialization_target_link_required")
-      return await reaction.given(materialized).emit(
-        datasetDomain.events.materialized({
-          datasetId: input.datasetId,
-          status: "materialized",
-        }).link({ target }),
-      )
-    },
-  )
-
-  await runDatasetMaterializationReaction({
+  const execution = await prepareDatasetMaterializationReactionStep({
     runtime: state.runtime,
     contextKey: `dataset:${targetDatasetId}`,
     trigger: {
@@ -744,9 +616,78 @@ export async function materializeSingleFileLikeSource<Runtime extends AnyDataset
       fileId: context.fileId,
     },
     initialContext,
-    definition,
-    parentSessionId: state.parentSessionId,
   })
+  const executionContext = new ContextHandle<FileMaterializationReactionContext>(
+    state.runtime,
+    execution.context,
+  )
+  const session = new Session(state.runtime, executionContext, {
+    scope: datasetDomain,
+    engine: state.engine,
+    sandbox: sandboxId,
+  })
+  const sessionId = getSessionId(session)
+  const input = initialContext
+  const preparedEvent = await session.from(execution.triggerEvent).action(
+    datasetDomain.actions.prepareFileMaterialization,
+    {
+      contextId: executionContext.id,
+      sessionId,
+      sourceEventId: execution.triggerEvent.id,
+      datasetId: input.datasetId,
+      fileId: input.fileId,
+      sandboxId: input.sandboxId,
+      instructions: input.instructions,
+      sandboxState: input.sandboxState,
+      filePreview: input.filePreview,
+      schema: input.schema,
+      filename: input.filename,
+      mediaType: input.mediaType,
+    },
+  )
+  const outputPath = (preparedEvent.payload.sandboxState as SandboxState).outputPath
+  const coreActions = [
+    datasetDomain.actions.executeCommand.scope({
+      datasetId: input.datasetId,
+      sandboxId: input.sandboxId,
+      contextId: executionContext.id,
+      sessionId,
+    }),
+    datasetDomain.actions.completeDataset.scope({
+      datasetId: input.datasetId,
+      sandboxId: input.sandboxId,
+      outputPath,
+    }),
+    datasetDomain.actions.clearDataset.scope({
+      datasetId: input.datasetId,
+      sandboxId: input.sandboxId,
+    }),
+    datasetDomain.actions.defineNotation.scope({
+      datasetId: input.datasetId,
+    }),
+  ] as const
+  if (input.schema?.schema) {
+    await session.from(preparedEvent).agent({
+      instruction: preparedEvent.payload.instructions,
+      output: datasetMaterializationOutputSchema,
+      actions: coreActions,
+      maxRounds: 20,
+    })
+  } else {
+    await session.from(preparedEvent).agent({
+      instruction: preparedEvent.payload.instructions,
+      output: datasetMaterializationOutputSchema,
+      actions: [
+        ...coreActions,
+        datasetDomain.actions.generateSchema.scope({
+          datasetId: input.datasetId,
+          fileId: input.fileId,
+        }),
+      ],
+      maxRounds: 20,
+    })
+  }
+  await session.complete()
 
   return targetDatasetId
 }
@@ -856,80 +797,7 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
     inputPreviews: context.inputPreviews,
     sources,
   }
-  const definition = defineReaction<
-    typeof datasetDomain.events.materializationRequested,
-    TransformMaterializationReactionContext,
-    typeof datasetDomain
-  >(
-    datasetDomain.events.materializationRequested,
-    {
-      key: `dataset.transform.materialize:${targetDatasetId}`,
-      scope: datasetDomain,
-      engine: state.engine,
-      sandbox: sandboxId,
-    },
-    async reaction => {
-      const input = reaction.context.content
-      const prepared = await reaction.given(reaction.trigger).action(
-        datasetDomain.actions.prepareTransformMaterialization,
-        {
-          datasetId: input.datasetId,
-          inputDatasetIds: input.inputDatasetIds,
-          outputSchema: input.outputSchema,
-          instructions: input.instructions,
-          sandboxId: input.sandboxId,
-          sandboxState: input.sandboxState,
-          inputPreviews: input.inputPreviews,
-          sources: input.sources,
-        },
-      )
-      const materialized = await reaction.given(prepared).agent({
-        instruction: prepared.payload.instructions,
-        output: datasetMaterializationOutputSchema,
-        actions: [
-          datasetDomain.actions.completeObject.scope({
-            datasetId: input.datasetId,
-            sandboxId: input.sandboxId,
-            schema: input.outputSchema,
-          }),
-          datasetDomain.actions.replaceRows.scope({
-            datasetId: input.datasetId,
-            sandboxId: input.sandboxId,
-            schema: input.outputSchema,
-          }),
-          datasetDomain.actions.executeCommand.scope({
-            datasetId: input.datasetId,
-            sandboxId: input.sandboxId,
-            contextId: reaction.context.id,
-            sessionId: reaction.id,
-            sources: input.sources as any[],
-          }),
-          datasetDomain.actions.completeDataset.scope({
-            datasetId: input.datasetId,
-            sandboxId: input.sandboxId,
-          }),
-          datasetDomain.actions.clearDataset.scope({
-            datasetId: input.datasetId,
-            sandboxId: input.sandboxId,
-          }),
-          datasetDomain.actions.defineNotation.scope({
-            datasetId: input.datasetId,
-          }),
-        ],
-        maxRounds: 20,
-      })
-      const target = reaction.trigger.links.target
-      if (!target) throw new Error("dataset_materialization_target_link_required")
-      return await reaction.given(materialized).emit(
-        datasetDomain.events.materialized({
-          datasetId: input.datasetId,
-          status: "materialized",
-        }).link({ target }),
-      )
-    },
-  )
-
-  await runDatasetMaterializationReaction({
+  const execution = await prepareDatasetMaterializationReactionStep({
     runtime: stateWithSandbox.runtime,
     contextKey: `dataset:${targetDatasetId}`,
     trigger: {
@@ -939,9 +807,67 @@ export async function materializeDerivedDataset<Runtime extends AnyDatasetRuntim
       sourceDatasetIds: linkedSourceDatasetIds,
     },
     initialContext,
-    definition,
-    parentSessionId: stateWithSandbox.parentSessionId,
   })
+  const executionContext = new ContextHandle<TransformMaterializationReactionContext>(
+    stateWithSandbox.runtime,
+    execution.context,
+  )
+  const session = new Session(stateWithSandbox.runtime, executionContext, {
+    scope: datasetDomain,
+    engine: state.engine,
+    sandbox: sandboxId,
+  })
+  const sessionId = getSessionId(session)
+  const input = initialContext
+  const preparedMaterialization = await session.from(execution.triggerEvent).action(
+    datasetDomain.actions.prepareTransformMaterialization,
+    {
+      datasetId: input.datasetId,
+      inputDatasetIds: input.inputDatasetIds,
+      outputSchema: input.outputSchema,
+      instructions: input.instructions,
+      sandboxId: input.sandboxId,
+      sandboxState: input.sandboxState,
+      inputPreviews: input.inputPreviews,
+      sources: input.sources,
+    },
+  )
+  await session.from(preparedMaterialization).agent({
+    instruction: preparedMaterialization.payload.instructions,
+    output: datasetMaterializationOutputSchema,
+    actions: [
+      datasetDomain.actions.completeObject.scope({
+        datasetId: input.datasetId,
+        sandboxId: input.sandboxId,
+        schema: input.outputSchema,
+      }),
+      datasetDomain.actions.replaceRows.scope({
+        datasetId: input.datasetId,
+        sandboxId: input.sandboxId,
+        schema: input.outputSchema,
+      }),
+      datasetDomain.actions.executeCommand.scope({
+        datasetId: input.datasetId,
+        sandboxId: input.sandboxId,
+        contextId: executionContext.id,
+        sessionId,
+        sources: input.sources as any[],
+      }),
+      datasetDomain.actions.completeDataset.scope({
+        datasetId: input.datasetId,
+        sandboxId: input.sandboxId,
+      }),
+      datasetDomain.actions.clearDataset.scope({
+        datasetId: input.datasetId,
+        sandboxId: input.sandboxId,
+      }),
+      datasetDomain.actions.defineNotation.scope({
+        datasetId: input.datasetId,
+      }),
+    ],
+    maxRounds: 20,
+  })
+  await session.complete()
 
   return targetDatasetId
 }

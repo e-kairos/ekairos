@@ -85,12 +85,28 @@ describe("Reaction causal input", () => {
       .toEqual(["trigger", "model-0", "action-0", "model-1"])
   })
 
+  it("follows metadata causeIds for exogenous Context Events", async () => {
+    const exogenousEvents = new Map([
+      ["root", event("root")],
+      ["reply", {
+        ...event("reply"),
+        metadata: { causeIds: ["root"] },
+      }],
+    ])
+
+    expect((await resolveCausalEvents({
+      sourceIds: ["reply"],
+      getEvent: async id => exogenousEvents.get(id) ?? null,
+      getReaction: async () => null,
+    })).map(row => row.id)).toEqual(["root", "reply"])
+  })
+
   it("fails when graph metadata references a missing producer", async () => {
     const broken = new Map(events).set("broken", event("broken", "missing"))
     await expect(resolveCausalEvents({
       sourceIds: ["broken"],
       getEvent: async id => broken.get(id) ?? null,
       getReaction: async id => reactions.get(id) ?? null,
-    })).rejects.toThrow("reaction_given_producer_not_found:missing")
+    })).rejects.toThrow("session_from_producer_not_found:missing")
   })
 })

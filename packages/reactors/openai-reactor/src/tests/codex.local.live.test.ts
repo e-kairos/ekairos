@@ -29,7 +29,7 @@ itLive("runs one minimal turn against the logged-in local Codex", async () => {
     trigger,
     sessionId: "local-live-session",
     reactionId: "local-live-reaction",
-    given: [trigger],
+    events: [trigger],
     messages: [{
       role: "user",
       content: [{ type: "text", text: "Reply with the single word ok." }],

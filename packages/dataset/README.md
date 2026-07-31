@@ -29,7 +29,7 @@ const itemSchema = z.object({
   quantity: z.number(),
 })
 
-const items = await reaction.given(reaction.trigger).dataset({
+const items = await session.from(message).dataset({
   instruction: "Extract one normalized row per requested item.",
   schema: itemSchema,
 })
@@ -47,8 +47,8 @@ The selected Event determines the source in this order:
 3. an Event payload array, or the selected Event payloads as rows
 
 There is no implicit Context scan. The parent Dataset operation produces a
-`context.dataset` Event. Materialization runs under a linked child Session and
-emits normal Dataset domain Events.
+`context.dataset` Event. Internal materialization uses the same flat Session
+surface and persists normal Dataset domain Events through actions.
 
 The preview is diagnostic. Production consumers read durable records or the
 Dataset data file by `datasetId`; they do not load millions of rows through the
@@ -57,7 +57,7 @@ Reaction Event.
 ## Let an Agent create Datasets
 
 ```ts
-const answer = await reaction.given(history).agent({
+const answer = await session.from(history).agent({
   instruction: "Group the complete cohort by recorded condition.",
 })
 ```
@@ -89,7 +89,7 @@ const addItems = defineDomainAction({
 ```
 
 ```ts
-const added = await reaction.given(items).action(
+const added = await session.from(items).action(
   bid.actions.addItems.scope({ bidId }),
   { items: items.payload },
 )

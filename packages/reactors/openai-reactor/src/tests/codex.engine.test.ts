@@ -98,7 +98,7 @@ function agentInput(
     trigger,
     sessionId: "session-1",
     reactionId: "reaction-1",
-    given: [trigger],
+      events: [trigger],
     messages: [
       { role: "user", content: [{ type: "text", text: "## Context\n\ncurrent-context\nprevious-context" }] },
       { role: "user", content: [{ type: "text", text: "## Event\n\nevt-trigger" }] },

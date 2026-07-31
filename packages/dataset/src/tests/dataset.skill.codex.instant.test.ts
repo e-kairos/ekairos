@@ -11,8 +11,7 @@ import { randomUUID } from "node:crypto"
 import { init, id as newId } from "@instantdb/admin"
 import { i } from "@instantdb/core"
 import { configureRuntime, EkairosRuntime } from "@ekairos/domain/runtime"
-import { Events, contextDomain } from "@ekairos/events"
-import { defineReaction } from "@ekairos/reactor"
+import { contextDomain } from "@ekairos/events"
 import { defineEvent, domain } from "@ekairos/domain"
 import { z } from "zod"
 import { datasetDomain } from "../domain"
@@ -281,55 +280,16 @@ describe("dataset skill + codex real", () => {
 
   const datasetSkill = buildDatasetSkillPackage()
 
-  function createDatasetCodexReaction(
+  function createDatasetCodexEngine(
     activeRunner: RealCodexRunner,
     repoPath: string,
   ) {
-    const output = z.object({
-      completed: z.boolean(),
-      summary: z.string().optional(),
+    return createRealCodexCommandEngine({
+      runner: activeRunner,
+      repoPath,
+      approvalPolicy: "never",
+      skills: [datasetSkill],
     })
-
-    return defineReaction(
-      appDomain.events.skillRequested,
-      {
-        key: "dataset.skill.codex.real",
-        scope: appDomain,
-        engine: createRealCodexCommandEngine({
-          runner: activeRunner,
-          repoPath,
-          approvalPolicy: "never",
-          skills: [datasetSkill],
-        }),
-        sandbox: false,
-      },
-      async reaction => {
-        const result = await reaction.given(reaction.trigger).agent({
-          instruction: [
-            "Use installed skills when they are relevant.",
-            "Persist the final dataset result when the task asks for a dataset.",
-            "When the dataset is persisted, return a concise structured completion summary.",
-            `Task: ${reaction.trigger.payload.prompt}`,
-          ].join("\n"),
-          output,
-          actions: [
-            appDomain.actions.executeCommand,
-            appDomain.actions.completeDataset,
-            appDomain.actions.clearDataset,
-            appDomain.actions.defineNotation,
-            appDomain.actions.generateSchema,
-            appDomain.actions.replaceRows,
-            appDomain.actions.completeObject,
-            appDomain.actions.prepareFileMaterialization,
-            appDomain.actions.prepareTransformMaterialization,
-          ],
-          maxRounds: 6,
-        })
-        return await reaction.given(result).emit(
-          appDomain.events.skillCompleted(result.payload),
-        )
-      },
-    )
   }
 
   beforeAll(async () => {
@@ -452,23 +412,44 @@ describe("dataset skill + codex real", () => {
         approvalPolicy: "never",
       }
       const runtime = new DatasetSkillRuntime(env)
-      const context = await Context(runtime as any).create({
+      const context = await Context(runtime as any).open({
         key: `dataset-skill:${Date.now()}:${Math.random().toString(36).slice(2)}`,
         content: { repoPath: params.repoPath },
       })
-      const trigger = await Events(runtime).emit(
+      const trigger = await context.append(
         appDomain.events.skillRequested({ prompt: params.prompt }),
-        {
-          id: randomUUID(),
-          channel: "web",
-          contextId: context.id,
-          createdAt: new Date(),
-        },
       )
-      const effect = await context.react(
-        trigger,
-        createDatasetCodexReaction(runner!, params.repoPath),
-      )
+      const session = context.session({
+        scope: appDomain,
+        engine: createDatasetCodexEngine(runner!, params.repoPath),
+        sandbox: false,
+      })
+      const effect = await session.from(trigger).agent({
+        instruction: [
+          "Use installed skills when they are relevant.",
+          "Persist the final dataset result when the task asks for a dataset.",
+          "When the dataset is persisted, return a concise structured completion summary.",
+          `Task: ${trigger.payload.prompt}`,
+        ].join("\n"),
+        output: z.object({
+          completed: z.boolean(),
+          summary: z.string().optional(),
+        }),
+        actions: [
+          appDomain.actions.executeCommand,
+          appDomain.actions.completeDataset,
+          appDomain.actions.clearDataset,
+          appDomain.actions.defineNotation,
+          appDomain.actions.generateSchema,
+          appDomain.actions.replaceRows,
+          appDomain.actions.completeObject,
+          appDomain.actions.prepareFileMaterialization,
+          appDomain.actions.prepareTransformMaterialization,
+        ],
+        maxRounds: 6,
+        datasets: false,
+      })
+      await session.complete()
       const snapshot: any = await db!.query({
         context_sessions: {
           $: { where: { context: context.id as any }, limit: 20 },

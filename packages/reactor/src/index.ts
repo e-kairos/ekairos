@@ -1,6 +1,6 @@
 export {
-  defineReaction,
-} from "./reaction.js"
+  Session,
+} from "./session.js"
 
 export {
   ai,
@@ -8,17 +8,13 @@ export {
 } from "./reactor.js"
 export { toModelActionName } from "./action-name.js"
 export type {
-  GivenOperations,
-  ReactionAgentInput,
-  ReactionContext,
-  ReactionDatasetHandle,
-  ReactionDatasetInput,
-  ReactionDefinition,
-  ReactionDefinitionOptions,
-  ReactionEffect,
-  ReactionRun,
-  ReactionTextAgentInput,
-} from "./reaction.js"
+  SessionAgentInput,
+  SessionConfig,
+  SessionDatasetHandle,
+  SessionDatasetInput,
+  SessionFrom,
+  SessionTextAgentInput,
+} from "./session.js"
 
 export type {
   AiReactionEngine,

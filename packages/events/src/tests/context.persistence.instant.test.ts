@@ -57,11 +57,14 @@ describeInstant("context causal persistence", () => {
     const runtime = { db }
     const events = Events(runtime)
     const store = new InstantStore(db)
-    const firstContext = await ContextHandle.create(runtime, {
+    const firstContext = await ContextHandle.open(runtime, {
       id: randomUUID(),
       content: { policy: "strict" },
     })
-    const updatedContext = await firstContext.updateContent({ policy: "reviewed" })
+    const updatedContext = await ContextHandle.open(runtime, {
+      id: firstContext.id,
+      content: { policy: "reviewed" },
+    })
     expect(updatedContext.context.previous).toEqual({ policy: "strict" })
 
     const triggerId = randomUUID()
@@ -79,16 +82,17 @@ describeInstant("context causal persistence", () => {
 
     const sessionId = randomUUID()
     const rootReactionId = randomUUID()
-    const session = await updatedContext.openSession({
+    const session = await store.openSession({
       id: sessionId,
       rootReactionId,
+      contextId: updatedContext.id,
       definition: "contextPersistenceTest.answerMessage",
       triggerId,
     })
     expect(session).toMatchObject({ status: "running", triggerId, rootReactionId })
 
     const operationReactionId = randomUUID()
-    await updatedContext.openReaction({
+    await store.openReaction({
       id: operationReactionId,
       sessionId,
       parentReactionId: rootReactionId,
@@ -131,9 +135,10 @@ describeInstant("context causal persistence", () => {
     await store.appendReactionEffect(operationReactionId, childTrigger.id)
     const childSessionId = randomUUID()
     const childRootReactionId = randomUUID()
-    await updatedContext.openSession({
+    await store.openSession({
       id: childSessionId,
       rootReactionId: childRootReactionId,
+      contextId: updatedContext.id,
       definition: "contextPersistenceTest.verify",
       triggerId: childTrigger.id,
       parentSessionId: sessionId,
@@ -215,13 +220,14 @@ describeInstant("context causal persistence", () => {
     })
     expect(stored.rootReaction.children[0].stream.id).toBe(streamId)
 
-    const secondContext = await ContextHandle.create(runtime, {
+    const secondContext = await ContextHandle.open(runtime, {
       id: randomUUID(),
       content: { policy: "independent" },
     })
-    const secondSession = await secondContext.openSession({
+    const secondSession = await store.openSession({
       id: randomUUID(),
       rootReactionId: randomUUID(),
+      contextId: secondContext.id,
       definition: "contextPersistenceTest.independentAnswer",
       triggerId,
     })

@@ -1,4 +1,4 @@
-export { executeReaction } from "./reaction.js"
+export { Session, getSessionId } from "./session.js"
 
 export type {
   DatasetAdapterEnsure,

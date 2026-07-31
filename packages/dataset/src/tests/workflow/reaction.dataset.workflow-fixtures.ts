@@ -6,10 +6,7 @@ import {
   type ContextEvent,
   type StoredContext,
 } from "@ekairos/events"
-import {
-  defineReaction,
-} from "@ekairos/reactor"
-import { executeReaction } from "@ekairos/reactor/internal"
+import { Session } from "@ekairos/reactor"
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 import { z } from "zod"
 
@@ -106,12 +103,6 @@ export class ReactionDatasetWorkflowContextHandle extends ContextHandle<
     return new ReactionDatasetWorkflowContextHandle(data.runtime, data.context)
   }
 
-  async react(
-    trigger: ContextEvent,
-    definition: typeof reactionDatasetWorkflowDefinition,
-  ) {
-    return await executeReaction(this.runtime, this, trigger, definition)
-  }
 }
 
 const pythonCode = [
@@ -144,38 +135,21 @@ const engine = deterministicReactionEngine({
   ],
 })
 
-export const reactionDatasetWorkflowDefinition = defineReaction<
-  typeof reactionDatasetWorkflowDomain.events.received,
-  ReactionDatasetWorkflowContext,
-  typeof reactionDatasetWorkflowDomain
->(
-  reactionDatasetWorkflowDomain.events.received,
-  {
-    key: "dataset.reaction.workflow",
-    scope: reactionDatasetWorkflowDomain,
-    engine,
-    sandbox: ({ context }) => context.sandboxId,
-  },
-  async reaction => {
-    const items = await reaction.given(reaction.trigger).dataset({
-      instruction: "Extract one canonical item row per source row.",
-      schema: sourceItemSchema,
-    })
-
-    return await reaction.given(items).emit(
-      reactionDatasetWorkflowDomain.events.materialized({
-        datasetId: items.payload.datasetId,
-        itemCount: items.payload.preview.length,
-      }),
-    )
-  },
-)
-
 export async function reactionDatasetWorkflow(
   context: ReactionDatasetWorkflowContextHandle,
   trigger: ContextEvent,
 ) {
   "use workflow"
 
-  return await context.react(trigger, reactionDatasetWorkflowDefinition)
+  const session = new Session(context.runtime, context, {
+    scope: reactionDatasetWorkflowDomain,
+    engine,
+    sandbox: ({ context: content }) => content.sandboxId,
+  })
+  const items = await session.from(trigger).dataset({
+    instruction: "Extract one canonical item row per source row.",
+    schema: sourceItemSchema,
+  })
+  await session.complete()
+  return items
 }

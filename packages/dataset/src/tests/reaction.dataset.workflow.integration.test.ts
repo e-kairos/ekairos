@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto"
 import { init } from "@instantdb/admin"
-import { ContextHandle, Events } from "@ekairos/events"
+import { ContextHandle } from "@ekairos/events"
 import { afterAll, beforeAll, expect } from "vitest"
 import { start } from "workflow/api"
 
@@ -45,7 +45,7 @@ afterAll(async () => {
   await destroyContextTestApp(appId)
 }, 60_000)
 
-itInstant("materializes Dataset in a child Session through the Reaction Workflow API", async () => {
+itInstant("materializes Dataset through the flat Session Workflow API", async () => {
   const runtime = new ReactionDatasetWorkflowRuntime({ appId, adminToken })
   const sandboxId = randomUUID()
   await db.transact([
@@ -56,28 +56,22 @@ itInstant("materializes Dataset in a child Session through the Reaction Workflow
       createdAt: Date.now(),
     }),
   ])
-  const stored = await ContextHandle.create(runtime, {
+  const stored = await ContextHandle.open(runtime, {
     key: `reaction-dataset-workflow:${randomUUID()}`,
     content: { sandboxId },
   })
   const context = new ReactionDatasetWorkflowContextHandle(runtime, stored.context)
-  const trigger = await Events(runtime).emit(
+  const trigger = await context.append(
     reactionDatasetWorkflowDomain.events.received([
       { code: "A1", description: "Bolt", price: 10.5 },
       { code: "A2", description: "Nut", price: 20.25 },
     ]),
-    {
-      id: randomUUID(),
-      contextId: context.id,
-      channel: "test",
-      createdAt: new Date(),
-    },
   )
 
   const run = await start(reactionDatasetWorkflow, [context, trigger])
   const effect = await run.returnValue
 
-  expect(effect.payload.itemCount).toBe(2)
+  expect(effect.payload.count).toBe(2)
   expect(effect.payload.datasetId).toBeTruthy()
 
   const result = await db.query({
@@ -86,18 +80,12 @@ itInstant("materializes Dataset in a child Session through the Reaction Workflow
       sessions: {
         rootReaction: { effects: {} },
         reactions: { causes: {}, effects: {} },
-        children: {
-          trigger: {},
-          rootReaction: { effects: {} },
-          reactions: { causes: {}, effects: { eventParts: {} } },
-        },
       },
     },
   } as any)
   const parent = (result as any).context_contexts[0].sessions[0]
   expect(parent.status).toBe("completed")
   expect(parent.workflowRunId).toBe(run.runId)
-  expect(parent.children).toHaveLength(1)
 
   const datasetReaction = parent.reactions.find((row: any) => row.type === "dataset")
   expect(datasetReaction.causes.map((event: any) => event.id)).toEqual([trigger.id])
@@ -106,21 +94,4 @@ itInstant("materializes Dataset in a child Session through the Reaction Workflow
     mode: "built",
     count: 2,
   })
-
-  const child = parent.children[0]
-  expect(child.status).toBe("completed")
-  expect(child.trigger).toEqual(expect.objectContaining({
-    type: "dataset.materializationRequested",
-    domain: "dataset",
-    name: "materializationRequested",
-  }))
-  const childTypes = [...child.reactions]
-    .sort((left: any, right: any) => left.position - right.position)
-    .map((row: any) => row.type)
-  expect(childTypes).toEqual([
-    `dataset.file.materialize:${effect.payload.datasetId}`,
-    "action",
-    "agent",
-    "emit",
-  ])
 }, 180_000)

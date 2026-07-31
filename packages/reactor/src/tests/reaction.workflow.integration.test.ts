@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { readdir, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { init } from "@instantdb/admin"
-import { ContextHandle, Events } from "@ekairos/events"
+import { ContextHandle } from "@ekairos/events"
 import { afterAll, beforeAll, expect } from "vitest"
 import { start } from "workflow/api"
 
@@ -65,19 +65,13 @@ afterAll(async () => {
 
 itInstant("runs the new Reaction API through Workflow and persists its causal graph", async () => {
   const runtime = new ReactorWorkflowRuntime({ appId, adminToken })
-  const stored = await ContextHandle.create(runtime, {
+  const stored = await ContextHandle.open(runtime, {
     key: `reactor-workflow:${randomUUID()}`,
     content: { prefix: "workflow" },
   })
   const context = new ReactorWorkflowContext(runtime, stored.context)
-  const trigger = await Events(runtime).emit(
+  const trigger = await context.append(
     reactorWorkflowDomain.events.requested({ message: "hello" }),
-    {
-      id: randomUUID(),
-      contextId: context.id,
-      channel: "test",
-      createdAt: new Date(),
-    },
   )
 
   const run = await start(reactorWorkflow, [context, trigger])
@@ -85,10 +79,9 @@ itInstant("runs the new Reaction API through Workflow and persists its causal gr
 
   expect(effect.payload).toEqual({ message: "workflow:hello" })
   expect(await workflowStepNames(run.runId)).toEqual([
-    "startReaction",
+    "startSession",
     "agent",
-    "emit",
-    "finishReaction",
+    "finishSession",
   ])
 
   const result = await db.query({
@@ -117,7 +110,7 @@ itInstant("runs the new Reaction API through Workflow and persists its causal gr
   expect(session.reactions
     .sort((left: any, right: any) => left.position - right.position)
     .map((reaction: any) => reaction.type))
-    .toEqual(["reactor.workflow.integration", "agent", "emit"])
+    .toEqual(["agent"])
 
   const agent = session.reactions.find((reaction: any) => reaction.type === "agent")
   expect(agent.causes.map((event: any) => event.id)).toEqual([trigger.id])

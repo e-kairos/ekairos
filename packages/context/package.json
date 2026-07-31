@@ -1,7 +1,7 @@
 {
   "name": "@ekairos/context",
   "version": "1.22.0",
-  "description": "Ekairos Context - typed domain events and workflow-safe reactions",
+  "description": "Ekairos Context - durable timelines and flat Session execution",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

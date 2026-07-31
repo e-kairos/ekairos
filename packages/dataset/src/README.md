@@ -5,7 +5,7 @@ runtime's `materializeDataset` integration.
 
 Materialization proceeds as follows:
 
-1. derive an explicit source from the Events selected by `given(...)`
+1. derive an explicit source from the causal Events selected by `from(...)`
 2. create or load the deterministic Dataset identity
 3. create a pure source Context containing descriptors
 4. start a child Session for model-driven materialization

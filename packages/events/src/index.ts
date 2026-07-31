@@ -22,10 +22,8 @@ export type {
 
 export {
   ContextHandle,
-  createContextHandle,
-  getContextHandle,
 } from "./context.handle.js"
-export type { ContextHandleCreateParams } from "./context.handle.js"
+export type { ContextHandleOpenParams } from "./context.handle.js"
 
 export type {
   ContextEvent,

@@ -7,14 +7,14 @@ import { afterAll, beforeAll, describe, expect } from "vitest"
 import { z } from "zod"
 
 import { EkairosRuntime, defineEvent, domain } from "@ekairos/domain"
-import { ContextHandle, Events, contextDomain } from "@ekairos/events"
+import { ContextHandle, contextDomain } from "@ekairos/events"
 import {
   destroyContextTestApp,
   itInstant,
   provisionContextTestApp,
 } from "../../../events/src/tests/_env.ts"
-import { defineReaction, executeReaction } from "../reaction.ts"
 import { ai } from "../reactor.ts"
+import { Session } from "../session.ts"
 
 const MODEL = "anthropic/claude-haiku-4.5"
 const HIDDEN_VALUE = "ROW-20-VERIFIED-7QX"
@@ -107,49 +107,40 @@ describe("live Dataset grounding beyond preview", () => {
 
   itInstant("answers from row 20 only after a durable dataset.read action", async () => {
     const runtime = new GroundingRuntime({ appId, adminToken })
-    const context = await ContextHandle.create(runtime, {
+    const context = await ContextHandle.open(runtime, {
       key: `dataset-grounding:${randomUUID()}`,
       content: { purpose: "prove row-level grounding beyond preview" },
     })
-    const trigger = await Events(runtime).emit(
+    const trigger = await context.append(
       groundingDomain.events.requested({
         question: "What exact observedValue is stored at index 20?",
       }),
-      { contextId: context.id, channel: "test" },
     )
-    const definition = defineReaction(
-      groundingDomain.events.requested,
-      {
-        key: "datasetGrounding.answer",
-        scope: groundingDomain,
-        engine: ai({ model: MODEL }),
-        sandbox: false,
-      },
-      async reaction => {
-        const dataset = await reaction.given(reaction.trigger).dataset({
-          instruction: "Materialize the 25 ordered observations exactly.",
-          schema: z.object({
-            index: z.number().int(),
-            observedValue: z.string(),
-            observedAt: z.string(),
-          }),
-        })
-        return await reaction.given([reaction.trigger, dataset]).agent({
-          instruction: [
-            "Answer the requested observedValue at index 20.",
-            "The preview contains only rows 0-2, so the answer is impossible from preview.",
-            "You must call dataset.read and ground the answer in the returned row.",
-          ].join(" "),
-          output: z.object({
-            value: z.string(),
-            evidenceIndex: z.literal(20),
-          }),
-          datasets: true,
-        })
-      },
-    )
-
-    const answer = await executeReaction(runtime, context, trigger, definition)
+    const session = new Session(runtime, context, {
+      scope: groundingDomain,
+      engine: ai({ model: MODEL }),
+      sandbox: false,
+    })
+    const dataset = await session.from(trigger).dataset({
+      instruction: "Materialize the 25 ordered observations exactly.",
+      schema: z.object({
+        index: z.number().int(),
+        observedValue: z.string(),
+        observedAt: z.string(),
+      }),
+    })
+    const answer = await session.from([trigger, dataset]).agent({
+      instruction: [
+        "Answer the requested observedValue at index 20.",
+        "The preview contains only rows 0-2, so the answer is impossible from preview.",
+        "You must call dataset.read and ground the answer in the returned row.",
+      ].join(" "),
+      output: z.object({
+        value: z.string(),
+        evidenceIndex: z.literal(20),
+      }),
+    })
+    await session.complete()
     expect((answer.payload as any).value).toContain(HIDDEN_VALUE)
     expect(runtime.reads.length).toBeGreaterThanOrEqual(1)
 

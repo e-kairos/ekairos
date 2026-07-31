@@ -63,7 +63,7 @@ describeInstant("Event persistence", () => {
       { contentType: "text/plain" },
     )
     const fileId = (upload as any).data.id as string
-    const context = await ContextHandle.create({ db }, {
+    const context = await ContextHandle.open({ db }, {
       key: `event-test:${randomUUID()}`,
       content: { purpose: "projection" },
     })

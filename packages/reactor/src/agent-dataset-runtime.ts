@@ -34,7 +34,7 @@ export const agentDatasetMaterializeInputSchema = z.object({
     .describe("How to transform the selected causal evidence into rows.")
     .optional(),
   query: z.record(z.string(), z.unknown())
-    .describe("Optional scoped InstaQL snapshot. Omit to use reaction.given(...) automatically.")
+    .describe("Optional scoped InstaQL snapshot. Omit to use session.from(...) automatically.")
     .optional(),
   explanation: z.string().trim().min(1)
     .describe("Why an optional query is needed for this answer.")
@@ -159,9 +159,9 @@ export function agentDatasetMaterializeDescription(
 ) {
   return [
     "Create or open a durable Dataset when the selected causal evidence needs collection-level transformation.",
-    "The source is automatically reaction.given(...); do not provide or reconstruct a source.",
+    "The source is automatically session.from(...); do not provide or reconstruct a source.",
     "Provide a short title and optional transformation instructions/schema.",
-    "Use the optional query only for a scoped domain snapshot; its entities and links must belong to the declared Reaction domain.",
+    "Use the optional query only for a scoped domain snapshot; its entities and links must belong to the Session scope.",
     "After materialization, call dataset.read before using row facts in the final answer.",
     `Scoped domain schema: ${JSON.stringify(domain)}`,
   ].join(" ")

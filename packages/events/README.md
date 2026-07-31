@@ -55,7 +55,7 @@ const history = await Events(runtime).query({
 ```
 
 History is never loaded implicitly. Pass the selected Events to
-`reaction.given(history)` when they should become causal model input.
+`session.from(history)` when they should become causal model input.
 
 ## Event Parts
 

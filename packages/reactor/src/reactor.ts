@@ -65,7 +65,7 @@ export type ReactionEngineInput<
   trigger: ContextEvent
   sessionId: string
   reactionId: string
-  given: readonly ContextEvent[]
+  events: readonly ContextEvent[]
   messages: readonly ModelMessage[]
   instruction: string
   output?: z.ZodType<TOutput>

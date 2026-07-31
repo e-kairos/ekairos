@@ -8,26 +8,25 @@
 - `context_reactions`
 - `context_eventParts`
 
-No other entity is part of the Reaction execution model.
+No other entity is part of the Session execution model.
 
 ## Session contract
 
-A Session records one invocation of a Reaction definition:
+A Session records one flat configured execution:
 
 - Context
 - trigger Event
 - root Reaction
-- optional parent Session
 - status, sandbox id, and Workflow run id
 
-A child Reaction invocation receives its own Session. It may share the parent
-Context or run against another explicitly supplied Context.
+The Session is opened lazily by its first operation. Its persisted definition is
+`"session"` and its trigger is the first point selected by `from(...)`.
 
 ## Reaction contract
 
 A Reaction is a causal edge with ordered causes and effects. Root Reactions
-represent the whole definition. Child Reactions represent `agent`, `action`,
-`dataset`, `workspace`, `shell`, `git`, `emit`, or a nested Reaction boundary.
+represent the whole Session. Child Reactions represent `agent`, `action`,
+`dataset`, `loadFiles`, `storeFiles`, `shell`, or `git`.
 
 Cause and effect ids are stored as ordered JSON for deterministic projection and
 also linked as real InstantDB relations for traversal.
@@ -57,11 +56,11 @@ started and completed/failed Parts with the same action call id.
 Each model request is compiled in this order:
 
 1. stable Context content
-2. each Event selected by `given(...)`, in supplied order
+2. the causal cone of each Event selected by `from(...)`, in timeline order
 3. each Event's ordered Parts, including file projections
 4. the unresolved instruction
 
-There is no implicit history query. Linked files receive a stable metadata
+There is no unrelated history query. Linked files receive a stable metadata
 header; supported text, image, and PDF content follows when available.
 
 ## React subscription

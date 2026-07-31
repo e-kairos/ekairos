@@ -8,10 +8,8 @@ import { afterAll, beforeAll, expect } from "vitest"
 import { z } from "zod"
 
 import { defineDomainAction, domain, EkairosRuntime } from "@ekairos/domain"
-import { defineReaction } from "@ekairos/reactor"
 import {
   Context,
-  Events,
   contextDomain,
   defineEvent,
 } from "../index.js"
@@ -37,16 +35,8 @@ const emailCore = domain("email")
       payload: z.object({ from: z.string().email(), subject: z.string() }),
       links: { message: { on: "email_messages", has: "one" } },
     }),
-    extractionRequested: defineEvent({
-      payload: z.object({ orderCode: z.string() }),
-      links: { message: { on: "email_messages", has: "one" } },
-    }),
-    orderExtracted: defineEvent({
-      payload: z.object({ orderCode: z.string() }),
-      links: { message: { on: "email_messages", has: "one" } },
-    }),
-    processingCompleted: defineEvent({
-      payload: z.object({ orderCode: z.string() }),
+    noted: defineEvent({
+      payload: z.object({ text: z.string() }),
       links: { message: { on: "email_messages", has: "one" } },
     }),
   })
@@ -64,44 +54,7 @@ const completeOrder = defineDomainAction({
   },
 })
 
-const extractFromAction = defineDomainAction({
-  description: "Start a causally linked extraction Reaction from this action.",
-  input: z.object({ messageId: z.string().uuid(), orderCode: z.string() }),
-  output: z.object({ eventId: z.string().uuid(), orderCode: z.string() }),
-  execute: async ({ input, runtime, reactionId }) => {
-    if (!reactionId) throw new Error("email_extraction_reaction_required")
-    const context = await Context(runtime as any).fromReaction(reactionId)
-    const requested = await context.emit(
-      emailCore.events.extractionRequested({ orderCode: input.orderCode })
-        .link({ message: input.messageId }),
-      { key: "extraction-requested" },
-    )
-    const completed = await context.react(
-      requested,
-      defineReaction(
-        emailCore.events.extractionRequested,
-        {
-          key: "email.extract-from-action",
-          scope: emailCore,
-          engine: false,
-          sandbox: false,
-        },
-        async child => await child.given(child.trigger).emit(
-          emailCore.events.orderExtracted({ orderCode: child.trigger.payload.orderCode })
-            .link({ message: input.messageId }),
-        ),
-      ),
-    )
-    return { eventId: completed.id, orderCode: completed.payload.orderCode }
-  },
-})
-
-const emailDomain = emailCore
-  .withActions({
-    completeOrder,
-    extractFromAction,
-  })
-
+const emailDomain = emailCore.withActions({ completeOrder })
 const appDomain = domain("context-test-app")
   .includes(emailDomain)
   .withSchema({ entities: {}, links: {}, rooms: {} })
@@ -120,14 +73,14 @@ class ContextTestRuntime extends EkairosRuntime<Env, typeof appDomain, ReturnTyp
   }
 }
 
-describeInstant("@ekairos/context", () => {
+describeInstant("@ekairos/context flat session", () => {
   let appId = ""
   let adminToken = ""
   let db: ReturnType<typeof init>
 
   beforeAll(async () => {
     const app = await provisionContextTestApp({
-      name: "context-domain-event-reactor",
+      name: "context-flat-session",
       schema: appDomain.instantSchema(),
     })
     appId = app.appId
@@ -137,187 +90,74 @@ describeInstant("@ekairos/context", () => {
 
   afterAll(async () => destroyContextTestApp(appId), 60_000)
 
-  itInstant("creates pure Context data and reacts to a linked Event", async () => {
+  itInstant("opens a Context and chains exogenous append events", async () => {
     const runtime = new ContextTestRuntime({ appId, adminToken })
     const messageId = randomUUID()
-    const orderId = randomUUID()
     await db.transact([
       db.tx.email_messages[messageId].create({ subject: "Factura OC 4400" }),
     ])
-    const created = await Context(runtime).create({
+    const context = await Context(runtime).open({
       key: `email:${messageId}`,
-      content: { requisitionId: "REQ-1", version: 1 },
+      content: { requisitionId: "REQ-1", version: 2 },
     })
-    const context = await created.updateContent({ requisitionId: "REQ-1", version: 2 })
-    expect(context.content).toEqual({ requisitionId: "REQ-1", version: 2 })
-    expect(context.previous).toEqual({ requisitionId: "REQ-1", version: 1 })
 
-    const trigger = await Events(runtime).emit(
+    const received = await context.append(
       emailDomain.events.received({
         from: "supplier@example.com",
         subject: "Factura OC 4400",
       }).link({ message: messageId }),
-      { id: randomUUID(), channel: "email", contextId: context.id },
     )
-    const definition = defineReaction(
-      emailDomain.events.received,
-      { key: "email.complete-order", scope: emailDomain, engine: false, sandbox: false },
-      async reaction => {
-        expect(reaction.trigger.id).toBe(trigger.id)
-        expect(reaction.context.content.version).toBe(2)
-        const order = await reaction.given(reaction.trigger).action(
-          emailDomain.actions.completeOrder.scope({ orderId }),
-          { code: "4400" },
-        )
-        return await reaction.given(order).emit(
-          emailDomain.events.processingCompleted({ orderCode: order.payload.code })
-            .link({ message: messageId }),
-        )
-      },
+    const noted = await context.append(
+      emailDomain.events.noted({ text: "manual review" }).link({ message: messageId }),
     )
 
-    const completed = await context.react(trigger, definition)
-    expect(completed.payload).toEqual({ orderCode: "4400" })
+    expect(context.content).toEqual({ requisitionId: "REQ-1", version: 2 })
+    expect(noted.metadata.causeIds).toEqual([received.id])
+    expect((await context.events).map(event => event.id)).toEqual([received.id, noted.id])
+  }, 60_000)
+
+  itInstant("runs an action from an explicit causal point and completes the Session", async () => {
+    const runtime = new ContextTestRuntime({ appId, adminToken })
+    const messageId = randomUUID()
+    const orderId = randomUUID()
+    await db.transact([
+      db.tx.email_messages[messageId].create({ subject: "OC 6600" }),
+    ])
+    const context = await Context(runtime).open({
+      key: `email:session:${messageId}`,
+      content: { mailbox: "purchasing" },
+    })
+    const trigger = await context.append(
+      emailDomain.events.received({
+        from: "supplier@example.com",
+        subject: "OC 6600",
+      }).link({ message: messageId }),
+    )
+    const session = context.session({
+      scope: emailDomain,
+      engine: false,
+      sandbox: false,
+    })
+    const completed = await session.from(trigger).action(
+      emailDomain.actions.completeOrder.scope({ orderId }),
+      { code: "6600" },
+    )
+    await session.complete()
+
+    expect(completed.payload).toEqual({ orderId, code: "6600", status: "completed" })
     const graph = await db.query({
       context_sessions: {
         $: { where: { context: context.id }, limit: 1 },
         trigger: {},
         rootReaction: { effects: {} },
-        reactions: { effects: { eventParts: {} } },
+        reactions: { causes: {}, effects: { eventParts: {} } },
       },
     } as any)
-    const session = graph.context_sessions[0]
-    expect(session.status).toBe("completed")
-    expect(session.trigger.id).toBe(trigger.id)
-    expect(session.rootReaction.effects[0].id).toBe(completed.id)
-    const action = session.reactions.find((row: any) => row.type === "action")
-    expect([...action.effects[0].eventParts]
-      .sort((left: any, right: any) => left.index - right.index)
-      .map((part: any) => part.content.status))
-      .toEqual(["started", "completed"])
-  }, 60_000)
-
-  itInstant("links an inline child Reaction through a child Session", async () => {
-    const runtime = new ContextTestRuntime({ appId, adminToken })
-    const messageId = randomUUID()
-    await db.transact([
-      db.tx.email_messages[messageId].create({ subject: "OC 6600" }),
-    ])
-    const context = await Context(runtime).create({
-      key: `email:child:${messageId}`,
-      content: { mailbox: "purchasing" },
-    })
-    const trigger = await Events(runtime).emit(
-      emailDomain.events.received({ from: "supplier@example.com", subject: "OC 6600" })
-        .link({ message: messageId }),
-      { id: randomUUID(), contextId: context.id },
-    )
-    const parent = defineReaction(
-      emailDomain.events.received,
-      { key: "email.process", scope: emailDomain, engine: false, sandbox: false },
-      async reaction => {
-        const requested = await reaction.given(reaction.trigger).emit(
-          emailDomain.events.extractionRequested({ orderCode: "6600" })
-            .link({ message: messageId }),
-        )
-        const extracted = await reaction.react(
-          requested,
-          defineReaction(
-            emailDomain.events.extractionRequested,
-            { key: "email.extract", scope: emailDomain, engine: false, sandbox: false },
-            async child => await child.given(child.trigger).emit(
-              emailDomain.events.orderExtracted({ orderCode: child.trigger.payload.orderCode })
-                .link({ message: messageId }),
-            ),
-          ),
-        )
-        return await reaction.given(extracted).emit(
-          emailDomain.events.processingCompleted({ orderCode: extracted.payload.orderCode })
-            .link({ message: messageId }),
-        )
-      },
-    )
-
-    const completed = await context.react(trigger, parent)
-    expect(completed.payload.orderCode).toBe("6600")
-    const graph = await db.query({
-      context_sessions: {
-        $: { where: { context: context.id } },
-        parent: {},
-        children: { parent: {}, trigger: {}, rootReaction: { effects: {} } },
-        reactions: { causes: {}, effects: {} },
-      },
-    } as any)
-    const parentSession = graph.context_sessions.find((row: any) => !row.parent)
-    expect(parentSession.children).toHaveLength(1)
-    expect(parentSession.children[0].parent.id).toBe(parentSession.id)
-    expect(parentSession.children[0].trigger.id).toBe(
-      parentSession.reactions.find((row: any) => row.type === "emit").effects[0].id,
-    )
-    expect(parentSession.reactions.some((row: any) => (
-      row.type === "child" && row.instruction === "email.extract"
-    )))
-      .toBe(true)
-  }, 60_000)
-
-  itInstant("starts a child Reaction from an action using only reactionId", async () => {
-    const runtime = new ContextTestRuntime({ appId, adminToken })
-    const messageId = randomUUID()
-    await db.transact([
-      db.tx.email_messages[messageId].create({ subject: "OC 7700" }),
-    ])
-    const context = await Context(runtime).create({
-      key: `email:action-child:${messageId}`,
-      content: { mailbox: "purchasing" },
-    })
-    const trigger = await Events(runtime).emit(
-      emailDomain.events.received({ from: "supplier@example.com", subject: "OC 7700" })
-        .link({ message: messageId }),
-      { id: randomUUID(), contextId: context.id },
-    )
-    const parent = defineReaction(
-      emailDomain.events.received,
-      {
-        key: "email.process-with-action-child",
-        scope: emailDomain,
-        engine: false,
-        sandbox: false,
-      },
-      async reaction => {
-        const extracted = await reaction.given(reaction.trigger).action(
-          emailDomain.actions.extractFromAction,
-          { messageId, orderCode: "7700" },
-        )
-        return await reaction.given(extracted).emit(
-          emailDomain.events.processingCompleted({ orderCode: extracted.payload.orderCode })
-            .link({ message: messageId }),
-        )
-      },
-    )
-
-    const completed = await context.react(trigger, parent)
-    expect(completed.payload.orderCode).toBe("7700")
-
-    const graph = await db.query({
-      context_sessions: {
-        $: { where: { context: context.id } },
-        parent: {},
-        trigger: {},
-        reactions: { effects: {} },
-        children: { parent: {}, trigger: {}, rootReaction: { effects: {} } },
-      },
-    } as any)
-    const parentSession = graph.context_sessions.find((row: any) => !row.parent)
-    const actionReaction = parentSession.reactions.find((row: any) => row.type === "action")
-
-    expect(parentSession.children).toHaveLength(1)
-    expect(parentSession.children[0].parent.id).toBe(parentSession.id)
-    expect(parentSession.children[0].trigger.type).toBe("email.extractionRequested")
-    expect(parentSession.children[0].rootReaction.effects[0].type).toBe(
-      "email.orderExtracted",
-    )
-    expect(actionReaction.effects.map((event: any) => event.type)).toContain(
-      "email.extractionRequested",
-    )
+    const stored = graph.context_sessions[0]
+    expect(stored.definition).toBe("session")
+    expect(stored.status).toBe("completed")
+    expect(stored.trigger.id).toBe(trigger.id)
+    expect(stored.rootReaction.effects[0].id).toBe(completed.id)
+    expect(stored.reactions[0].causes[0].id).toBe(trigger.id)
   }, 60_000)
 })

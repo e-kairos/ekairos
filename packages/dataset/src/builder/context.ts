@@ -1,5 +1,5 @@
 import {
-  createContextHandle,
+  ContextHandle,
   type ContextRuntimeServiceHandle,
 } from "@ekairos/events"
 
@@ -119,7 +119,7 @@ async function persistDatasetSourceContextStep(params: {
   "use step"
 
   const sources = await enrichDatasetSources(params.runtime, params.sources)
-  const context = await createContextHandle<DatasetSourceContextContent>(
+  const context = await ContextHandle.open<DatasetSourceContextContent>(
     params.runtime as unknown as ContextRuntimeServiceHandle,
     {
       key: `dataset:${params.datasetId}`,

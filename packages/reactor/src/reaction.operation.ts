@@ -157,7 +157,7 @@ async function runOperation(
     const output = operation.outputSchema
       ? schemaFromJson(operation.outputSchema, "reaction_agent_output")
       : undefined
-    const given = await hydrateEvents(request.runtime, request.causeIds)
+    const events = await hydrateEvents(request.runtime, request.causeIds)
     const actions = resolveEngineActions(request, operation.actions, operation.dataset)
     const sandbox = await openSandbox(request)
     const workspace = sandbox ? await prepareReactionWorkspace(request, sandbox) : undefined
@@ -170,7 +170,7 @@ async function runOperation(
       reactionKey: request.definition,
       instruction: modelInstruction,
       context: request.context,
-      events: given,
+      events,
     })
     const result = await runReactionEngineAgent({
       engine: request.engine,
@@ -181,7 +181,7 @@ async function runOperation(
         trigger: request.trigger,
         sessionId: request.sessionId,
         reactionId: request.reactionId,
-        given,
+        events,
         messages,
         instruction: modelInstruction,
         ...(output ? { output } : {}),

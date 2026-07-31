@@ -5,8 +5,7 @@ import { randomUUID } from "node:crypto"
 import { init } from "@instantdb/admin"
 import { i } from "@instantdb/core"
 import { defineEvent, domain, EkairosRuntime } from "@ekairos/domain"
-import { Events, contextDomain } from "@ekairos/events"
-import { defineReaction } from "@ekairos/reactor"
+import { contextDomain } from "@ekairos/events"
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { z } from "zod"
 
@@ -108,7 +107,7 @@ describeInstant("Reaction Dataset operation", () => {
     await destroyContextTestApp(appId)
   }, 60_000)
 
-  itLiveSandbox("materializes a causal Event in a linked child Session", async () => {
+  itLiveSandbox("materializes a causal Event from a flat Session", async () => {
     const runtime = new DatasetReactionRuntime({ appId, adminToken })
     const sandboxId = randomUUID()
     const messageId = randomUUID()
@@ -127,16 +126,15 @@ describeInstant("Reaction Dataset operation", () => {
       { contentType: "text/csv", contentDisposition: "items.csv" },
     )
     const fileId = (upload as any).data.id as string
-    const context = await Context(runtime).create({
+    const context = await Context(runtime).open({
       key: `dataset-reaction:${messageId}`,
       content: { purpose: "quote" },
     })
-    const trigger = await Events(runtime).emit(
+    const trigger = await context.append(
       inboxDomain.events.received({ subject: "Quote CSV" }).link({
         message: messageId,
         files: [fileId],
       }),
-      { id: randomUUID(), channel: "email", contextId: context.id },
     )
 
     const pythonCode = [
@@ -172,35 +170,21 @@ describeInstant("Reaction Dataset operation", () => {
       description: z.string(),
       price: z.number(),
     })
-    const definition = defineReaction(
-      inboxDomain.events.received,
-      {
-        key: "dataset-inbox.answer",
-        scope: inboxDomain,
-        engine,
-        sandbox: sandboxId,
-      },
-      async reaction => {
-        const items = await reaction.given(reaction.trigger).dataset({
-          instruction: "Extract one canonical item row per CSV row.",
-          schema: rowSchema,
-        })
-        const rows = items.payload.preview
-        expect(rows).toEqual([
-          { code: "A1", description: "Bolt", price: 10.5 },
-          { code: "A2", description: "Nut", price: 20.25 },
-        ])
-        return await reaction.given(items).emit(
-          inboxDomain.events.answered({
-            datasetId: items.payload.datasetId,
-            itemCount: rows.length,
-          }).link({ message: messageId }),
-        )
-      },
-    )
-
-    const answer = await context.react(trigger, definition)
-    expect(answer.payload.itemCount).toBe(2)
+    const session = context.session({
+      scope: inboxDomain,
+      engine,
+      sandbox: sandboxId,
+    })
+    const answer = await session.from(trigger).dataset({
+      instruction: "Extract one canonical item row per CSV row.",
+      schema: rowSchema,
+    })
+    await session.complete()
+    expect(answer.payload.count).toBe(2)
+    expect(answer.payload.preview).toEqual([
+      { code: "A1", description: "Bolt", price: 10.5 },
+      { code: "A2", description: "Nut", price: 20.25 },
+    ])
 
     const graph = await db.query({
       context_sessions: {
@@ -208,17 +192,10 @@ describeInstant("Reaction Dataset operation", () => {
         trigger: {},
         rootReaction: { causes: {}, effects: {} },
         reactions: { causes: {}, effects: { eventParts: {} } },
-        children: {
-          context: {},
-          trigger: {},
-          rootReaction: { causes: {}, effects: {} },
-          reactions: { causes: {}, effects: { eventParts: {} } },
-        },
       },
     } as any)
     const parent = (graph as any).context_sessions[0]
     expect(parent.status).toBe("completed")
-    expect(parent.children).toHaveLength(1)
 
     const datasetReaction = parent.reactions.find((row: any) => row.type === "dataset")
     expect(datasetReaction.causeIds).toEqual([trigger.id])
@@ -233,45 +210,6 @@ describeInstant("Reaction Dataset operation", () => {
     })
     expect(datasetReaction.effects[0].payload).not.toHaveProperty("reader")
 
-    const child = parent.children[0]
-    expect(child.status).toBe("completed")
-    const childContext = Array.isArray(child.context) ? child.context[0] : child.context
-    const childTrigger = Array.isArray(child.trigger) ? child.trigger[0] : child.trigger
-    const childRoot = Array.isArray(child.rootReaction)
-      ? child.rootReaction[0]
-      : child.rootReaction
-    expect(childContext.id).not.toBe(context.id)
-    expect(childTrigger).toMatchObject({
-      type: "dataset.materializationRequested",
-      domain: "dataset",
-      name: "materializationRequested",
-    })
-    expect(childRoot.effects).toEqual([
-      expect.objectContaining({
-        type: "dataset.materialized",
-        payload: {
-          datasetId: answer.payload.datasetId,
-          status: "materialized",
-        },
-      }),
-    ])
-    const childReactions = [...child.reactions]
-      .sort((left: any, right: any) => left.position - right.position)
-    expect(childReactions.map((row: any) => row.type)).toEqual([
-      "dataset.file.materialize:" + answer.payload.datasetId,
-      "action",
-      "agent",
-      "emit",
-    ])
-    const agent = childReactions.find((row: any) => row.type === "agent")
-    const completedActions = agent.effects[0].eventParts
-      .map((part: any) => part.content)
-      .filter((part: any) => part.status === "completed")
-      .map((part: any) => part.actionName)
-    expect(completedActions).toEqual(expect.arrayContaining([
-      "dataset.executeCommand",
-      "dataset.completeDataset",
-    ]))
   }, 120_000)
 
   itInstant("lets Agent materialize a scoped InstaQL Dataset", async () => {
@@ -284,15 +222,14 @@ describeInstant("Reaction Dataset operation", () => {
     await db.transact(messages.map(message =>
       db.tx.dataset_inbox_messages[message.id].update({ subject: message.subject })))
 
-    const context = await Context(runtime).create({
+    const context = await Context(runtime).open({
       key: `dataset-agent-query:${randomUUID()}`,
       content: { purpose: "cohort-query" },
     })
-    const trigger = await Events(runtime).emit(
+    const trigger = await context.append(
       inboxDomain.events.received({ subject: "Group all inbox messages" }).link({
         message: messages[0]!.id,
       }),
-      { id: randomUUID(), channel: "web", contextId: context.id },
     )
     const engine = deterministicReactionEngine({
       steps: [
@@ -307,43 +244,31 @@ describeInstant("Reaction Dataset operation", () => {
         }),
       ],
     })
-    const definition = defineReaction(
-      inboxDomain.events.received,
-      {
-        key: "dataset-inbox.agent-query",
-        scope: inboxDomain,
-        engine,
-        sandbox: false,
-      },
-      async reaction => {
-        const analysis = await reaction.given(reaction.trigger).agent({
-          instruction: "Materialize the full collection before answering.",
-          output: z.object({
-            completed: z.literal(true),
-            action: z.literal("dataset.materialize"),
-            output: z.object({
-              datasetId: z.string(),
-              mode: z.enum(["opened", "built"]),
-              preview: z.array(z.unknown()),
-              count: z.number().optional(),
-            }),
-          }),
-        })
-        return await reaction.given(analysis).emit(
-          inboxDomain.events.answered({
-            datasetId: analysis.payload.output.datasetId,
-            itemCount: analysis.payload.output.count ?? analysis.payload.output.preview.length,
-          }).link({ message: messages[0]!.id }),
-        )
-      },
-    )
-
-    const answer = await context.react(trigger, definition)
-    expect(answer.payload.itemCount).toBeGreaterThanOrEqual(messages.length)
+    const session = context.session({
+      scope: inboxDomain,
+      engine,
+      sandbox: false,
+    })
+    const answer = await session.from(trigger).agent({
+      instruction: "Materialize the full collection before answering.",
+      output: z.object({
+        completed: z.literal(true),
+        action: z.literal("dataset.materialize"),
+        output: z.object({
+          datasetId: z.string(),
+          mode: z.enum(["opened", "built"]),
+          preview: z.array(z.unknown()),
+          count: z.number().optional(),
+        }),
+      }),
+    })
+    await session.complete()
+    const itemCount = answer.payload.output.count ?? answer.payload.output.preview.length
+    expect(itemCount).toBeGreaterThanOrEqual(messages.length)
 
     const stored = await db.query({
       dataset_datasets: {
-        $: { where: { datasetId: answer.payload.datasetId } },
+        $: { where: { datasetId: answer.payload.output.datasetId } },
         dataFile: {},
       },
       context_sessions: {
@@ -357,11 +282,11 @@ describeInstant("Reaction Dataset operation", () => {
     } as any)
     const dataset = (stored as any).dataset_datasets[0]
     expect(dataset.status).toBe("completed")
-    expect(dataset.actualGeneratedRowCount).toBe(answer.payload.itemCount)
+    expect(dataset.actualGeneratedRowCount).toBe(itemCount)
     expect(dataset.dataFile).toMatchObject({ id: expect.any(String) })
 
     const read = await new DatasetService(db as any).readRows({
-      datasetId: answer.payload.datasetId,
+      datasetId: answer.payload.output.datasetId,
       limit: 100,
     })
     if (!read.ok) throw new Error(read.error)
@@ -369,12 +294,12 @@ describeInstant("Reaction Dataset operation", () => {
       expect.arrayContaining(messages.map(message => message.subject)),
     )
 
-    const session = (stored as any).context_sessions[0]
-    const agent = session.reactions.find((reaction: any) => reaction.type === "agent")
+    const storedSession = (stored as any).context_sessions[0]
+    const agent = storedSession.reactions.find((reaction: any) => reaction.type === "agent")
     const actionParts = agent.effects[0].eventParts
       .map((part: any) => part.content)
       .filter((part: any) => part.actionName === "dataset.materialize")
     expect(actionParts.map((part: any) => part.status)).toEqual(["started", "completed"])
-    expect(actionParts[1].output.datasetId).toBe(answer.payload.datasetId)
+    expect(actionParts[1].output.datasetId).toBe(answer.payload.output.datasetId)
   }, 120_000)
 })

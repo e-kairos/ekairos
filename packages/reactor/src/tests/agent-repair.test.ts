@@ -120,7 +120,7 @@ function request(input: {
     },
     sessionId: "session-1",
     reactionId: "reaction-1",
-    given: [],
+    events: [],
     messages: [],
     instruction: "Return the requested result.",
     ...(input.output ? { output: input.output } : {}),

@@ -29,7 +29,7 @@
     "src/index.ts",
     "src/internal.ts",
     "src/reactor.ts",
-    "src/reaction.ts",
+    "src/session.ts",
     "src/reaction.operation.ts",
     "src/reaction-view.ts",
     "src/agent.ts",
