@@ -1,22 +1,21 @@
 import "server-only"
 
 import {
-  createChatReaction,
-  createReviewReaction,
+  answerChatMessage,
+  reviewRequest,
 } from "./reaction.definitions"
 import type { PreparedWorkbenchReaction } from "./reaction.input"
 
 export async function answerMessageWorkflow(input: PreparedWorkbenchReaction) {
   "use workflow"
 
-  const definition = input.scenario === "review"
-    ? createReviewReaction({
+  return input.scenario === "review"
+    ? await reviewRequest({
+        ...input,
         sandboxId: requiredSandboxId(input),
         repositoryUrl: requiredRepositoryUrl(input),
       })
-    : createChatReaction(input.history)
-  const answered = await input.context.react(input.trigger, definition)
-  return answered
+    : await answerChatMessage(input)
 }
 
 function requiredSandboxId(input: PreparedWorkbenchReaction) {

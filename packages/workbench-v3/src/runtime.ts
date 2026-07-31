@@ -5,11 +5,6 @@ import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde"
 
 import { workbenchDomain, workbenchSchema } from "./domain"
 
-export type WorkbenchContext = Readonly<{
-  purpose: string
-  createdBy: "workbench-v3"
-}>
-
 export type WorkbenchRuntimeEnv = {
   appId: string
   adminToken: string

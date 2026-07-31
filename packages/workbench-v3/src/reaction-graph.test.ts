@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildEventTimeline,
   reactionTitle,
-} from "./reaction-graph"
+} from "../../registry/components/ekairos/reactions/reaction-graph"
 
 function event(
   id: string,

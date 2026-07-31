@@ -1,11 +1,11 @@
-import type { ReactionContextHandle } from "@ekairos/context"
 import type { ContextEvent } from "@ekairos/events"
 
 import type { WorkbenchScenario } from "./domain"
-import type { WorkbenchContext, WorkbenchRuntime } from "./runtime"
+import type { WorkbenchRuntime } from "./runtime"
 
 export type PreparedWorkbenchReaction = Readonly<{
-  context: ReactionContextHandle<WorkbenchContext, WorkbenchRuntime>
+  runtime: WorkbenchRuntime
+  contextKey: string
   trigger: ContextEvent
   history: readonly ContextEvent[]
   scenario: WorkbenchScenario

@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>
     const input = message(body)
     if (!input.text) return NextResponse.json({ error: "message_required" }, { status: 400 })
-    const state = await ensureWorkbenchContext(text(body.contextId) || undefined)
+    const state = await ensureWorkbenchContext()
     const prepared = await prepareAnswerMessage({
       runtime: state.runtime,
       context: state.context,

@@ -8,13 +8,13 @@ import {
 import { contextDomain } from "@ekairos/events"
 import {
   ai,
-  defineReaction,
 } from "@ekairos/reactor"
 import { sandboxDomain } from "@ekairos/sandbox/domain"
 import { i } from "@instantdb/core"
 import { z } from "zod"
 
 import { getAzureModel } from "./azure"
+import type { WorkbenchRuntime } from "./runtime"
 
 export const workbenchScenarioSchema = z.enum(["chat", "review"])
 export type WorkbenchScenario = z.infer<typeof workbenchScenarioSchema>
@@ -146,57 +146,49 @@ const workbenchReactionDomain = workbenchCore
   .withActions(datasetDomain.actions)
   .withActions(sandboxDomain.actions)
 
-const verifyReview = defineReaction(
-  workbenchReactionDomain.events.reviewVerificationRequested,
-  {
-    key: "workbench.verify-recorded-review",
-    scope: workbenchReactionDomain,
-    engine: ai({ model: async () => getAzureModel(), maxRounds: 4 }),
-    sandbox: false,
-  },
-  async reaction => {
-    const verification = await reaction.given(reaction.trigger).agent({
-      instruction: [
-        "Verify that the persisted review is internally consistent.",
-        "A review is valid when item and risk counts are nonnegative and the recommendation is coherent.",
-        "Return a short factual summary; do not perform or request any action.",
-      ].join(" "),
-      output: workbenchVerificationSchema,
-    })
-    return await reaction.given(verification).emit(
-      workbenchReactionDomain.events.reviewVerificationCompleted({
-        reviewId: reaction.trigger.payload.reviewId,
-        valid: verification.payload.valid,
-        summary: verification.payload.summary,
-      }).link({ review: reaction.trigger.payload.reviewId }),
-    )
-  },
-)
-
 async function verifyRecordedReview(input: {
-  runtime: any
-  reactionId: string
+  runtime: WorkbenchRuntime
+  contextKey: string
   reviewId: string
   datasetId: string
   itemCount: number
   riskCount: number
   recommendation: "proceed" | "clarify" | "reject"
 }): Promise<z.infer<typeof workbenchVerificationSchema> & { eventId: string }> {
-  const context = await Context(input.runtime).fromReaction(input.reactionId)
-  const requested = await context.emit(
-    workbenchReactionDomain.events.reviewVerificationRequested({
-      reviewId: input.reviewId,
-      datasetId: input.datasetId,
-      itemCount: input.itemCount,
-      riskCount: input.riskCount,
-      recommendation: input.recommendation,
-    }).link({ review: input.reviewId }),
-    {
-      key: `review-verification-requested:${input.reviewId}`,
-    },
+  const scope = workbenchDomain.scope({
+    events: [workbenchDomain.events.reviewVerificationRequested],
+    actions: [],
+  })
+  await using session = await Context(input.runtime).session(
+    input.contextKey,
+    scope,
+    ai({ model: async () => await getAzureModel(), maxRounds: 4 }),
+    { sandbox: false },
   )
-  const completed = await context.react(requested, verifyReview)
-  return { ...completed.payload, eventId: completed.id }
+  const requested = workbenchDomain.events.reviewVerificationRequested({
+    reviewId: input.reviewId,
+    datasetId: input.datasetId,
+    itemCount: input.itemCount,
+    riskCount: input.riskCount,
+    recommendation: input.recommendation,
+  }).link({ review: input.reviewId })
+  const verification = await session.from(requested).agent({
+    instruction: [
+      "Verify that the persisted review is internally consistent.",
+      "A review is valid when item and risk counts are nonnegative and the recommendation is coherent.",
+      "Return a short factual summary; do not perform or request any action.",
+    ].join(" "),
+    output: workbenchVerificationSchema,
+    datasets: false,
+  })
+  const completed = await session.context.append(
+    workbenchReactionDomain.events.reviewVerificationCompleted({
+      reviewId: input.reviewId,
+      valid: verification.payload.valid,
+      summary: verification.payload.summary,
+    }).link({ review: input.reviewId }),
+  )
+  return { ...verification.payload, eventId: completed.id }
 }
 
 const recordReview = defineDomainAction({
@@ -215,10 +207,15 @@ const recordReview = defineDomainAction({
     status: z.literal("recorded"),
     verification: workbenchVerificationSchema.extend({ eventId: z.string() }),
   }),
-  execute: async ({ input, domain: activeDomain, runtime, reactionId }) => {
+  execute: async (
+    { input, domain: activeDomain, runtime },
+    executionContext,
+  ) => {
     "use step"
 
-    if (!reactionId) throw new Error("workbench_review_reaction_required")
+    if (!executionContext) {
+      throw new Error("workbench_review_session_context_required")
+    }
 
     const db = (activeDomain as any).db
     const datasetResult = await db.query({
@@ -252,8 +249,8 @@ const recordReview = defineDomainAction({
         .link({ dataset: datasetEntity.id }),
     ])
     const verification = await verifyRecordedReview({
-      runtime: runtime as any,
-      reactionId,
+      runtime: runtime as WorkbenchRuntime,
+      contextKey: executionContext.context.key,
       reviewId: input.reviewId,
       datasetId: input.items.datasetId,
       itemCount: input.itemCount,

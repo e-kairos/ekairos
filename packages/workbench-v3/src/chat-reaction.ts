@@ -1,6 +1,6 @@
 import "server-only"
 
-import type { ReactionContextHandle } from "@ekairos/context"
+import type { ContextHandle } from "@ekairos/context"
 import { Events, Part } from "@ekairos/events"
 
 import {
@@ -8,12 +8,12 @@ import {
   type WorkbenchScenario,
 } from "./domain"
 import type { PreparedWorkbenchReaction } from "./reaction.input"
-import type { WorkbenchContext, WorkbenchRuntime } from "./runtime"
+import type { WorkbenchRuntime } from "./runtime"
 import { ensureWorkbenchSandbox } from "./runtime.server"
 
 export async function prepareAnswerMessage(input: {
   runtime: WorkbenchRuntime
-  context: ReactionContextHandle<WorkbenchContext, WorkbenchRuntime> | null
+  context: ContextHandle<unknown> | null
   eventId: string
   text: string
   parts: readonly unknown[]
@@ -49,7 +49,8 @@ export async function prepareAnswerMessage(input: {
     event.type === workbenchDomain.events.reviewCompleted.kind)
 
   return Object.freeze({
-    context,
+    runtime: input.runtime,
+    contextKey: requiredContextKey(context),
     trigger,
     history,
     scenario: input.scenario,
@@ -62,6 +63,11 @@ export async function prepareAnswerMessage(input: {
   }) satisfies PreparedWorkbenchReaction
 }
 
+function requiredContextKey(context: ContextHandle<unknown>) {
+  if (!context.key) throw new Error("workbench_context_key_required")
+  return context.key
+}
+
 function repositoryURL() {
   return String(
     process.env.WORKBENCH_REPOSITORY_URL ??
@@ -71,7 +77,7 @@ function repositoryURL() {
 
 async function uploadInputFiles(input: {
   runtime: WorkbenchRuntime
-  context: ReactionContextHandle<WorkbenchContext, WorkbenchRuntime>
+  context: ContextHandle<unknown>
   eventId: string
   text: string
   parts: readonly unknown[]

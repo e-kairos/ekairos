@@ -21,28 +21,26 @@ It does not wait for model, Dataset, Sandbox, or Git work.
 export async function answerMessageWorkflow(input: PreparedWorkbenchReaction) {
   "use workflow"
 
-  const answered = await input.context.react(input.trigger, definition)
-  return answered
+  return input.scenario === "review"
+    ? await reviewRequest(input)
+    : await answerChatMessage(input)
 }
 ```
 
-`context.react(...)` executes in the caller's boundary. The same call is direct
-when used from a normal async function and durable when its caller has the
-`"use workflow"` directive. Reactor never creates a Workflow implicitly.
+Both orchestration functions open a flat
+`Context(runtime).session(contextKey, scope, engine)` and execute through
+`session.from(...)`. Reactor never creates a Workflow implicitly.
 
 The persisted correspondence is:
 
-- one Context Session is the complete Reaction-definition invocation and stores
+- one Context Session is the complete flat orchestration invocation and stores
   the Workflow run id when one exists
 - the root Reaction spans the Session
 - every semantic operation (`agent`, `dataset`, `action`, `loadFiles`,
-  `storeFiles`, `shell`, `git`, `emit`) is a Reaction and, at the top Workflow
+  `storeFiles`, `shell`, and `git`) is a Reaction and, at the top Workflow
   level, one durable step
-- child Sessions and their Reactions remain nested in the causal graph
-
-`startReaction`, `finishReaction`, and failure handling are technical durable
-checkpoints. The Gantt hides them and renders the Workflow span plus semantic
-Reactions, including parallel overlap.
+- terminal domain facts are appended to the same Context timeline through the
+  Session's public Context handle
 
 The browser does not poll Workflow state. `useContext` subscribes directly to
 Context, Session, Reaction, Event, and Event Part entities in InstantDB, then
@@ -55,13 +53,12 @@ The default `Causal review` scenario proves the full path:
 3. A repository-aware decision Reaction joins those effect Events.
 4. Shell writes the report, `storeFiles` publishes it, and Git commits it.
 5. `workbench.recordReview` validates `dataset(workbenchItemSchema)`, writes the
-   linked durable review, resolves its Context from the sole `reactionId`, and
-   starts the verification child Reaction.
+   linked durable review, reads the ambient Context key from its second execute
+   argument, and opens the verification Session.
 6. `workbench.reviewCompleted` links the review and artifact as the final domain
-   Event; Dataset materialization and verification remain visible as child
-   Sessions.
+   Event; Dataset materialization and verification remain visible in the Context.
 
-At the beginning of a causal review, the Reaction sandbox resolver probes the
+Before a causal review Session begins, the request adapter probes the
 cached Daytona lease. A missing remote sandbox is replaced once under a shared
 lock without replacing the InstantDB app, Context, or conversation history.
 Provider, network, and credential failures remain visible instead of triggering

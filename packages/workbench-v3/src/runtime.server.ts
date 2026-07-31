@@ -5,10 +5,7 @@ import { Sandbox } from "@ekairos/sandbox"
 import { createTestApp } from "@ekairos/testing/provision"
 
 import { workbenchSchema } from "./domain"
-import {
-  WorkbenchRuntime,
-  type WorkbenchContext,
-} from "./runtime"
+import { WorkbenchRuntime } from "./runtime"
 import { resolveSandboxLease } from "./sandbox-lifecycle"
 
 type RuntimeProvision = Readonly<{
@@ -118,23 +115,8 @@ export async function ensureWorkbenchSandbox(runtime: WorkbenchRuntime): Promise
   }
 }
 
-export async function ensureWorkbenchContext(contextId?: string) {
+export async function ensureWorkbenchContext() {
   const state = await getWorkbenchRuntime()
-  const contexts = Context(state.runtime)
-  if (contextId) {
-    const existing = await contexts.get<WorkbenchContext>({ id: contextId })
-    if (existing) return { ...state, context: existing }
-  }
-  const byKey = await contexts.get<WorkbenchContext>({
-    key: "workbench-v3-chat",
-  })
-  const context = byKey ?? await contexts.create({
-    key: "workbench-v3-chat",
-    name: "Azure streaming trace",
-    content: {
-      purpose: "Inspect a real conversational Reaction and its complete stream trace.",
-      createdBy: "workbench-v3",
-    },
-  })
+  const context = await Context(state.runtime).open("workbench-v3-chat")
   return { ...state, context }
 }
