@@ -22,8 +22,10 @@ import {
   type ReactionGraphState,
 } from "./reaction-view.ts"
 import { buildTimelineRail } from "./timeline-rail.ts"
+import { createReactionNavigator } from "./reaction-navigator.ts"
 import {
   limitRowLines,
+  selectCenteredTerminalViewport,
   selectTerminalViewport,
 } from "./terminal-viewport.ts"
 
@@ -211,16 +213,23 @@ function eventPartLines(
   })
 }
 
-function Rail({ value }: { value: string }) {
+function Rail({ active = "", value }: { active?: string; value: string }) {
   return (
     <Text>
       {[...value].map((character, index) => (
-        <Text key={index} color={character === "●" ? "cyan" : "gray"}>
+        <Text
+          key={index}
+          color={active[index] && active[index] !== " " ? "cyan" : "gray"}
+        >
           {character}
         </Text>
       ))}
     </Text>
   )
+}
+
+function continuationRail(value: string): string {
+  return value.replaceAll("●", "│")
 }
 
 function ReactionTree({
@@ -242,12 +251,19 @@ function ReactionTree({
     () => projectSessionTimeline(graph, sessionId),
     [graph, sessionId],
   )
+  const navigator = useMemo(() => createReactionNavigator(timeline), [timeline])
   const railWidth = Math.max(1, timeline.lanes * 2 - 1)
   const contentWidth = Math.max(24, Number(stdout.columns ?? 100) - railWidth - 12)
   const selectedIndex = Math.max(0, selectedEventId
     ? timeline.rows.findIndex(row => row.event.id === selectedEventId)
     : timeline.rows.length - 1)
   const selectedRow = timeline.rows[selectedIndex]
+  const activeEventIds = useMemo(
+    () => selectedEventId
+      ? navigator.activeBranch(selectedEventId)
+      : new Set(timeline.rows.map(row => row.event.id)),
+    [navigator, selectedEventId, timeline.rows],
+  )
   const detailLines = useMemo(() => {
     if (!selectedRow) return Object.freeze([]) as readonly TimelineLine[]
     const event = selectedRow.event
@@ -300,57 +316,76 @@ function ReactionTree({
       return
     }
     if (key.upArrow) {
-      const next = Math.max(0, selectedIndex - 1)
-      setSelectedEventId(timeline.rows[next]!.event.id)
+      setSelectedEventId(navigator.move(selectedRow!.event.id, "up"))
     }
     if (key.downArrow) {
-      const next = Math.min(timeline.rows.length - 1, selectedIndex + 1)
-      setSelectedEventId(timeline.rows[next]!.event.id)
+      setSelectedEventId(navigator.move(selectedRow!.event.id, "down"))
+    }
+    if (key.leftArrow) {
+      setSelectedEventId(navigator.move(selectedRow!.event.id, "left"))
+    }
+    if (key.rightArrow) {
+      setSelectedEventId(navigator.move(selectedRow!.event.id, "right"))
     }
     if (key.return && selectedRow) {
+      setSelectedEventId(selectedRow.event.id)
       setDetailOffset(0)
       setDetailOpen(true)
     }
     if (key.escape) setSelectedEventId(undefined)
-  }, { isActive: focused })
+  }, { isActive: focused && Boolean(process.stdin.isTTY) })
 
   const rows = useMemo(() => timeline.rows.map((row, rowIndex) => {
     const summary = timelineEventSummary(row.event)
     const durability = row.event.durability ?? "durable"
     const partCount = row.event.eventParts.length
     const selected = rowIndex === selectedIndex
+    const active = activeEventIds.has(row.event.id)
+    const navigationNode = navigator.node(row.event.id)
+    const branchBadge = navigationNode && navigationNode.fanIn > 1
+      ? `fan-in ${navigationNode.fanIn}`
+      : navigationNode && navigationNode.fanOut > 1
+        ? `fan-out ${navigationNode.fanOut}`
+        : ""
     const expanded = selectedEventId
       ? selected
       : durability === "streaming" || rowIndex === timeline.rows.length - 1
     const lines: TimelineLine[] = [{
-      text: `${selected && focused ? "› " : "  "}${column(row.event.type, 28)} #${shortId(row.event.id)}  ${durability}${partCount > 0 ? ` · ${partCount} part${partCount === 1 ? "" : "s"}` : ""}${summary ? ` · ${clipped(summary, Math.max(0, contentWidth - 60))}` : ""}`,
+      text: `${selected && focused ? "› " : "  "}${column(row.event.type, 28)} #${shortId(row.event.id)}  ${durability}${branchBadge ? ` · ${branchBadge}` : ""}${partCount > 0 ? ` · ${partCount} part${partCount === 1 ? "" : "s"}` : ""}${summary ? ` · ${clipped(summary, Math.max(0, contentWidth - 70))}` : ""}`,
       color: selected && focused ? "cyan" : durability === "streaming" ? "cyan" : "blue",
       bold: true,
+      dim: !active,
     }]
     if (expanded) {
       lines.push(...row.event.eventParts.flatMap(part => eventPartLines(part, contentWidth)))
     }
     return limitRowLines(
       lines,
-      Math.max(2, Math.min(7, maxLines - 1)),
+      Math.max(1, Math.min(5, maxLines - 2)),
       hiddenLines => ({
         text: `  … ${hiddenLines} more part lines`,
         color: "gray" as const,
         dim: true,
       }),
     )
-  }), [contentWidth, focused, maxLines, selectedEventId, selectedIndex, timeline.rows])
+  }), [activeEventIds, contentWidth, focused, maxLines, navigator, selectedEventId, selectedIndex, timeline.rows])
   const rowHeights = useMemo(() => rows.map(lines => lines.length), [rows])
   const rail = useMemo(
-    () => buildTimelineRail(timeline, rowHeights),
-    [rowHeights, timeline],
+    () => buildTimelineRail(timeline, rowHeights, activeEventIds),
+    [activeEventIds, rowHeights, timeline],
   )
-  const laterRows = selectedEventId ? Math.max(0, rows.length - selectedIndex - 1) : 0
-  const overviewRows = selectedEventId ? rows.slice(0, selectedIndex + 1) : rows
-  const viewport = useMemo(
-    () => selectTerminalViewport(overviewRows, maxLines - (laterRows > 0 ? 1 : 0)),
-    [laterRows, maxLines, overviewRows],
-  )
+  const viewport = useMemo(() => {
+    if (selectedEventId) {
+      const centered = selectCenteredTerminalViewport(rows, selectedIndex, maxLines)
+      return {
+        hiddenBefore: centered.hiddenBefore,
+        hiddenAfter: centered.hiddenAfter,
+        rows: centered.rows,
+      }
+    }
+    const tail = selectTerminalViewport(rows, maxLines)
+    return { hiddenBefore: tail.hiddenRows, hiddenAfter: 0, rows: tail.rows }
+  }, [maxLines, rows, selectedEventId, selectedIndex])
   const rowStarts = useMemo(() => {
     const starts: number[] = []
     let offset = 0
@@ -386,21 +421,31 @@ function ReactionTree({
       </Box>
     )
   }
+  const firstVisibleIndex = viewport.rows[0]?.rowIndex ?? 0
+  const lastVisibleIndex = viewport.rows.at(-1)?.rowIndex ?? firstVisibleIndex
+  const topBoundaryLine = rowStarts[firstVisibleIndex] ?? 0
+  const bottomBoundaryLine = (rowStarts[lastVisibleIndex] ?? 0)
+    + (rowHeights[lastVisibleIndex] ?? 1) - 1
   return (
     <Box flexDirection="column">
-      {viewport.hiddenRows > 0 ? (
+      {viewport.hiddenBefore > 0 ? (
         <Box width="100%">
           <Box flexGrow={1} minWidth={0}>
-            <Text dimColor>  ↑ {viewport.hiddenRows} earlier Events</Text>
+            <Text dimColor>  ↑ {viewport.hiddenBefore} earlier Events</Text>
           </Box>
           <Text>  </Text>
           <Box width={rail.width} flexShrink={0}>
-            <Rail value={" ".repeat(rail.width)} />
+            <Rail
+              active={continuationRail(rail.activeLines[topBoundaryLine] ?? "")}
+              value={continuationRail(rail.lines[topBoundaryLine] ?? " ".repeat(rail.width))}
+            />
           </Box>
         </Box>
       ) : null}
       {viewport.rows.flatMap(({ lines, rowIndex }) => lines.map((line, lineIndex) => {
         const railLine = rail.lines[(rowStarts[rowIndex] ?? 0) + lineIndex]
+          ?? " ".repeat(rail.width)
+        const activeRailLine = rail.activeLines[(rowStarts[rowIndex] ?? 0) + lineIndex]
           ?? " ".repeat(rail.width)
         return (
           <Box key={`${timeline.rows[rowIndex]!.event.id}:${lineIndex}`} width="100%">
@@ -416,19 +461,22 @@ function ReactionTree({
             </Box>
             <Text>  </Text>
             <Box width={rail.width} flexShrink={0}>
-              <Rail value={railLine} />
+              <Rail active={activeRailLine} value={railLine} />
             </Box>
           </Box>
         )
       }))}
-      {laterRows > 0 ? (
+      {viewport.hiddenAfter > 0 ? (
         <Box width="100%">
           <Box flexGrow={1} minWidth={0}>
-            <Text dimColor>  ↓ {laterRows} later Events</Text>
+            <Text dimColor>  ↓ {viewport.hiddenAfter} later Events</Text>
           </Box>
           <Text>  </Text>
           <Box width={rail.width} flexShrink={0}>
-            <Rail value={" ".repeat(rail.width)} />
+            <Rail
+              active={continuationRail(rail.activeLines[bottomBoundaryLine] ?? "")}
+              value={continuationRail(rail.lines[bottomBoundaryLine] ?? " ".repeat(rail.width))}
+            />
           </Box>
         </Box>
       ) : null}
@@ -484,7 +532,7 @@ export function ReactionInspector({ options }: { options: CliOptions }) {
   useInput((_input, key) => {
     if (!interactive || phase === "running" || !key.tab) return
     setFocus(current => current === "input" ? "reaction" : "input")
-  }, { isActive: Boolean(app) })
+  }, { isActive: Boolean(app) && interactive && Boolean(process.stdin.isTTY) })
 
   useEffect(() => {
     let active = true
@@ -638,7 +686,7 @@ export function ReactionInspector({ options }: { options: CliOptions }) {
           <Status value={sessionStatus} />
         </Box>
         <ReactionTree
-          focused={focus === "reaction"}
+          focused={interactive && focus === "reaction"}
           graph={graph}
           maxLines={reactionMaxLines}
           sessionId={sessionId}
@@ -672,7 +720,7 @@ export function ReactionInspector({ options }: { options: CliOptions }) {
       ) : null}
       {interactive ? (
         <Text dimColor>
-          Tab input/reaction · ↑↓ Event · Enter details · Esc tree · /new · /context · /exit
+          Tab input/reaction · ↑↓ causal · ←→ branch · Enter details · Esc tree · /new · /context · /exit
         </Text>
       ) : null}
     </Box>

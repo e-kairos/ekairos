@@ -22,8 +22,19 @@ pnpm reaction:chat path/to/reaction.ts --context customer:42
 ```
 
 The Ink interface is an execution inspector, not a conversation. It renders
-structured INPUT, the live durable Event → Reaction → Event graph, converging
-causes, per-reaction streams, and the final OUTPUT. Interactive inputs are JSON.
+structured INPUT, the live causal Event graph with Event Parts, converging
+causes, stream projections, and the final OUTPUT. Interactive inputs are JSON.
+
+The reaction panel is a causal navigator:
+
+- `Tab` moves focus between input and reaction.
+- `Up` / `Down` follow causal parents and effects.
+- `Left` / `Right` move between sibling branches at fan-out and fan-in.
+- `Enter` opens the selected Event with its complete payload and Parts.
+- In Event detail, `Up` / `Down` scroll and `Enter` / `Escape` returns to the tree.
+
+The selected causal branch is highlighted, other branches are dimmed, and the
+viewport remains centered without growing beyond the terminal height.
 
 Each CLI process creates and configures a new Instant app before importing the
 reaction module. The app is preserved for inspection after the CLI exits; its

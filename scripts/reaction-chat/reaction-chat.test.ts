@@ -11,12 +11,62 @@ import {
   relationIds,
 } from "./reaction-view.ts"
 import { buildTimelineRail } from "./timeline-rail.ts"
+import { createReactionNavigator } from "./reaction-navigator.ts"
 import {
   limitRowLines,
+  selectCenteredTerminalViewport,
   selectTerminalViewport,
 } from "./terminal-viewport.ts"
 
 describe("reaction chat", () => {
+  it("navigates causal branches through fan-out and fan-in", () => {
+    const ids = ["request", "plan", "research", "risks", "synthesis", "publish"]
+    const lanes = [0, 0, 0, 1, 0, 0]
+    const timeline = {
+      lanes: 2,
+      rows: ids.map((id, index) => ({
+        event: { id },
+        lane: lanes[index],
+        producer: null,
+        child: false,
+        branch: 0,
+        branchOf: null,
+      })),
+      edges: [
+        ["request", "plan"],
+        ["plan", "research"],
+        ["plan", "risks"],
+        ["research", "synthesis"],
+        ["risks", "synthesis"],
+        ["synthesis", "publish"],
+      ].map(([from, to], index) => ({
+        id: `edge-${index}`,
+        reactionId: `reaction-${index}`,
+        from,
+        to,
+        kind: "flow" as const,
+      })),
+    } as never
+    const navigator = createReactionNavigator(timeline)
+
+    expect(navigator.move("plan", "down")).toBe("research")
+    expect(navigator.move("research", "left")).toBe("risks")
+    expect(navigator.move("risks", "right")).toBe("research")
+    expect(navigator.move("risks", "down")).toBe("synthesis")
+    expect(navigator.move("synthesis", "left")).toBe("risks")
+    expect(navigator.move("synthesis", "right")).toBe("research")
+    expect(navigator.node("plan")).toMatchObject({ fanIn: 1, fanOut: 2 })
+    expect(navigator.node("synthesis")).toMatchObject({ fanIn: 2, fanOut: 1 })
+    expect([...navigator.activeBranch("research")]).toEqual(expect.arrayContaining([
+      "request",
+      "plan",
+      "research",
+      "synthesis",
+      "publish",
+    ]))
+    expect(navigator.activeBranch("research").has("risks")).toBe(false)
+  })
+
   it("keeps the terminal viewport within its physical line budget", () => {
     const rows = Array.from({ length: 8 }, (_, index) => [`event-${index}`])
     const viewport = selectTerminalViewport(rows, 5)
@@ -26,6 +76,19 @@ describe("reaction chat", () => {
     expect(renderedLines).toBeLessThanOrEqual(5)
     expect(viewport.hiddenRows).toBe(4)
     expect(viewport.rows.map(row => row.rowIndex)).toEqual([4, 5, 6, 7])
+  })
+
+  it("centers the tree viewport around the selected causal Event", () => {
+    const rows = Array.from({ length: 9 }, (_, index) => [`event-${index}`])
+    const viewport = selectCenteredTerminalViewport(rows, 4, 5)
+    const renderedLines = viewport.rows.reduce((sum, row) => sum + row.lines.length, 0)
+      + (viewport.hiddenBefore > 0 ? 1 : 0)
+      + (viewport.hiddenAfter > 0 ? 1 : 0)
+
+    expect(renderedLines).toBeLessThanOrEqual(5)
+    expect(viewport.rows.map(row => row.rowIndex)).toEqual([3, 4, 5])
+    expect(viewport.hiddenBefore).toBe(3)
+    expect(viewport.hiddenAfter).toBe(3)
   })
 
   it("collapses oversized Event Parts into one overflow line", () => {
@@ -373,6 +436,18 @@ describe("reaction chat", () => {
         expect(rail.lines[line]).toMatch(/[│├┤┼]/)
       }
       offset += height
+    })
+
+    const activeIds = new Set(["event-message", "event-model", "event-action"])
+    const activeRail = buildTimelineRail(timeline, heights, activeIds)
+    offset = 0
+    timeline.rows.forEach((row, index) => {
+      if (activeIds.has(row.event.id)) {
+        expect(activeRail.activeLines[offset]).toContain("●")
+      } else {
+        expect(activeRail.activeLines[offset]).not.toContain("●")
+      }
+      offset += heights[index]!
     })
   })
 })
