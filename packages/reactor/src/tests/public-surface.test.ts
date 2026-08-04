@@ -9,7 +9,9 @@ describe("@ekairos/reactor public surface", () => {
     expect(Object.keys(root).sort()).toEqual([
       "Session",
       "ai",
+      "getSessionId",
       "isAiEngine",
+      "scripted",
       "toModelActionName",
     ])
   })

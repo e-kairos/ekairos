@@ -83,6 +83,12 @@ export type {
 export { uuidV5 } from "./context.part-identity.js"
 
 export {
+  createSessionLogDb,
+  logSession,
+} from "./context.session-log.js"
+export type { SessionLogRecord } from "./context.session-log.js"
+
+export {
   REACTION_STREAM_VERSION,
   consumeReactionStream,
   createReactionStreamChunk,

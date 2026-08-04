@@ -1,4 +1,5 @@
 export {
+  getSessionId,
   Session,
 } from "./session.js"
 
@@ -6,6 +7,7 @@ export {
   ai,
   isAiEngine,
 } from "./reactor.js"
+export { scripted } from "./reactors/scripted.js"
 export { toModelActionName } from "./action-name.js"
 export type { DomainActionExecutionContext } from "@ekairos/domain"
 export type {
@@ -48,3 +50,13 @@ export type {
 } from "./reactor.js"
 
 export type { ReactorPath } from "./workspace-path.js"
+
+export type {
+  ScriptedAgent,
+  ScriptedAgentInput,
+  ScriptedEngineStream,
+  ScriptedReactionEngineOptions,
+  ScriptedReactionResult,
+  ScriptedReactionStream,
+  ScriptedStreamEmission,
+} from "./reactors/scripted.js"

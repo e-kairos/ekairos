@@ -36,7 +36,8 @@
     "src/context.action-calls.ts",
     "src/dataset-adapter.ts",
     "src/tools-to-model-tools.ts",
-    "src/reactors/ai-sdk.agent.ts"
+    "src/reactors/ai-sdk.agent.ts",
+    "src/reactors/scripted.ts"
   ],
   "exclude": ["node_modules", "**/*.test.ts", "**/tests/**", "src/__type_tests__"]
 }

@@ -8,7 +8,7 @@ Sessions, Reactions, Events, Parts, and streams.
 ## Surface
 
 ```ts
-import { Session, ai } from "@ekairos/reactor"
+import { Session, ai, scripted } from "@ekairos/reactor"
 ```
 
 Applications normally construct a Session through `@ekairos/context`:
@@ -29,6 +29,32 @@ const message = app.events.messageReceived(payload)
 
 The concrete scope is the execution boundary for domain Events and actions.
 Actions are still exposed explicitly to each Agent operation.
+
+For deterministic execution without an AI provider, use the same contextual
+input through the public scripted reactor:
+
+```ts
+import { Part } from "@ekairos/events"
+
+const engine = scripted({
+  agent({ trigger, events, context, instruction, causeIds }) {
+    const text = `${instruction}: ${events.length} causal Events for ${context.ref.key}`
+    return {
+      output: { text, trigger: trigger.type },
+      parts: [Part.message(text)],
+      stream: [
+        { kind: "text.delta", round: 0, partId: "message:0", delta: text },
+      ],
+      metadata: { causeIds },
+    }
+  },
+})
+```
+
+`scripted({ agent })` has no mutable step cursor. The handler receives the full
+`ReactionEngineInput`; it may return a synchronous or asynchronous stream.
+Reactor continues to own lifecycle chunks, output-schema validation, retries,
+durable Events, and Event Parts.
 
 ## Operations
 
